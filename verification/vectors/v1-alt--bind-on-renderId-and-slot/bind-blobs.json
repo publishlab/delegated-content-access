@@ -1,0 +1,101 @@
+{
+  "name": "bind-blobs",
+  "vectorFormat": "4",
+  "description": "A generator-owned format-4 bound-carrier fixture: two deterministic ECDH P-256 blobs and one recorded RSA-OAEP blob. The bindings are dca-bind-v1|c|renderId|contentName and dca-bind-v1|p|renderId|accessGroup|t, with an exact 16-byte renderId carried as 22 canonical unpadded base64url characters. The ECDH blobs are re-sealed from the fixed issuer and ephemeral keypairs, 12-byte nonces, keys and coordinates below. RSA-OAEP cannot be reproduced byte for byte, so its recorded ciphertext is retained only after the generator opens it under the fixture private key and confirms the same binding and content key. Replayers also refuse a relabelled contentName and an ECDH open with no additionalData.",
+  "input": {
+    "algorithm": "ECDH-P256",
+    "renderId": "ESIzRFVmd4iZqrvM3e7_AA",
+    "contentName": "premiumtext",
+    "accessGroup": "premium",
+    "t": "251023T13",
+    "contentKeyBase64url": "AwoRGB8mLTQ7QklQV15lbA",
+    "periodKeyBase64url": "HSo3RFFea3iFkp-sucbT4A",
+    "ecdh": {
+      "issuer": {
+        "publicKeyJwk": {
+          "kty": "EC",
+          "crv": "P-256",
+          "x": "KnsL031lVTbNxwtMq3OQmFq-fyPVh3k1__Adl4ieLXw",
+          "y": "-aNkTV8wd6O2rTWc2jkpJgez4Cuvas4J8_Styi-cdsE"
+        },
+        "privateKeyJwk": {
+          "kty": "EC",
+          "crv": "P-256",
+          "x": "KnsL031lVTbNxwtMq3OQmFq-fyPVh3k1__Adl4ieLXw",
+          "y": "-aNkTV8wd6O2rTWc2jkpJgez4Cuvas4J8_Styi-cdsE",
+          "d": "iWEhz6AHq-n4l_YzhTZcyQH7O9B1A1AKl4maOJh3z5g"
+        }
+      },
+      "contentEphemeral": {
+        "publicKeyJwk": {
+          "kty": "EC",
+          "crv": "P-256",
+          "x": "_-uukcCcIVx_w156EOBQbfD2S1QJtv_Us08hfmlPy7s",
+          "y": "s5xZErWJNnNAJfmyMYNXO4LYDDMaasFJMMGHk63Fqho"
+        },
+        "privateKeyJwk": {
+          "kty": "EC",
+          "crv": "P-256",
+          "x": "_-uukcCcIVx_w156EOBQbfD2S1QJtv_Us08hfmlPy7s",
+          "y": "s5xZErWJNnNAJfmyMYNXO4LYDDMaasFJMMGHk63Fqho",
+          "d": "8bOnBLg9jBNNA0DcpVKLwa74Lp_0Ld1NwYxeFMPslSY"
+        }
+      },
+      "periodEphemeral": {
+        "publicKeyJwk": {
+          "kty": "EC",
+          "crv": "P-256",
+          "x": "g0aRijquqGBYFVV0mIzRCIuHSyXs9EAOiPWxTLCHVVg",
+          "y": "30j8-6vfS2mXZ0KkOXUnF29fVZLF1YKUUPyeUhpwI44"
+        },
+        "privateKeyJwk": {
+          "kty": "EC",
+          "crv": "P-256",
+          "x": "g0aRijquqGBYFVV0mIzRCIuHSyXs9EAOiPWxTLCHVVg",
+          "y": "30j8-6vfS2mXZ0KkOXUnF29fVZLF1YKUUPyeUhpwI44",
+          "d": "tf8SxGwDTqEdSWZgwsHmsxePi5_OdgELGnin1Id894c"
+        }
+      },
+      "contentNonceBase64url": "AQYLEBUaHyQpLjM4",
+      "periodNonceBase64url": "AgsUHSYvOEFKU1xl"
+    },
+    "rsa": {
+      "publicKeyJwk": {
+        "kty": "RSA",
+        "n": "tZqcXwvLYArS9n-wfbtSO9zNbSWBaPIV8rTOb8luS-g9UaRF1j3Av-R-5Yg1F_qQAH-pkOkV_MVYkuS2CCpa6gBsZFu76BVtvceOnFncJZdK6TBES9YCmX_Wu_kWN_dk-AeqPMf3ThxoEmI37OB1pRDjZeoR1ujzK2ogmb2314uv3Xh_u3XWca211AiAMqndd_JbgjCBSpTLicQmHu0WIuLBe2Px6RIHRZqWDcQQMOM56GeERwms728WU5kKg6pGEbssqTwaT_8vLbk_W28Gm6Cct4UGVTZr4P5_irno3155ALu3ngTKeowa7cuo7Z2AOppO140gRa0TK-iKQMi2VQ",
+        "e": "AQAB",
+        "alg": "RSA-OAEP-256"
+      },
+      "privateKeyJwk": {
+        "kty": "RSA",
+        "n": "tZqcXwvLYArS9n-wfbtSO9zNbSWBaPIV8rTOb8luS-g9UaRF1j3Av-R-5Yg1F_qQAH-pkOkV_MVYkuS2CCpa6gBsZFu76BVtvceOnFncJZdK6TBES9YCmX_Wu_kWN_dk-AeqPMf3ThxoEmI37OB1pRDjZeoR1ujzK2ogmb2314uv3Xh_u3XWca211AiAMqndd_JbgjCBSpTLicQmHu0WIuLBe2Px6RIHRZqWDcQQMOM56GeERwms728WU5kKg6pGEbssqTwaT_8vLbk_W28Gm6Cct4UGVTZr4P5_irno3155ALu3ngTKeowa7cuo7Z2AOppO140gRa0TK-iKQMi2VQ",
+        "e": "AQAB",
+        "d": "Abe1fWk-fyLMrBpFxTapmGY_xvKMUHDW6zP-SAyv0p94cjNIM5z9AioE1wjS0CGyTXlOCJ0WJ5ntOvxw47X7Pj9xRwGE6JtiE_t7pys3zt8Cs7hqMozSx8Vi0Ew5KdMMI5PQLofjC3XVnsDkXJ6JD-qpBlYW3TSLiKOJE3_5tmi4O3IbIzxXCX_7LiwL2nck74jQmQyjotgg3R2DZKIugRz383Z2FjzZ7KozPHyFaBuAtRnOv3amgDKkLx1iXtWLLBCXGPvU5EPDfO_U3YR5OTyYyxn9biGFzdplpD0YvVDredMlIU5MjIGDMdFq4Ky0VX5goTyjAiXm_96rDg_ziQ",
+        "p": "_SJfXspdbD9ZdN1QDDfhl-2yHSs9Ftp6rIQ81OkBrATWHal24CfppmJEH9yfVrR9Z_SncoIEgJxyNfw3HSURdHcnvGADTo1d7K3fJmJhG0TBJGyAJKMG2Q9Da997LOD3I-OBBX5trWFfYZ7Tad--ff8d49-HxvGTMe5-WJqt-bk",
+        "q": "t6juTp-T6fvjQ6WdyH7xvJjUamv_qtT42bjnxUlXVlYwDJC6egSAtv4XFf0KQQBJURf8LruqmH2NEC9quvRzBsD66VPNpwZxXvSEa04zF-CkcHehWvyGdHPv8YT8NWQKNB4ROm9JsbxzaL1W_bMfAADAkwYzYU5F-AyXLjALf30",
+        "dp": "jyOXsF9YUrTD3hyjfjU_QQ0tMedYZQroYZNpXq_fvSkC9sT0Lq8DJY3dnfLAu2PWoikrYsn4x80vnC1h8P4cD7Ktao0UcZ_o48QyMl9hL-1CFlmwYIc7gRRreJ1n5qnTtpyYQcYLOQady_Lm87CM5GyVt1yYR7wlExAcq_fTtyk",
+        "dq": "nUAN8tGdQt0BxFzcUNuoPPOaBBi-SlWZUEmKYJggKHMZJtkQYQLT9lpuB8ylZ-xH2iAwMw9JzNDK5A3FU5eTmTfIXdj8H0Nb9JJlgr7s7kfQY996Dz5iHPlbey6DB2_FcMRBugepUH3rTsW24vfn1gfO2tOXUHxFWlHla42Fer0",
+        "qi": "ND9CMV48VNCEayq4x0rAWYa1ZwPOofP2lefawlLja4A2IYo31s3AAtBUCMIwR3ZFDhKyUJN_hrrSdxdNfoO9RlxYTPddY6F36yFUA7spZKxZ1PuukqRdwS9TQnHU8BqZWIW59ofJxG6lXmXMG4k7rghLMNru9Y4zaD2X4BZVGo0",
+        "alg": "RSA-OAEP-256"
+      }
+    }
+  },
+  "expected": {
+    "bind": {
+      "content": "dca-bind-v1|c|ESIzRFVmd4iZqrvM3e7_AA|premiumtext",
+      "period": "dca-bind-v1|p|ESIzRFVmd4iZqrvM3e7_AA|premium|251023T13"
+    },
+    "ecdh": {
+      "contentBlob": "BP_rrpHAnCFcf8NeehDgUG3w9ktUCbb_1LNPIX5pT8u7s5xZErWJNnNAJfmyMYNXO4LYDDMaasFJMMGHk63FqhoBBgsQFRofJCkuMzhaTZjMHCookHHlyocKXaMYTWr36jw-LCvLOmhO2eBg1A",
+      "periodBlob": "BINGkYo6rqhgWBVVdJiM0QiLh0sl7PRADoj1sUywh1VY30j8-6vfS2mXZ0KkOXUnF29fVZLF1YKUUPyeUhpwI44CCxQdJi84QUpTXGU1T4gf8yqJrHGkeIgl5dBgY0enJl_lvpRuQH4NELvzNw",
+      "unsealWithoutAad": {
+        "fails": true,
+        "reason": "aes-gcm-tag"
+      }
+    },
+    "rsa": {
+      "contentBlob": "iJHtQ2T7MdNs0uqlbuIl4-YfnEENKjkootNLVI37A-MO7i1Hbdc7CntvxG4AyYILYECaShNOuh6nsuH4sQOfrRTeAx6YD41GiGe8gIJGNSm3FrgQZMyqVdrg_Y6VkOTO4Cs1CueApS3oP32M1f6gY-TogcttFXP7Np8-vTgLbbQYPwxKVp2TqV1vHEBhPSWE6ucJflOYOOxcVJu8SkMYV_gpeqG8WhhoEfN7lHT7N817tO7uXfug02fCQZKdHiigq3tRdqMeSUKEh5sbvjf-A8Rn1nU7DhaNOXfaO-BrQ0cbdJc8yp_HYIucQ6mEWt-n0F4SJthKg-1TXCaJpai8Xg",
+      "plaintextBase64url": "ZGNhLWJpbmQtdjF8Y3xFU0l6UkZWbWQ0aVpxcnZNM2U3X0FBfHByZW1pdW10ZXh0AwoRGB8mLTQ7QklQV15lbA"
+    }
+  }
+}

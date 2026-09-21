@@ -1,0 +1,32 @@
+{
+  "note": "A fixture corpus whose first expected value carries a character outside ASCII, so a disagreement the two printed lines cannot show can be driven through a bridge. That value is written with JSON escapes, so the file states which spelling it holds: the composed one, U+00E9. A real observation of this operation is base64url and cannot carry it; the printer under test reads any string, and this row is what gives it one. The second case is plain ASCII and is there to be left unanswered, which is how the same printing is reached from an incomplete run. No value here is a conformance fact.",
+  "cases": [
+    {
+      "id": "encoding/01",
+      "set": "encoding",
+      "label": "accented fixture value",
+      "op": "open-rsa-oaep",
+      "input": {
+        "ciphertextBase64url": "AQID",
+        "privateKeyJwk": { "kty": "RSA", "n": "AQID", "e": "AQAB" }
+      },
+      "expected": {
+        "plaintextBase64url": "a-fixture-value-of-café.jpg"
+      },
+      "rationale": "a fixture row, so the code-point printer has two spellings of one text to report."
+    },
+    {
+      "id": "encoding/02",
+      "set": "encoding",
+      "label": "canonical value",
+      "op": "decode-base64url",
+      "input": {
+        "value": "AQID"
+      },
+      "expected": {
+        "bytesHex": "010203"
+      },
+      "rationale": "a fixture row left unanswered, so an incomplete run reaches the same printing."
+    }
+  ]
+}

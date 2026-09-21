@@ -1,0 +1,74 @@
+#!/usr/bin/env bash
+# Opt-in Go conformance check. Not part of the default public gate.
+#
+# The default `node --test` run touches no Go at all, so it needs no network and
+# no compiler. This script runs the Go lane on request: every corpus set this
+# lane declares, through this lane's own operation bridge.
+#
+#   ./check                     # every corpus set this lane declares
+#   ./check --record <file>     # also write this run's lane record to that file
+#
+# The corpus run goes through this lane's own bridge.json, whose build step runs a
+# separate toolchain install with no flags of its own; this script calls
+# install-toolchain the same, flagless way, only to print the version banner
+# below, so the banner names the toolchain that answered.
+#
+# It needs network the first time, to download the toolchain (~70 MB). After
+# that the cached toolchain is reused with no network. Some execution
+# environments have no egress, which is exactly why this is never wired into the
+# suite: run it by hand on a machine that has network. Nothing is installed
+# system-wide and no binary is committed; the toolchain lives only in the cache
+# dir install-toolchain names, which `./install-toolchain --print-base`
+# prints without installing anything.
+#
+# Exit codes, the three ../README.md names:
+#   0  every corpus set this lane was asked held
+#   1  the bridge answered inside the contract and answered wrongly
+#   2  a set verified nothing, or no usable Go toolchain was found
+set -euo pipefail
+
+HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
+# The corpus-set driver step this check is built from.
+# shellcheck source=../_shared/driver-steps.sh
+. "$HERE/../_shared/driver-steps.sh"
+
+# What this lane calls itself in a record, which is the name the cross-lane
+# aggregator keys every comparison it makes on.
+DCA_LANE=go
+# Where a record goes, empty until --record names a file and no record written
+# while it stays empty.
+DCA_RECORD=""
+
+while [ $# -gt 0 ]; do
+    case "$1" in
+        --record)
+            [ $# -ge 2 ] || { echo "--record needs a file path to write the lane record to" >&2; exit 2; }
+            DCA_RECORD="$2"; shift 2 ;;
+        *)
+            echo "go/check takes no argument beside --record: it always answers the whole case corpus through the driver." >&2
+            exit 2 ;;
+    esac
+done
+
+# The installer is idempotent and prints BASE on stdout, so the path is asked
+# for rather than rebuilt from a version pin this script would then have to keep
+# in step with the installer's. Called with no flags, the same way
+# the lane's own build step calls it, so the banner below names the toolchain
+# that actually answers the corpus.
+if ! BASE="$("$HERE/install-toolchain")"; then
+    echo "no Go toolchain, so nothing was verified." >&2
+    exit 2
+fi
+
+echo "== $("$BASE/bin/go" version) ==" >&2
+# Said out loud because the other lanes name a crypto library here, and a reader
+# who sees none for Go should learn there is none rather than assume it was omitted.
+echo "== crypto: pure Go standard library, no OpenSSL, nothing linked ==" >&2
+
+run_driver_steps
+
+if [ -n "${DCA_RECORD:-}" ]; then
+    write_driver_record || DCA_WALK_STATUS=2
+fi
+exit "$DCA_WALK_STATUS"

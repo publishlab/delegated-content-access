@@ -1,0 +1,39 @@
+{
+  "name": "open-rsa-oaep",
+  "vectorFormat": "3",
+  "description": "One RSA-OAEP sealed key blob, recorded with the private fixture key that opens it. RSA-OAEP is a base sealed-blob carrier beside ECDH P-256: the key is wrapped by OAEP directly, with the binding value ahead of it inside the one plaintext, so the blob is exactly one modulus wide - 256 bytes at 2048 bits, base64url to 342 characters - whatever the plaintext holds. THIS IS AN OPEN VECTOR, NOT A SEAL VECTOR. OAEP draws its padding seed inside the crypto library with nothing to inject, so an RSA render is not reproducible and re-sealing input.contentKeyBase64url would produce a different blob every run. What is pinned is the unseal: expected.blob is the fixture, and a regeneration re-emits it verbatim. REPLAY. Import input.rsa.privateKeyJwk as RSA-OAEP over SHA-256 with no label; decrypt expected.blob with a single decrypt call (no internal structure to parse); the plaintext is expected.bind as UTF-8 followed by the 16-byte key. Rebuild the binding from input.binding (dca-bind-v1|c|renderId|contentName, which is expected.bind), take everything ahead of the last 16 bytes as the recovered binding and compare it WHOLE against that value - a prefix compare would open the premiumtext blob under a premium grant - then the last 16 bytes are the key, equal to input.contentKeyBase64url. WRONG-BINDING REFUSAL. The prefix is the whole relabel defence on this carrier: the same blob rebuilt for another coordinate (contentName bodytext) recovers a plaintext whose prefix is not the rebuilt binding, and the open fails closed. The values are canonical, the fixed 16-byte renderId and an ordinary content name, because a vector is what an implementer copies; the format maxima are proved in the unit tests. Every wire value is base64url with no padding.",
+  "input": {
+    "algorithm": "RSA-OAEP",
+    "hash": "SHA-256",
+    "binding": {
+      "renderId": "ESIzRFVmd4iZqrvM3e7_AA",
+      "contentName": "premiumtext"
+    },
+    "contentKeyBase64url": "AwoRGB8mLTQ7QklQV15lbA",
+    "rsa": {
+      "publicKeyJwk": {
+        "kty": "RSA",
+        "n": "tZqcXwvLYArS9n-wfbtSO9zNbSWBaPIV8rTOb8luS-g9UaRF1j3Av-R-5Yg1F_qQAH-pkOkV_MVYkuS2CCpa6gBsZFu76BVtvceOnFncJZdK6TBES9YCmX_Wu_kWN_dk-AeqPMf3ThxoEmI37OB1pRDjZeoR1ujzK2ogmb2314uv3Xh_u3XWca211AiAMqndd_JbgjCBSpTLicQmHu0WIuLBe2Px6RIHRZqWDcQQMOM56GeERwms728WU5kKg6pGEbssqTwaT_8vLbk_W28Gm6Cct4UGVTZr4P5_irno3155ALu3ngTKeowa7cuo7Z2AOppO140gRa0TK-iKQMi2VQ",
+        "e": "AQAB",
+        "alg": "RSA-OAEP-256"
+      },
+      "privateKeyJwk": {
+        "kty": "RSA",
+        "n": "tZqcXwvLYArS9n-wfbtSO9zNbSWBaPIV8rTOb8luS-g9UaRF1j3Av-R-5Yg1F_qQAH-pkOkV_MVYkuS2CCpa6gBsZFu76BVtvceOnFncJZdK6TBES9YCmX_Wu_kWN_dk-AeqPMf3ThxoEmI37OB1pRDjZeoR1ujzK2ogmb2314uv3Xh_u3XWca211AiAMqndd_JbgjCBSpTLicQmHu0WIuLBe2Px6RIHRZqWDcQQMOM56GeERwms728WU5kKg6pGEbssqTwaT_8vLbk_W28Gm6Cct4UGVTZr4P5_irno3155ALu3ngTKeowa7cuo7Z2AOppO140gRa0TK-iKQMi2VQ",
+        "e": "AQAB",
+        "d": "Abe1fWk-fyLMrBpFxTapmGY_xvKMUHDW6zP-SAyv0p94cjNIM5z9AioE1wjS0CGyTXlOCJ0WJ5ntOvxw47X7Pj9xRwGE6JtiE_t7pys3zt8Cs7hqMozSx8Vi0Ew5KdMMI5PQLofjC3XVnsDkXJ6JD-qpBlYW3TSLiKOJE3_5tmi4O3IbIzxXCX_7LiwL2nck74jQmQyjotgg3R2DZKIugRz383Z2FjzZ7KozPHyFaBuAtRnOv3amgDKkLx1iXtWLLBCXGPvU5EPDfO_U3YR5OTyYyxn9biGFzdplpD0YvVDredMlIU5MjIGDMdFq4Ky0VX5goTyjAiXm_96rDg_ziQ",
+        "p": "_SJfXspdbD9ZdN1QDDfhl-2yHSs9Ftp6rIQ81OkBrATWHal24CfppmJEH9yfVrR9Z_SncoIEgJxyNfw3HSURdHcnvGADTo1d7K3fJmJhG0TBJGyAJKMG2Q9Da997LOD3I-OBBX5trWFfYZ7Tad--ff8d49-HxvGTMe5-WJqt-bk",
+        "q": "t6juTp-T6fvjQ6WdyH7xvJjUamv_qtT42bjnxUlXVlYwDJC6egSAtv4XFf0KQQBJURf8LruqmH2NEC9quvRzBsD66VPNpwZxXvSEa04zF-CkcHehWvyGdHPv8YT8NWQKNB4ROm9JsbxzaL1W_bMfAADAkwYzYU5F-AyXLjALf30",
+        "dp": "jyOXsF9YUrTD3hyjfjU_QQ0tMedYZQroYZNpXq_fvSkC9sT0Lq8DJY3dnfLAu2PWoikrYsn4x80vnC1h8P4cD7Ktao0UcZ_o48QyMl9hL-1CFlmwYIc7gRRreJ1n5qnTtpyYQcYLOQady_Lm87CM5GyVt1yYR7wlExAcq_fTtyk",
+        "dq": "nUAN8tGdQt0BxFzcUNuoPPOaBBi-SlWZUEmKYJggKHMZJtkQYQLT9lpuB8ylZ-xH2iAwMw9JzNDK5A3FU5eTmTfIXdj8H0Nb9JJlgr7s7kfQY996Dz5iHPlbey6DB2_FcMRBugepUH3rTsW24vfn1gfO2tOXUHxFWlHla42Fer0",
+        "qi": "ND9CMV48VNCEayq4x0rAWYa1ZwPOofP2lefawlLja4A2IYo31s3AAtBUCMIwR3ZFDhKyUJN_hrrSdxdNfoO9RlxYTPddY6F36yFUA7spZKxZ1PuukqRdwS9TQnHU8BqZWIW59ofJxG6lXmXMG4k7rghLMNru9Y4zaD2X4BZVGo0",
+        "alg": "RSA-OAEP-256"
+      }
+    }
+  },
+  "expected": {
+    "bind": "dca-bind-v1|c|ESIzRFVmd4iZqrvM3e7_AA|premiumtext",
+    "blob": "iJHtQ2T7MdNs0uqlbuIl4-YfnEENKjkootNLVI37A-MO7i1Hbdc7CntvxG4AyYILYECaShNOuh6nsuH4sQOfrRTeAx6YD41GiGe8gIJGNSm3FrgQZMyqVdrg_Y6VkOTO4Cs1CueApS3oP32M1f6gY-TogcttFXP7Np8-vTgLbbQYPwxKVp2TqV1vHEBhPSWE6ucJflOYOOxcVJu8SkMYV_gpeqG8WhhoEfN7lHT7N817tO7uXfug02fCQZKdHiigq3tRdqMeSUKEh5sbvjf-A8Rn1nU7DhaNOXfaO-BrQ0cbdJc8yp_HYIucQ6mEWt-n0F4SJthKg-1TXCaJpai8Xg",
+    "plaintextBase64url": "ZGNhLWJpbmQtdjF8Y3xFU0l6UkZWbWQ0aVpxcnZNM2U3X0FBfHByZW1pdW10ZXh0AwoRGB8mLTQ7QklQV15lbA"
+  }
+}

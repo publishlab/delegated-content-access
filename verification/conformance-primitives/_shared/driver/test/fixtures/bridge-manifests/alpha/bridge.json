@@ -1,0 +1,6 @@
+{
+    "script": "alpha/bridge.mjs",
+    "command": "alpha/run.sh",
+    "operations": ["decode-base64url"],
+    "prepare": { "command": "alpha/prepare.sh", "args": ["--go"] }
+}

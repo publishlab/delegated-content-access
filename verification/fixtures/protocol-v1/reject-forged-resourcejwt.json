@@ -1,0 +1,55 @@
+{
+  "name": "reject-forged-resourcejwt",
+  "vectorFormat": "2",
+  "derivedFrom": "seal-ecdh",
+  "description": "An unlock request an issuer must refuse whole: a resourceJWT signed by a key the publisher does not hold. THE ATTACK. Every byte of this body except one segment is the honest render - the blobs, the periodKeys section and the token's own header and payload are the publisher's, byte for byte. The signature segment is not: it was drawn over those same two segments by attacker.publicKeyJwk's private half, a key that appears nowhere in publisher.signingKeys. The header still names the publisher's kid, because an attacker writes whatever selects the key most likely to be skipped. WHY THE CHECK IS ALL THERE IS. The renderId is the binding's only unguessable field and it comes out of this payload alone. An issuer that skips verification accepts a self-minted token naming any renderId, and every blob the attacker holds then opens at the coordinate the attacker chose. This body is the least version of that: the token is self-minted and everything else is honest, so an issuer that skips the check answers every key of the render - the loudest possible failure against the recorded bad_signature refusal. An issuer that checks spends one signature verification and refuses. WHY THE FORGERY IS WELL-FORMED. attacker.publicKeyJwk verifies this token, so a replay can confirm the signature is a valid ES256 signature by the wrong key and not 64 damaged bytes - the damaged case is reject-tampered-resourcejwt's. A refusal that only fires on malformed signatures would pass here and fail there. A CONFORMANT ISSUER answers 400 with bad_signature and no key of any kind, before its private key is touched: the refusal costs the one verification and zero ECDH operations. expected.privateKeyReached is false and a replay that can count asymmetric operations should hold it to that. REPLAY. Post `rawBody` VERBATIM - the string as it sits in this file, never a re-serialization of it - to the unlock endpoint, with `issuer` as the key material the issuer holds for its own name and keyId, and `publisher.signingKeys` as the public verification halves, read straight from this file rather than resolved by a deployment lookup. A pass is: expected.code where there is one; key material back for exactly the coordinates in expected.keys and no others; and an error back for exactly the coordinates in expected.errors, under the codes recorded there. No publisher private key is in this file, on purpose: an issuer never holds one, so everything a reject vector asks for is checkable with what a real issuer has. HOW FAR THE REFUSAL REACHES IS PART OF WHAT IS PINNED, and expected.privateKeyReached says which side of the line this body lands on. A request that fails integrity - a signature that does not verify, a signed resource with no renderId to bind to - has asked nothing that could be answered, so it is refused whole and before the key store is consulted at all. A blob presented at a coordinate it was not sealed at is one bad blob in an ordinary request: the only way to find out is to try it, so the key store is reached, the blob comes back as an error, and everything else the request carried is answered beside it. The untouched coordinates were never the attack, and a page has to keep working around one bad blob, so they are answered. Everything in the body but the attack is the render this vector was cut from - the envelope, the periodKeys section and the untouched blobs are what the publisher emitted. An unchanged regeneration retains the valid resourceJWT signature segment inside rawBody, so the body is byte-stable with seal-ecdh.json. A fresh seal still draws a new k, which is why a replayer verifies the segment rather than comparing it. The token is the one in the base vector from the same run, byte for byte, except in reject-no-renderid, reject-renderid-noncanonical and reject-renderid-wrong-width, whose envelopes are second tokens signed over resources with the renderId removed, given a noncanonical spelling, or resized, which is each vector's whole subject; in reject-forged-resourcejwt, whose signature segment was drawn by a key the publisher does not hold; in reject-tampered-resourcejwt, which carries the seal-ecdh token's own signature segment under a payload edited after signing; and in the two reject-alg-substituted arms, which carry that token's payload segment under a header rewritten to name another algorithm, with a third segment that is empty or a MAC - neither of which moves between runs.",
+  "issuer": {
+    "issuerName": "paywall_subscription_service",
+    "keyId": "2025-10",
+    "algorithm": "ECDH-P256",
+    "publicKeyJwk": {
+      "kty": "EC",
+      "crv": "P-256",
+      "x": "KnsL031lVTbNxwtMq3OQmFq-fyPVh3k1__Adl4ieLXw",
+      "y": "-aNkTV8wd6O2rTWc2jkpJgez4Cuvas4J8_Styi-cdsE"
+    },
+    "privateKeyJwk": {
+      "kty": "EC",
+      "crv": "P-256",
+      "x": "KnsL031lVTbNxwtMq3OQmFq-fyPVh3k1__Adl4ieLXw",
+      "y": "-aNkTV8wd6O2rTWc2jkpJgez4Cuvas4J8_Styi-cdsE",
+      "d": "iWEhz6AHq-n4l_YzhTZcyQH7O9B1A1AKl4maOJh3z5g"
+    }
+  },
+  "publisher": {
+    "origin": "https://www.news-site.example",
+    "signingKeys": [
+      {
+        "kid": "sign-2025-10",
+        "publicKeyJwk": {
+          "kty": "EC",
+          "crv": "P-256",
+          "x": "wjapTnuqn7FYYz7TbSiG283dToV0I1zpHoiVpbYGUYU",
+          "y": "9vgUr7XBOhco_Pf-7CczUPW8tmscQKhkiK0zybXWVCI"
+        }
+      }
+    ]
+  },
+  "attacker": {
+    "publicKeyJwk": {
+      "kty": "EC",
+      "crv": "P-256",
+      "x": "W1MP_GCjSOxj-G8nJJfe78IybvQ4k-EH1B8nwRAl69g",
+      "y": "o8PZ1rWwuq5RGPYRb01H1CLPnDQuhE3_KUbFl5YkTGQ"
+    }
+  },
+  "rawBody": "{\n  \"version\": \"1\",\n  \"issuerName\": \"paywall_subscription_service\",\n  \"resourceJWT\": \"eyJhbGciOiJFUzI1NiIsInR5cCI6IkpXVCIsImtpZCI6InNpZ24tMjAyNS0xMCJ9.eyJyZW5kZXJJZCI6InVVVDU3Nk8zNEJvR0twZ1hwZE11Y3ciLCJvcmlnaW4iOiJodHRwczovL3d3dy5uZXdzLXNpdGUuZXhhbXBsZSIsImlzc3VlZEF0IjoiMjAyNS0xMC0yM1QxNDowMDowMC4wMDBaIiwicmVzb3VyY2VJZCI6IjEyMzQ1NiIsImRhdGEiOnsiZGF0ZS5wdWJsaXNoZWQiOiIyMDI1LTEwLTIwVDEwOjMwOjAwWiIsInNlY3Rpb24iOiJwb2xpdGljcyIsInRhZ3MiOlsiYnJlYWtpbmciLCJlbGVjdGlvbnMiXX19.YL_nsVtl_MIsX6uOd56p7T_PcApALLV9zed3G2WwrqZ8FuPmJynkbAt_E0p3IciiI1I3kZAcWeYh00WHc9LJ1A\",\n  \"keyId\": \"2025-10\",\n  \"sealed\": {\n    \"contentKeys\": {\n      \"bodytext\": \"BP_rrpHAnCFcf8NeehDgUG3w9ktUCbb_1LNPIX5pT8u7s5xZErWJNnNAJfmyMYNXO4LYDDMaasFJMMGHk63Fqhosaqe6Y6UyHEziB6sXe3DGjrotDFBb6mExgzszE4KG62Spq-0L-7Zv57MhJA\",\n      \"locked-data\": \"BFO_DIR8YvBF7KDC6csLOOywgRvvgkrXGZhgvX-4UEbpjbcExTFUDum7lWRXU21llsS3dQpzLxiJJptmVbY-4g8qfRNQEv0AcNYEiG1iIJU7zMr1FGdS7UvuXolBcdl7j3-D2tYgk9WiwmXMXA\"\n    },\n    \"periodKeys\": {\n      \"premium\": {\n        \"251023T14\": \"BINGkYo6rqhgWBVVdJiM0QiLh0sl7PRADoj1sUywh1VY30j8-6vfS2mXZ0KkOXUnF29fVZLF1YKUUPyeUhpwI459IIsktg7TzyWqZE8sG6I6_24awZIo1HqTXHU67JKWK7lfv-44qY-G6Say0w\",\n        \"251023T15\": \"BAWaMLaWFTKu1iD55oppbs7SCejlyxIOREMmS7otAOx3ZIAWv7cpyI0pH_U12MO4MTIUaBhuLkF0EVTFuneETtqTGmtnzfyKr7dq6DcaqE1sLpwp6Dg05xXHVUlMbeHDZ-YBka4WFtS_e7JlNg\"\n      },\n      \"locked-data\": {\n        \"251023T14\": \"BCU1ON5iY7-eabveiBcgWpJrWzc_5vWApm2kotjEBkVPXEeyvi2q1CZQgghDAdZds0Le4a0zopxM_a0OZrDEUJRB0E4FZIuqTeDrw-ZYTXvW8yB-13kvodjWBripgXpFl6xY8Ouidx9Y3tlubw\",\n        \"251023T15\": \"BM-G5T29LnZ14YBqxm6SAMCbKHcwdX5wv_iLL0FEb_D0C-MPak9ZNDvcMsAOHjaiKcg9spCJnuVa-PDS7RcExw43MylAD1w88J_d8T-SsnfCHklnU4H6FVwk5g3OKszBFwcpBYy5fr_MwBjt6Q\"\n      }\n    }\n  }\n}",
+  "expected": {
+    "code": "bad_signature",
+    "keys": {
+      "contentKeys": []
+    },
+    "errors": {},
+    "privateKeyReached": false
+  }
+}

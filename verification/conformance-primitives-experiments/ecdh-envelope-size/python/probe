@@ -1,0 +1,43 @@
+#!/usr/bin/env bash
+# The launcher for the Python probe: it resolves the pinned interpreter the
+# public Python lane installs, then hands the process to probe.py.
+#
+# `python3` on PATH is not that interpreter. The system one has no cryptography
+# package, so a probe started through it would report a missing library rather
+# than an observation. The pinned CPython and the wheel directory beside it are
+# managed by ../../../conformance-primitives/python/install-toolchain, and that script
+# is asked by relative path rather than copied here, so there is one pin, one cache, and
+# one script that fills it. It answers the same print queries from any
+# working directory, since it reads its own location.
+set -euo pipefail
+
+HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+INSTALLER="$HERE/../../../conformance-primitives/python/install-toolchain"
+
+if [ ! -x "$INSTALLER" ]; then
+  echo "probe: no installer at $INSTALLER, so no interpreter could be resolved." >&2
+  exit 2
+fi
+
+if ! PYTHON="$("$INSTALLER" --print-bin)" || [ ! -x "$PYTHON" ]; then
+  echo "probe: no pinned Python interpreter; run $INSTALLER once on a machine with network." >&2
+  exit 2
+fi
+
+SITE="$("$INSTALLER" --print-site)"
+if [ -n "$SITE" ]; then
+  export PYTHONPATH="$SITE"
+else
+  unset PYTHONPATH
+fi
+
+# CPython writes __pycache__ beside every source unless it is told where to put
+# it, and a checkout never carries build output.
+if CACHE="$("$INSTALLER" --print-cache)"; then
+  export PYTHONPYCACHEPREFIX="$CACHE/build/ecdh-envelope-size"
+fi
+export PYTHONNOUSERSITE=1
+
+# `-s` keeps the user site-packages directory off sys.path, so a stray
+# cryptography in ~/.local cannot be the package the probe imports.
+exec "$PYTHON" -s "$HERE/probe.py" "$@"

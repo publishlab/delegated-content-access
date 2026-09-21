@@ -1,0 +1,4 @@
+{
+  "script": "lane/bridge.mjs",
+  "command": "lane/run.sh"
+}

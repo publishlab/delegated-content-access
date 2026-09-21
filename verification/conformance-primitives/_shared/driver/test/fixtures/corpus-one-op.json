@@ -1,0 +1,14 @@
+{
+  "note": "A fixture corpus carrying one operation only, so a known --op that selects zero cases can be exercised.",
+  "cases": [
+    {
+      "id": "encoding/01",
+      "set": "encoding",
+      "label": "canonical value",
+      "op": "decode-base64url",
+      "input": { "value": "AQID" },
+      "expected": { "bytesHex": "010203" },
+      "rationale": "a fixture row, so a corpus of one operation exists to select against."
+    }
+  ]
+}

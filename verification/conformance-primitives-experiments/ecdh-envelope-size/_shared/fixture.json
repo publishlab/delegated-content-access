@@ -1,0 +1,107 @@
+{
+  "note": "Frozen inputs and expected outputs for the ecdh-envelope-size experiment. Probes read inputs only.",
+  "inputs": {
+    "curve": "P-256",
+    "issuer": {
+      "privatePkcs8Hex": "308187020100301306072a8648ce3d020106082a8648ce3d030107046d306b020101042027c1e398556fef9fdb9f1e6e9e284d957ed25bdb3fdae6de5661d52ee5494a87a144034200049c9aecccee9cf48c257accb7063799f5caf0c423e76e96cdd50db8ef00eedbd0db39200aee7649aca75721e02aceb7896792a545fe0153b3553a5753b69adee0",
+      "publicUncompressedHex": "049c9aecccee9cf48c257accb7063799f5caf0c423e76e96cdd50db8ef00eedbd0db39200aee7649aca75721e02aceb7896792a545fe0153b3553a5753b69adee0"
+    },
+    "ephemeral": {
+      "privatePkcs8Hex": "308187020100301306072a8648ce3d020106082a8648ce3d030107046d306b0201010420f0bf6fa6cb09f85c08bc46d86f13a8bca17558102c3cd99a8d381c591c9c06fea1440342000442d4380f60223e3528de7994b8920af107414889bb6326c16832cac89430d38662d6f76941cb7543e55b9d9c23676f08a258cb992f6226211935f9d8c1cbd02c",
+      "publicUncompressedHex": "0442d4380f60223e3528de7994b8920af107414889bb6326c16832cac89430d38662d6f76941cb7543e55b9d9c23676f08a258cb992f6226211935f9d8c1cbd02c",
+      "publicCompressedHex": "0242d4380f60223e3528de7994b8920af107414889bb6326c16832cac89430d386"
+    },
+    "ephemeralFresh": {
+      "privatePkcs8Hex": "308187020100301306072a8648ce3d020106082a8648ce3d030107046d306b020101042074244c9c2abc308bee87b6451e01953681cf247cba0416bc11b5555fc5134fc1a14403420004061061826b423c388ea6352bdf91f4336d1d367c2d2ad7c6bfa4fe29156791994368651a9c419ee5a86ea34bec5952a575d15d218c89dfbb370fe369e6783958",
+      "publicUncompressedHex": "04061061826b423c388ea6352bdf91f4336d1d367c2d2ad7c6bfa4fe29156791994368651a9c419ee5a86ea34bec5952a575d15d218c89dfbb370fe369e6783958",
+      "publicCompressedHex": "02061061826b423c388ea6352bdf91f4336d1d367c2d2ad7c6bfa4fe2915679199"
+    },
+    "dcaKeyHex": "b6492c068d5e6251816ebad533a6ffa4",
+    "bind": {
+      "renderId": "ZVetNYbYvT3D1_J-WkmaKQ",
+      "contentName": "bodytext",
+      "value": "dca-bind-v1|c|ZVetNYbYvT3D1_J-WkmaKQ|bodytext"
+    },
+    "otherBind": {
+      "renderId": "ZVetNYbYvT3D1_J-WkmaKQ",
+      "contentName": "teaser",
+      "value": "dca-bind-v1|c|ZVetNYbYvT3D1_J-WkmaKQ|teaser"
+    },
+    "controlNonceHex": "ae8a3da1c5ca427345207cb0",
+    "hkdf": {
+      "hash": "SHA-256",
+      "saltEmpty": true,
+      "keyInfoPrefix": "dca-envelope-size-experiment-v1|key|",
+      "nonceInfoPrefix": "dca-envelope-size-experiment-v1|nonce|",
+      "keyBytes": 32,
+      "nonceBytes": 12
+    },
+    "offCurvePoints": {
+      "uncompressedHex": "0442d4380f61223e3528de7994b8920af107414889bb6326c16832cac89430d38662d6f76941cb7543e55b9d9c23676f08a258cb992f6226211935f9d8c1cbd02c",
+      "compressedHex": "0242d4380f63223e3528de7994b8920af107414889bb6326c16832cac89430d386",
+      "compressedNonResidueHex": "0342d4380f60223e3528de7994b8920af107414889bb6326c16832cac89430d387"
+    }
+  },
+  "expected": {
+    "note": "Recorded by node/probe.mjs --record. Every runtime is held against these bytes.",
+    "recordedBy": "node",
+    "profiles": {
+      "control-109": {
+        "envelopeHex": "0442d4380f60223e3528de7994b8920af107414889bb6326c16832cac89430d38662d6f76941cb7543e55b9d9c23676f08a258cb992f6226211935f9d8c1cbd02cae8a3da1c5ca427345207cb0cb107da2a180df774caaad125e7e2946e20142e55fe656f8dfb470ed853c7a19",
+        "derivedKeyHex": "ecf39c426b1fadcd6fe493e056b0e787f1510868a38a39552058c789b0d853c5",
+        "derivedNonceHex": "ae8a3da1c5ca427345207cb0",
+        "envelopeBase64url": "BELUOA9gIj41KN55lLiSCvEHQUiJu2MmwWgyysiUMNOGYtb3aUHLdUPlW52cI2dvCKJYy5kvYiYhGTX52MHL0Cyuij2hxcpCc0UgfLDLEH2ioYDfd0yqrRJefilG4gFC5V_mVvjftHDthTx6GQ",
+        "decodedBytes": 109,
+        "base64urlChars": 146,
+        "pointBytes": 65,
+        "openedKeyHex": "b6492c068d5e6251816ebad533a6ffa4",
+        "wrongBind": "no-key",
+        "flippedCiphertext": "no-key",
+        "invalidPoint": "no-key",
+        "nonResiduePoint": "n/a"
+      },
+      "hkdf-97": {
+        "envelopeHex": "0442d4380f60223e3528de7994b8920af107414889bb6326c16832cac89430d38662d6f76941cb7543e55b9d9c23676f08a258cb992f6226211935f9d8c1cbd02c6f5ad98c91b582d3b376384c946ce8337d1e75ce94b3f9b67f7710b6f1917fb3",
+        "derivedKeyHex": "a11ca3772c8057e0e68607936b42c69b6a9dee932dcd9f3bb622baa62c9645f7",
+        "derivedNonceHex": "524f26a5074889396569b5d3",
+        "envelopeBase64url": "BELUOA9gIj41KN55lLiSCvEHQUiJu2MmwWgyysiUMNOGYtb3aUHLdUPlW52cI2dvCKJYy5kvYiYhGTX52MHL0CxvWtmMkbWC07N2OEyUbOgzfR51zpSz-bZ_dxC28ZF_sw",
+        "decodedBytes": 97,
+        "base64urlChars": 130,
+        "pointBytes": 65,
+        "openedKeyHex": "b6492c068d5e6251816ebad533a6ffa4",
+        "wrongBind": "no-key",
+        "flippedCiphertext": "no-key",
+        "invalidPoint": "no-key",
+        "nonResiduePoint": "n/a"
+      },
+      "hkdf-compressed-65": {
+        "envelopeHex": "0242d4380f60223e3528de7994b8920af107414889bb6326c16832cac89430d3866f5ad98c91b582d3b376384c946ce8337d1e75ce94b3f9b67f7710b6f1917fb3",
+        "derivedKeyHex": "a11ca3772c8057e0e68607936b42c69b6a9dee932dcd9f3bb622baa62c9645f7",
+        "derivedNonceHex": "524f26a5074889396569b5d3",
+        "envelopeBase64url": "AkLUOA9gIj41KN55lLiSCvEHQUiJu2MmwWgyysiUMNOGb1rZjJG1gtOzdjhMlGzoM30edc6Us_m2f3cQtvGRf7M",
+        "decodedBytes": 65,
+        "base64urlChars": 87,
+        "pointBytes": 33,
+        "openedKeyHex": "b6492c068d5e6251816ebad533a6ffa4",
+        "wrongBind": "no-key",
+        "flippedCiphertext": "no-key",
+        "invalidPoint": "no-key",
+        "nonResiduePoint": "no-key"
+      }
+    },
+    "ephemeralReuse": {
+      "sameEphemeralSameBind": {
+        "keyHex": "a11ca3772c8057e0e68607936b42c69b6a9dee932dcd9f3bb622baa62c9645f7",
+        "nonceHex": "524f26a5074889396569b5d3"
+      },
+      "sameEphemeralOtherBind": {
+        "keyHex": "fbeca1ed943e29067a8b86817438e7bf60efbeebe1ab9d36bb32aea9e7552d0f",
+        "nonceHex": "2c4e80e1052cf8161a823f0b"
+      },
+      "freshEphemeralSameBind": {
+        "keyHex": "0560837b7295a9300e2ea7c4b3590344636c50d3530feebc0501f8d0a64117c9",
+        "nonceHex": "4abe2f40f01a16d1012d0cdc"
+      }
+    }
+  }
+}

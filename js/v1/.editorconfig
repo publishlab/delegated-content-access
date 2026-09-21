@@ -1,0 +1,13 @@
+# Indent and line endings live with the package, so its source reads the same in any
+# checkout. Prettier reads them from here; the 100-column width is in .prettierrc.json.
+root = true
+
+[*]
+indent_style = space
+indent_size = 2
+end_of_line = lf
+trim_trailing_whitespace = true
+insert_final_newline = true
+
+[{*.yml,*.yaml}]
+indent_size = 2

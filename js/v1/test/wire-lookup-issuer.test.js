@@ -1,0 +1,85 @@
+//
+// Every map on the wire is keyed by a name an attacker picks: contentName,
+// accessGroup, issuerName. A bare `map[name]` reaches Object.prototype, so
+// 'constructor' or 'toString' resolves to a function instead of missing.
+// Lookups over wire-derived objects go through Object.hasOwn.
+//
+// The issuer half runs on `demo/scenarios/world.js`'s direct family, over a real
+// `IssuerKeyStore` holding a key that opens what this publisher sealed. That is
+// what backs the claim that no coordinate was walked: an issuer whose
+// store carries a null private key fails every walk it makes, so empty
+// contentKeys says nothing about whether it walked anything. Here a walked
+// coordinate comes back as a key or as a per-item failure, and both are
+// asserted absent.
+
+import test from "node:test";
+import assert from "node:assert/strict";
+
+import { IssuerEngine } from "../core-issuer/IssuerEngine.js";
+import { DcaRequest } from "../core-shared--client-issuer/DcaRequest.js";
+import { sign } from "../core-shared--publisher-issuer/jwt.js";
+import { directWorld } from "../demo/scenarios/world.js";
+import { AllowAllPolicy } from "../demo/support/AllowAllPolicy.js";
+import { ISSUER_NAME, KEY_ID, RESOURCE_ID, SIGNING_KID } from "../demo/scenarios/fixtures.js";
+import { makeRenderId } from "../test-lib/fixtures/renderId.js";
+
+/** The origin this render is delivered from, and every blob bound under. */
+const ORIGIN = "https://www.news-site.example";
+
+/** A renderId to anchor on; the value is incidental. */
+const RENDER_ID = makeRenderId(3);
+
+/**
+ * A signed request for one issuer. The envelope carries the renderId the engine
+ * anchors on, so a request that reaches the walks below is one the engine was
+ * willing to walk, which keeps these tests about the lookups.
+ *
+ * The signing key is the world's, whose publisher registration holds the other half:
+ * the engine verifies the envelope before it opens anything, so a request that
+ * reaches the lookups below has to be signed for real; a stub here would test a
+ * gate that is not the one running.
+ *
+ * @param {CryptoKey} signingKey - the private half of the world's signing pair
+ * @param {{ contentKeys?: any, periodKeys?: any }} [sealed]
+ * @returns {Promise<object>}
+ */
+async function signedRequest(signingKey, sealed) {
+  const resource = {
+    renderId: RENDER_ID,
+    origin: ORIGIN,
+    issuedAt: "2025-10-23T14:00:00.000Z",
+    resourceId: RESOURCE_ID,
+    data: {},
+  };
+
+  const request = {
+    version: "1",
+    issuerName: ISSUER_NAME,
+    resource,
+    resourceJWT: await sign(resource, signingKey, { kid: SIGNING_KID }),
+    keyId: KEY_ID,
+  };
+
+  return sealed === undefined ? request : { ...request, sealed };
+}
+
+test("the engine unseals only own members of sealed.contentKeys", async () => {
+  const { keyStore, publisherRegistration, signingKeys } = await directWorld();
+  const engine = new IssuerEngine({ accessPolicy: new AllowAllPolicy() });
+
+  const result = await engine.unlock(
+    new DcaRequest(await signedRequest(signingKeys.privateKey, { contentKeys: {} })),
+    publisherRegistration,
+  );
+
+  // One reach, for the keyId the request named, and the count cannot be
+  // lower, because the engine looks a key up before it walks any coordinate.
+  // The empty `errors` beside the empty keys is what says nothing was walked:
+  // this store holds a key that opens what this publisher sealed, so a
+  // coordinate walked here comes back either as a key or as the failure of
+  // one, and neither arrived.
+  assert.equal(keyStore.reachCount, 1);
+  assert.deepEqual(result.contentKeys, {});
+  assert.deepEqual(result.errors, {});
+  assert.equal(Object.getPrototypeOf(result.contentKeys), Object.prototype);
+});

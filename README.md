@@ -1,100 +1,179 @@
 # Delegated Content Access (DCA)
 
-*A design for delegating content access control from publisher system to multiple independent issuers.*
+*DCA delegates access to encrypted, cacheable content to independent issuers
+without publisher-issuer shared secrets or runtime coordination.*
 
-DCA encrypts content at render time and delegates access decisions to independent issuers (subscription services, CRM systems, SSO providers) who hold the user relationships and make unlock decisions directly. The publisher delivers encrypted content without handling user authentication or entitlement logic.
+DCA lets a publisher deliver the same encrypted render to every reader while
+independent issuers decide which readers receive the capability needed to open
+it. The publisher encrypts content at render time and seals key material for
+configured issuers. Each issuer keeps its reader relationship, verifies the
+signed resource context, applies its own policy, and returns only capability it
+is willing to grant.
+
+The publisher does not run issuer authentication flows, interpret
+issuer-specific entitlement tokens, or keep issuer reader state. It applies
+the content-access model and uses each issuer's configured opening material and
+route; identity, entitlement, and reader policy remain issuer-side.
 
 ## How it works
 
-1. Publisher seals content and keys at render time
-2. Client receives sealed markup (content unreadable, keys unusable)
-3. Client forwards sealed keys to issuer
-4. Issuer unlocks keys, returns them to client
-5. Client decrypts content
+1. The publisher renders encrypted content items, signs the resource context,
+   and seals key capability for configured issuers.
+2. The client receives the same inert, cacheable delivery as every other
+   reader: ciphertext, signed context, sealed keys, and issuer routes.
+3. The client first tries matching key material stored from previous unlocks.
+4. For unresolved items, it asks a selected issuer to unlock applicable
+   capability.
+5. The issuer verifies the publisher evidence, authenticates the reader when
+   required or handles the request as explicitly anonymous, applies its own
+   policy, and opens only authorized coordinates.
+6. The client admits the issuer response, retains reusable capability when
+   appropriate, and opens the granted content items.
 
-Markup is identical for all users - cacheable at edge. Access control happens at unlock time, not render time. Harder than CSS, not DRM.
+The publisher can cache and share one sealed delivery; readers need an
+issuer-opened capability before the protected content becomes readable. Access
+decisions happen when the issuer processes an unlock request instead of at
+render time. DCA blocks CSS-only bypasses but does not provide DRM: an
+authorized reader can still copy plaintext or relay delivered access.
 
-**Terminology:** DCA uses **sealed** for encrypted/wrapped data (opaque, unusable without a key) and **unlocked** for the reverse. Not "locked" - that implies visibility behind bars. Sealed means opaque, can't even inspect. Field names are semantic (`contentKey`, `periodKey`), not crypto jargon (`wrappedCEK`).
+**Terminology:** Protected data is **sealed**, not locked: text behind locked
+glass can still be read, while a safe hides its contents. Sealed
+content remains opaque until opened with a key. The reverse is
+**opening**. An **unlock** is the client-issuer exchange that applies access
+policy and returns granted key capability. Names such as `contentKey` and
+`periodKey` describe protocol roles, not cryptographic operations.
 
 ## Actors
 
 | Actor | Role |
 |-------|------|
-| **Publisher** | Encrypts and delivers content. Derives keys, configures issuers, renders DCA markup or API responses. |
-| **Issuer** | Controls access. Holds private key, makes unlock decisions. Owns both sides: server (verify, unseal, decide) and browser JS (decrypt, cache, render). One team, one integration. |
-| **Client** | Requests unlock, decrypts, renders content. |
+| **Publisher** | Renders and delivers content. Encrypts protected items, signs their context, and seals keys for configured issuers. |
+| **Issuer** | Controls access. Checks the publisher's signed content information, authenticates the reader when required or handles the request as explicitly anonymous, decides what that principal may access, and opens and returns only the key capabilities it grants. |
+| **Client** | Receives the rendered content. First tries key capabilities stored from previous unlocks, then asks issuers for keys it is missing, and opens the content it is granted. |
 
 ## Background
 
-The typical approach to content access control is server-side gating: the publisher integrates with each access provider, handles OAuth flows, parses provider-specific ID tokens and entitlement formats, and maps them to content. Some providers require deeper integration: session management, identity federation, or user state on the publisher side.
+Server-side content gating commonly makes the publisher integrate with each
+access provider, participate in its authentication flow, interpret its
+entitlement data, and personalize the response before delivery.
 
-DCA inverts this: the publisher encrypts content once and delegates access decisions entirely to issuers. No per-provider integration, no user state on the publisher side.
+DCA moves that decision behind the encrypted delivery. The publisher integrates
+with a stable content-access protocol; each issuer keeps its own reader
+relationship and policy. The publisher still decides which content and routes
+to offer, but it does not need issuer-specific reader state.
 
 ## Design goals
 
-- **Asymmetric trust:** Publisher holds only issuer public keys, never private keys. Publisher breach cannot compromise issuer credentials.
-- **Multi-issuer:** Each issuer holds its own private key. Separate trust boundaries, no shared secrets. Compromising one issuer does not expose others.
-- **Zero runtime coordination:** Publisher only needs issuer pubkey at render time. No API calls, OAuth, or sync.
-- **Multi-publisher ready:** Issuers identify the publisher by domain and look up the corresponding signing key. Adding a second publisher should just work - no code changes, just a new key in the issuer's config.
-- **Opaque unlock:** DCA specifies the encryption envelope, not how the issuer delivers keys to the client. Issuers choose their own transport.
-- **CDN-friendly:** Encrypted content is identical for all users. Cacheable at edge without per-user rendering.
-- **Crypto:** Symmetric encryption for content, asymmetric key transport per issuer, deterministic key derivation for time-windowed caching. See [DCA-data-format.md](DCA-data-format.md) for algorithms and wire format.
-- **Security parity with cookies:** [Direct transport](DCA-issuer-reference.md#transport-modes): keys are replayable (like any bearer credential). [Client-bound transport](DCA-issuer-reference.md#client-bound-transport-security-properties): keys are bound to the browser (like session cookies, if unmodified). DCA does not ask for more trust in the browser than cookie-based gating already does.
+- **Independent access policy:** Each issuer authenticates its own readers and
+  applies its own policy. DCA does not prescribe subscriptions, passes,
+  metering, or another entitlement model.
+- **Asymmetric delegation:** The publisher uses an issuer's public opening
+  material. The issuer retains the corresponding private key; the parties do
+  not establish a shared secret.
+- **Separate issuer boundaries:** Each issuer can use independent key custody
+  and policy. Compromising one such boundary does not reveal another issuer's
+  private material.
+- **No render-time issuer call:** Once configured, the publisher can create the
+  shared encrypted render without calling an issuer or knowing the reader.
+- **Cacheable delivery:** The encrypted publisher output is the same for all
+  readers and can be cached without placing personalized plaintext at the
+  shared edge.
+- **Reusable capability:** Period keys can avoid a request for every render;
+  the issuer chooses what capability to grant and the client retains admitted
+  results where the selected profile permits it.
+- **Explicit interoperability:** Selected profiles define wire structures,
+  cryptographic transcripts, response protection, and failure behavior. Local
+  alternatives require their own identified profile rather than silent
+  substitution.
 
 ## Content items
 
-Articles contain multiple independently encrypted content items (e.g., `bodytext`, `premiumtext`, `locked-data`). Each has its own key and can contain any data type (HTML, JSON, image URLs). The issuer decides which to unlock per user, composing access dynamically from the available items. Same markup, same keys - the access policy lives entirely on the issuer side. The publisher does not need to know about issuer tier structures.
+A page or response can contain several independently encrypted content items.
+Each item has its own key and may contain HTML, JSON, an image URL, or another
+type of data. The publisher can offer access through the item's own key or
+through a reusable period key. The publisher decides which items and which
+routes to offer. At unlock, the issuer decides which offered key capabilities
+to grant to that reader. Access varies through the granted keys, so DCA does
+not require the publisher to render the protected content again for each
+reader.
 
 ## Period keys
 
-Without periodKeys, every article requires a separate unlock request. A periodKey (a time-windowed key) gives access to a specific content item across all articles within a time period. The client caches periodKeys, reuses across articles - fewer unlock requests.
+Without reusable period keys, a client normally needs an unlock to obtain a new
+content key for each render. A `periodKey` is a reusable key for one
+publisher, access group, and period coordinate. It can open every item key
+protected through that matching route. It does not automatically cover content
+merely because that content was published during the named period.
 
-**Trade-off:** Longer period = more reuse but wider key sharing window. Acceptable for non-DRM use cases.
+The client stores granted period keys and tries them again when later content
+offers a matching route. Reuse reduces unlock requests, but the same capability
+can open everything the publisher sealed under it. A key already delivered to
+a client cannot be revoked.
 
-**Clock-independent:** Only the publisher needs clock sync (to derive periodKeys at render time). The issuer unseals whatever the publisher sealed - no time awareness needed. The client tries periodKeys in order until one works.
+An optional period-key chain can represent a bounded run of periods with one
+capability. From a granted position, the client can derive exact period keys
+back to the start of that fixed window, but not later positions or keys in
+another window. Issuers and clients may instead support exact period keys only.
+
+The publisher chooses the period label when it renders the content. An issuer
+can open the capability carried for that label without recreating the label
+from its own clock, although it may still consider time when applying policy.
 
 ## Data flow
 
-Sequence diagram: [DCA-issuer-reference.md](DCA-issuer-reference.md#overview).
+**Publisher → Client** (at render time):
 
-**Publisher → Client** (in markup, at render time):
-- Sealed content (unreadable without keys)
-- Sealed contentKey and sealed periodKeys per issuer (unusable without issuer's private key)
-- Issuer endpoint identifiers
+- Encrypted content.
+- Signed information about the content and render (`resourceJWT`).
+- Issuer routes and sealed keys that only the matching issuer can open.
+- No plaintext or usable content or period keys.
 
 **Client → Issuer** (unlock request):
-- Forwards sealed keys meant for this issuer
-- `resourceJWT` (issuer verifies publisher origin, reads claims for access decisions)
-- `issuerJWT` (issuer verifies sealed blob integrity and binding to the correct resource and issuer before unsealing)
+
+- The publisher's `resourceJWT`, relayed unchanged.
+- That issuer's sealed keys for content the client cannot already open.
+- The names and coordinates needed to identify the requested keys. The request
+  names coordinates; the issuer decides whether to grant them.
 
 **Issuer → Client** (unlock response):
-- Unlocked contentKey (one article, per-view users) or unlocked periodKeys (cacheable across articles, subscribers)
+
+- Only the keys granted by the issuer's access decision.
+- Content keys for individual items, reusable period keys, or an optional
+  bounded period-chain capability.
 
 **Never exchanged:**
-- `periodSecret` - stays on publisher, derives periodKeys
-- `issuerPrivateKey` - stays on issuer, unseals keys
 
-**Access control is in the sealing.** The publisher grants issuers access to content items by sealing keys for them. Two issuers may be granted the same content items. The differentiation is which content items the publisher seals for each issuer, controlled at render time.
+- The issuer's private opening key stays with the issuer.
+- A publisher `keyDerivationSecret`, when a chain profile uses one, stays with
+  the publisher.
+
+**The publisher limits an issuer's grants by choosing which keys to seal.**
+Several issuers can receive authority over the same content. At unlock, the
+client names coordinates, while each issuer independently decides which of
+those keys the reader receives.
 
 ## Key layers
 
-Three layers, three independent dimensions:
-
-Normative wire-format details: [DCA-data-format.md#key-hierarchy](DCA-data-format.md#key-hierarchy).
+The three key layers control content, reuse, and who decides:
 
 | Layer | Dimension | Controls |
 |-------|-----------|----------|
-| **contentKey** | What + when | Per content item, per render |
-| **periodKey** | Caching | Cross-article reuse within time window |
-| **issuerPublicKey** | Who decides | Per-issuer delegation |
+| **`contentKey`** | What | One protected item in one render |
+| **Exact `periodKey`** | Reuse | Matching content across renders for one publisher, access group, and period |
+| **Issuer key pair** | Who decides | Selects the issuer that may decide access; `issuerPublicKey` seals and `issuerPrivateKey` opens |
 
-The issuer composes access from these primitives: which content items to unlock (granularity), contentKey vs periodKey per item (one-time vs cached), different decisions per user/article/request, mixed modes in the same response.
+The public and private keys are two halves of one issuer opening key pair. The
+publisher chooses who may decide by choosing the key pair. The issuer then
+authenticates the reader and applies policy before using its private key to open
+the capabilities it grants. One unlock response can contain item keys, reusable
+period keys, or both.
 
 ### Layers of encapsulation
 
-#### a) contentKey delivery
+#### Direct `contentKey` delivery
 
-Direct: one unlock request per article. Issuer returns the contentKey, client decrypts immediately.
+Direct: the issuer returns a content key for one item in one render. The client
+can open that item immediately.
 
 <pre>
 <b>content</b>
@@ -103,17 +182,22 @@ Direct: one unlock request per article. Issuer returns the contentKey, client de
 </pre>
 
 Sealing (publisher, at render time):
-- Publisher seals content with contentKey
-- Publisher seals contentKey with issuerPublicKey
 
-Unlocking (client, at page load):
-- Client sends sealed keys to issuer
-- Issuer unlocks contentKey with issuerPrivateKey
-- Client decrypts content with contentKey
+- Publisher seals the item with its content key.
+- Publisher seals the content key with `issuerPublicKey`.
 
-#### b) periodKey delivery
+Opening (client, at page load):
 
-Cached: one unlock request per time period. Issuer returns a periodKey, client unlocks contentKey locally, then decrypts. periodKey is cacheable across articles.
+- Client asks the issuer to unlock the sealed content key.
+- After granting access, the issuer opens it with `issuerPrivateKey` and
+  returns the content key.
+- Client opens the item with the content key.
+
+#### Reusable `periodKey` delivery
+
+Reusable: the issuer returns an exact period key. The client uses it to open a
+matching sealed content key, then opens the item. It can store the period key
+and use it again for matching content.
 
 <pre>
 <b>content</b>
@@ -123,82 +207,181 @@ Cached: one unlock request per time period. Issuer returns a periodKey, client u
 </pre>
 
 Sealing (publisher, at render time):
-- Publisher seals content with contentKey
-- Publisher seals contentKey with periodKey
-- Publisher seals periodKey with issuerPublicKey
 
-Unlocking (client, at page load):
-- Client sends sealed keys to issuer
-- Issuer unlocks periodKey with issuerPrivateKey
-- Client unlocks contentKey with periodKey
-- Client decrypts content with contentKey
+- Publisher seals the item with its content key.
+- Publisher seals the content key with an exact period key.
+- Publisher seals period-key capability with `issuerPublicKey`.
+
+Opening (client, at page load):
+
+- Client asks the issuer to unlock the sealed period-key capability.
+- After granting access, the issuer opens it with `issuerPrivateKey` and
+  returns the period key.
+- Client opens the sealed content key with the period key.
+- Client opens the item with the content key.
+
+An optional period-chain capability changes how exact period keys are obtained.
+It does not add another sealing layer or change what an exact period key opens.
 
 ## Threat model
 
-**Design stance:** Raise the bar vs CSS/JS hiding, not bulletproof content protection. Acceptable for paywall use case where goal is "honest users pay" not "impossible to copy".
+**Design stance: Block CSS/JS-only bypasses without claiming copy prevention.**
+DCA suits paywalls intended to require payment, not prevent an authorized
+reader from copying decrypted content. It requires an issuer-approved key
+instead of shipping plaintext behind presentation logic, but it does not stop
+an authorized reader from copying that key or the content it opens. Other
+schemes can make copying harder, but at a steeper price in complexity and often
+server or cloud cost. For example, they may keep control online or tailor
+content delivery to each reader instead of sharing one cached render.
+
+### Choosing the operating boundary
+
+| Approach | Publisher delivery | Issuer contact | Reach after delivery | Main trade-off |
+|----------|--------------------|----------------|----------------------|----------------|
+| DCA, reusable `periodKey` | Shared encrypted content | Once per matching period or cache miss | Matching content in the granted access group and period | Fewer issuer calls, broader reusable key |
+| DCA, direct `contentKey` | Shared encrypted content | Each unresolved render | One item in one render | Narrower key, more issuer traffic and availability dependence |
+| DCA, client role on a server or edge | Shared encrypted source; private authorized response | Each protected request, or a deployment-defined private cache | Only the authorized result released by the gate | Server-side paywall boundary with shared encrypted source and a separate issuer |
+| Server gating without DCA | Usually personalized plaintext | Each protected request | Server decides before each delivery | More origin or edge work and less shared caching |
+| DRM or attestation | Separate product architecture | Product-specific | Product-specific | Greater platform, operational, and user cost |
+
+DCA does not require the client role to run in the browser. A publisher backend,
+edge worker or paywall service can authenticate the reader, perform the DCA
+client work, and return an authorized result without delivering DCA keys to the
+browser. From the reader's side this is a conventional server-side paywall with
+the same pre-delivery access boundary; DCA continues behind it to keep the
+stored render encrypted and cacheable and to let a separate issuer decide
+access. See the
+[server-client deployment patterns](docs/guide--deployment-patterns.md#server-client).
+
+DCA can mix direct and reusable routes across content items. If the issuer must
+be consulted for every render, use direct content keys and avoid reusable
+period grants. Neither browser nor server placement prevents an authorized
+reader from copying content after it is delivered.
 
 ### Trust boundaries
 
 | From | To | Trust given |
 |------|----|-------------|
-| Publisher | Issuer | Sealed keys - issuer can unlock and grant to anyone |
-| Issuer | Client | Unlocked keys - client can decrypt and copy content |
-| Publisher | Client | Encrypted content only - no keys without issuer |
+| Publisher | Issuer | The publisher caps an issuer's grants by what it seals |
+| Issuer | Client | Granted keys can be used and copied; delivery cannot be taken back |
+| Publisher | Client | Encrypted content and protected key material, but no usable keys |
 
-Issuer controls access policy, publisher provides keys. Any issuer you configure can grant access to their entitled content. Once decrypted, content is plaintext - copyable by client.
+The publisher limits what each issuer can possibly grant. The issuer
+authenticates the reader and decides which of those keys to return. Once the
+client opens the content, it has plaintext and can copy it.
 
 ### Protection scope
 
 **What DCA protects against:**
-- Casual bypass (view-source, disable JS, browser extensions)
-- Unauthorized access without valid issuer grant
-- Bulk scraping of plaintext - scraped markup is ciphertext, useless without issuer authorization per article
-- Cross-publisher key substitution (different signing keys per publisher, issuer verifies origin via `resourceJWT`)
-- Content item relabeling in unlock requests - sealed blobs are bound to their content item slot via signed proof (`issuerJWT`)
-- Request replay - not prevented, but mitigated: replay window is bounded by periodKey rotation (e.g., hourly)
+
+- Revealing protected content by viewing source, removing CSS, or disabling
+  presentation code.
+- Opening a copied encrypted page without a matching key. The copied page stays
+  ciphertext and contains no hidden plaintext.
+- **Unauthorized widening through request manipulation or replay:** Changing
+  names or coordinates, relabeling or moving sealed keys, or replaying an
+  exchange cannot expand access beyond what the publisher supplied and the
+  issuer granted.
+- Collecting plaintext at scale without repeatedly passing issuer policy.
+  Authorized readers can still automate what they are granted, and reusable
+  keys deliberately reduce issuer calls.
+
+These protections come from the signed publisher context, BIND on sealed keys,
+registration-scoped opening keys, and the issuer's own authentication and
+policy. See the
+[full threat model](docs/spec--security-model.md) for the exact boundaries and
+failure cases.
 
 **What DCA does NOT protect against (not DRM):**
-- Authorized user copying decrypted content
-- Key sharing between users and key extraction from compromised clients. Can be mitigated - issuers can deliver keys as non-extractable WebCrypto keys (see [client-bound transport](DCA-issuer-reference.md#client-bound-transport-security-properties)).
-- Screen capture, copy/paste of rendered content
-- JS hooks reading DOM post-decrypt - plaintext must reach the DOM to render
+
+- An authorized reader copying or sharing opened content.
+- A reader sharing returned keys or access. Client-bound delivery can make
+  passive response copying harder by delivering a non-extractable browser key.
+  That prevents straightforward key export, but a reader-controlled browser
+  can still use or relay the capability.
+- Screen capture or copy and paste of rendered content.
+- Scripts or extensions reading plaintext after opening. Plaintext must reach
+  the application or DOM to be used.
 
 ### Asymmetric trust model
 
-Publisher holds only issuer public keys. Issuer holds the private key. This means:
+The publisher uses an issuer's public key. The matching private key stays with
+the issuer. This separates their key custody, but each party still has its own
+trusted material:
 
-- **Publisher breach:** Publisher already has plaintext content, and decrypted content already exists in browser caches and client DOMs. `periodSecret` additionally enables decryption of collected encrypted markup - incremental exposure. No forward secrecy: `periodSecret` is long-lived, compromise enables retrospective decryption of all previously collected encrypted content.
-  - **Blast radius:** Issuer credentials unaffected. Other issuers continue to operate normally.
-  - **Mitigation:** Rotate `periodSecret`, re-seal future content, purge cached sealed markup rendered with the compromised secret. Past encrypted markup is exposed, but the publisher had the plaintext anyway.
-- **Issuer breach:** Attacker gets that issuer's private key and can unlock content sealed for that issuer.
-  - **Blast radius:** Only content items granted to that issuer are affected. Other issuers are independent. Previously sealed content remains decryptable until it expires from caches. Note: periodKeys are publisher-derived per `contentName` - if multiple issuers are granted the same content items, the underlying key material is identical, but only the compromised issuer's transport encryption is broken.
-  - **Mitigation:** Publisher removes the issuer's public key, re-seals with remaining issuers.
-- **No shared secrets:** DCA isolates private keys per issuer. Designs that share a secret between publisher and issuer double the attack surface - breach of either side exposes all content. DCA's asymmetric transport means breach of one side does not compromise the other.
+- **Publisher breach:** The publisher already has the plaintext. Theft of its
+  signing key can forge publisher information, but does not reveal an issuer's
+  private key or bypass issuer reader policy by itself. Theft of exact period
+  keys exposes their matching content; theft of an optional chain
+  `keyDerivationSecret` has the wider reach defined by that chain generation.
+  Issuers retire compromised publisher signing keys, and publishers rotate
+  affected key material for future renders.
+- **Issuer breach:** Theft of an issuer private key exposes publisher material
+  sealed under that opening key. Independently keyed issuers remain separate.
+  Publishers that share one issuer opening key set are mutually trusted at
+  that boundary. Rotation protects future material but cannot retract keys or
+  plaintext already delivered.
+- **No publisher-issuer shared secret:** Publisher-to-issuer sealing uses a
+  public-key pair instead of placing the same secret at both the publisher and
+  issuer. This keeps one issuer's private material away from the publisher, and
+  compromise of one issuer key pair does not reveal another independently
+  keyed issuer's private material.
 
 ## Operational considerations
 
-**Search indexing (Googlebot etc.):** The publisher system already renders two modes: open (full content) and protected (reduced/paywalled content). DCA changes the protected mode - encrypted content replaces reduced content. The open mode stays as-is. Infrastructure controls which mode to serve via a request header, caching both variants on the same URL (extra cache key on that header). Bot detection and IP verification at the infrastructure layer routes verified bots to the open variant. Details are publisher-implementation-specific (see publisher reference).
+**Search indexing:** A publisher that wants search crawlers to index protected
+content can keep an open variant for verified crawlers and a DCA-protected
+variant for readers. Both variants can use the same resource URL when an
+explicit cache key keeps them separate. Trusted
+infrastructure verifies crawlers and selects the open variant. The routing and
+verification details are publisher deployment concerns, not DCA protocol
+behavior.
 
-**Issuer failover:** If an issuer is unavailable, the publisher system can disable encryption for affected content (self-service via editorial/admin). Content falls back to unencrypted delivery until the issuer recovers.
+**Issuer failover and load shedding:** A client can try another issuer route
+offered for the same content. An issuer can also activate a deliberately weaker
+emergency policy to keep content available when its issuer service is
+overloaded or cannot reach its usual entitlement system. Direct content keys
+keep the content encrypted and limit each grant to one item and render. With
+direct response delivery, an answer can be reused only inside a safe
+authorization cache partition.
+Client-bound answers are specific to one client capability and are not shared
+cache entries. Reusable period keys reduce later issuer calls further, but
+grant broader reach.
 
-**JS-disabled users:** DCA content is ciphertext in markup - disabling JavaScript shows nothing, not the plaintext. This is a fundamental improvement over CSS/JS-based paywalls where content is in the DOM.
+Publishing an unencrypted fallback is a separate, explicit publisher decision,
+not an automatic DCA failure mode. A publisher may expose that last-resort
+choice through an editorial or administrative control so an operator can weigh
+availability, access precision, server cost, and content protection during an
+outage.
+
+**JavaScript-disabled users:** Protected items remain ciphertext and cannot be
+opened. The page may still show unprotected content or a publisher-provided
+fallback message. Unlike a soft paywall, the protected plaintext is not already
+present in the page for a CSS or DOM change to reveal.
 
 ## Documents
 
 | Document | Scope |
 |----------|-------|
-| [DCA-data-format.md](DCA-data-format.md) | **The wire format.** Publisher → client markup structure, dca-data JSON, sealed content. |
-| [DCA-issuer-reference.md](DCA-issuer-reference.md) | **Implementation guide.** Server-side (verify, unseal, access decisions) and browser-side (unlock, decrypt, cache, placement). Not normative. |
+| [Design overview](docs/guide---overview.md) | Deeper explanation of how DCA's parts fit together |
+| [Deployment patterns](docs/guide--deployment-patterns.md) | Browser, server, edge, and hybrid ways to place the DCA client role |
+| [Browser content presentation](docs/guide--browser-content-presentation.md) | Illustrative, non-normative handoff from opened bytes to publisher-owned placement and activation code |
+| [Exact-period integration](docs/guide--integration--exact-period.md) | Publisher, issuer, and client path with runnable reference evidence |
+| [Specification overview](docs/spec---overview.md) | Normative document map, conformance boundaries, and reading order |
+| [Profiles](docs/spec--profiles.md) | The `dca-v1-direct-https` baseline every implementation starts from, and the optional profiles |
+| [Threat model](docs/spec--security-model.md) | Security promises, assumptions, limitations, and operating choices |
+| [Data-format example](docs/design--data-format--example.md) | Worked publisher delivery and wire example |
+| [JavaScript reference](js/README.md) | Reference implementation, runnable demonstration, tests, experiments, and the public check command |
+| [Verification](verification/README.md) | Cross-runtime conformance lanes for six runtimes, recorded wire vectors, and shared fixtures |
 
 ## Status
 
-Draft - all documents are under active development. These documents are extracted from a larger internal design and research effort. Additional material will be published as it stabilizes.
+DCA is a public working draft and may change before v1. Current draft
+priorities are listed in
+[roadmap--draft-period.md](roadmap--draft-period.md).
+
+Developed at Labrador CMS AS. Specification editor: Geir Bostad.
 
 Licensed under the [Apache License 2.0](https://www.apache.org/licenses/LICENSE-2.0).
 
 Copyright 2026 Labrador CMS AS.
-
-## Planned
-
-- **Test vectors** - test keys, sealed blobs, dca-data JSON, and expected outputs at each step. Given these inputs, verify your implementation produces the correct results (ECDH unseal, proof hash, content decryption).
-- **DCA-publisher-reference.md** - publisher-side implementation guide: key derivation, sealing, AAD format, markup generation, issuer onboarding.

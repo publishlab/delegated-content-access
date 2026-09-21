@@ -1,0 +1,61 @@
+{
+  "name": "reject-duplicate-member-name",
+  "vectorFormat": "2",
+  "derivedFrom": "seal-ecdh",
+  "description": "An unlock request whose sealed.contentKeys carries the member name \"bodytext\" TWICE. THE SHAPE, which is a paywall-bypass shape. The first occurrence is the blob the publisher sealed under bodytext. The second is the blob sealed under locked-data, which this request never mentions by name. The client asks for bodytext and nothing else, so a policy keyed by contentName - which is where DCA puts one - sees a request for bodytext. IT ONLY EXISTS IN THE STRING. JSON.parse and PHP json_decode both keep the last member and hand back an object with one \"bodytext\", so a request object cannot express this and a replay that re-serializes rawBody before posting it has already destroyed the vector. Post the string. WHAT THE BINDING DOES TO IT. If parsing accepts the body, the lexical-last member is unsealed with \"dca-bind-v1|c|\" + renderId + \"|bodytext\" as additionalData, because \"bodytext\" is the name it was read under. Last wins, which is what every parser in reach does: the locked-data blob is at bodytext, it was not sealed there, and it does not open. The key it would otherwise have yielded is 0-xxOcrwjcmg1LmyAVYZwg - the contentKey for locked-data, handed back under the name the caller was entitled to. Keeping the first occurrence would instead open the bodytext blob, but that is not an allowed parser reading. The protocol permits exactly two outcomes: refuse duplicate members, or keep the lexical-last member and produce the recorded per-coordinate refusal. IT IS STILL WORTH A PUBLISHER-SIDE LINT. A duplicate member in rendered output is a publisher bug wherever it lands. js/v1/tools/duplicateMembers.js is that lint. REPLAY. Post `rawBody` VERBATIM - the string as it sits in this file, never a re-serialization of it - to the unlock endpoint, with `issuer` as the key material the issuer holds for its own name and keyId, and `publisher.signingKeys` as the public verification halves, read straight from this file rather than resolved by a deployment lookup. A pass is: expected.code where there is one; key material back for exactly the coordinates in expected.keys and no others; and an error back for exactly the coordinates in expected.errors, under the codes recorded there. No publisher private key is in this file, on purpose: an issuer never holds one, so everything a reject vector asks for is checkable with what a real issuer has. HOW FAR THE REFUSAL REACHES IS PART OF WHAT IS PINNED, and expected.privateKeyReached says which side of the line this body lands on. A request that fails integrity - a signature that does not verify, a signed resource with no renderId to bind to - has asked nothing that could be answered, so it is refused whole and before the key store is consulted at all. A blob presented at a coordinate it was not sealed at is one bad blob in an ordinary request: the only way to find out is to try it, so the key store is reached, the blob comes back as an error, and everything else the request carried is answered beside it. The untouched coordinates were never the attack, and a page has to keep working around one bad blob, so they are answered. Everything in the body but the attack is the render this vector was cut from - the envelope, the periodKeys section and the untouched blobs are what the publisher emitted. An unchanged regeneration retains the valid resourceJWT signature segment inside rawBody, so the body is byte-stable with seal-ecdh.json. A fresh seal still draws a new k, which is why a replayer verifies the segment rather than comparing it. The token is the one in the base vector from the same run, byte for byte, except in reject-no-renderid, reject-renderid-noncanonical and reject-renderid-wrong-width, whose envelopes are second tokens signed over resources with the renderId removed, given a noncanonical spelling, or resized, which is each vector's whole subject; in reject-forged-resourcejwt, whose signature segment was drawn by a key the publisher does not hold; in reject-tampered-resourcejwt, which carries the seal-ecdh token's own signature segment under a payload edited after signing; and in the two reject-alg-substituted arms, which carry that token's payload segment under a header rewritten to name another algorithm, with a third segment that is empty or a MAC - neither of which moves between runs.",
+  "issuer": {
+    "issuerName": "paywall_subscription_service",
+    "keyId": "2025-10",
+    "algorithm": "ECDH-P256",
+    "publicKeyJwk": {
+      "kty": "EC",
+      "crv": "P-256",
+      "x": "KnsL031lVTbNxwtMq3OQmFq-fyPVh3k1__Adl4ieLXw",
+      "y": "-aNkTV8wd6O2rTWc2jkpJgez4Cuvas4J8_Styi-cdsE"
+    },
+    "privateKeyJwk": {
+      "kty": "EC",
+      "crv": "P-256",
+      "x": "KnsL031lVTbNxwtMq3OQmFq-fyPVh3k1__Adl4ieLXw",
+      "y": "-aNkTV8wd6O2rTWc2jkpJgez4Cuvas4J8_Styi-cdsE",
+      "d": "iWEhz6AHq-n4l_YzhTZcyQH7O9B1A1AKl4maOJh3z5g"
+    }
+  },
+  "publisher": {
+    "origin": "https://www.news-site.example",
+    "signingKeys": [
+      {
+        "kid": "sign-2025-10",
+        "publicKeyJwk": {
+          "kty": "EC",
+          "crv": "P-256",
+          "x": "wjapTnuqn7FYYz7TbSiG283dToV0I1zpHoiVpbYGUYU",
+          "y": "9vgUr7XBOhco_Pf-7CczUPW8tmscQKhkiK0zybXWVCI"
+        }
+      }
+    ]
+  },
+  "rawBody": "{\n  \"version\": \"1\",\n  \"issuerName\": \"paywall_subscription_service\",\n  \"resourceJWT\": \"eyJhbGciOiJFUzI1NiIsInR5cCI6IkpXVCIsImtpZCI6InNpZ24tMjAyNS0xMCJ9.eyJyZW5kZXJJZCI6InVVVDU3Nk8zNEJvR0twZ1hwZE11Y3ciLCJvcmlnaW4iOiJodHRwczovL3d3dy5uZXdzLXNpdGUuZXhhbXBsZSIsImlzc3VlZEF0IjoiMjAyNS0xMC0yM1QxNDowMDowMC4wMDBaIiwicmVzb3VyY2VJZCI6IjEyMzQ1NiIsImRhdGEiOnsiZGF0ZS5wdWJsaXNoZWQiOiIyMDI1LTEwLTIwVDEwOjMwOjAwWiIsInNlY3Rpb24iOiJwb2xpdGljcyIsInRhZ3MiOlsiYnJlYWtpbmciLCJlbGVjdGlvbnMiXX19.J2wve9h-80DsFuL9VHtY8X5jYpTDierdPyigKhQFaocp-EnSJlRNTPs5yNmSVF_HrinwqfN84rzalG5l0osBFQ\",\n  \"keyId\": \"2025-10\",\n  \"sealed\": {\n    \"contentKeys\": {\n      \"bodytext\": \"BP_rrpHAnCFcf8NeehDgUG3w9ktUCbb_1LNPIX5pT8u7s5xZErWJNnNAJfmyMYNXO4LYDDMaasFJMMGHk63Fqhosaqe6Y6UyHEziB6sXe3DGjrotDFBb6mExgzszE4KG62Spq-0L-7Zv57MhJA\",\n      \"bodytext\": \"BFO_DIR8YvBF7KDC6csLOOywgRvvgkrXGZhgvX-4UEbpjbcExTFUDum7lWRXU21llsS3dQpzLxiJJptmVbY-4g8qfRNQEv0AcNYEiG1iIJU7zMr1FGdS7UvuXolBcdl7j3-D2tYgk9WiwmXMXA\"\n    },\n    \"periodKeys\": {\n      \"premium\": {\n        \"251023T14\": \"BINGkYo6rqhgWBVVdJiM0QiLh0sl7PRADoj1sUywh1VY30j8-6vfS2mXZ0KkOXUnF29fVZLF1YKUUPyeUhpwI459IIsktg7TzyWqZE8sG6I6_24awZIo1HqTXHU67JKWK7lfv-44qY-G6Say0w\",\n        \"251023T15\": \"BAWaMLaWFTKu1iD55oppbs7SCejlyxIOREMmS7otAOx3ZIAWv7cpyI0pH_U12MO4MTIUaBhuLkF0EVTFuneETtqTGmtnzfyKr7dq6DcaqE1sLpwp6Dg05xXHVUlMbeHDZ-YBka4WFtS_e7JlNg\"\n      }\n    }\n  }\n}",
+  "expected": {
+    "code": null,
+    "keys": {
+      "contentKeys": [],
+      "periodKeys": {
+        "premium": [
+          "251023T14",
+          "251023T15"
+        ]
+      }
+    },
+    "errors": {
+      "bodytext": "unseal_failed"
+    },
+    "privateKeyReached": true,
+    "alsoConformant": [
+      {
+        "code": "invalid_json",
+        "when": "a parser that refuses a body carrying the same member name twice, before any DCA check runs"
+      }
+    ]
+  }
+}

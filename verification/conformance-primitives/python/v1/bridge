@@ -1,0 +1,67 @@
+#!/usr/bin/env bash
+# The program the harness starts for the Python lane: this resolves an
+# interpreter, then hands the process to bridge.py.
+#
+# This lane needs a wrapper. The harness's bridge table names one command per
+# language, and this lane's interpreter lives off PATH: a pinned CPython under
+# the project cache, at a path only install-toolchain can answer, keyed by
+# version and platform. The table names this file, and the one question of
+# where the interpreter is stays with the lane that owns it, the same way the
+# lane check asks it.
+#
+# `python3` on PATH is not that interpreter. The system one here is 3.11 with no
+# cryptography, so a bridge started through it would report a missing AES
+# library rather than an observation.
+#
+# The Python wrapper has no code for the protocol, the operations or what an
+# observation looks like. It reads nothing on stdin and writes nothing on
+# stdout: `exec` replaces this shell with the interpreter, so the batch flows
+# between the harness and bridge.py with nothing in between to buffer, reorder
+# or add a line to it.
+#
+# The preparation step installs the toolchain. Every installer call here is a
+# --print query, which installs nothing. The harness runs install-toolchain
+# before the batch and outside its clock, so by the time this runs the
+# interpreter is either there or the run already stopped.
+set -euo pipefail
+
+HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+LANE="$(cd "$HERE/.." && pwd)"
+INSTALLER="$LANE/install-toolchain"
+
+if [ ! -x "$INSTALLER" ]; then
+  echo "bridge: no installer at $INSTALLER, so no interpreter could be resolved." >&2
+  exit 1
+fi
+
+if ! PYTHON="$("$INSTALLER" --print-bin)" || [ ! -x "$PYTHON" ]; then
+  echo "bridge: no Python interpreter for this lane; run $INSTALLER first." >&2
+  exit 1
+fi
+
+# The wheel directory the installer put cryptography in, and nothing else. This
+# bridge imports the standard library and cryptography, so the lane's own v1/
+# stays off PYTHONPATH: `import primitives` still resolves because Python puts a
+# directly-run script's own directory on sys.path, and nothing wider is added
+# for a module this bridge does not import to be reached by accident.
+#
+# An empty answer is valid. A --base run drives an interpreter that already
+# imports cryptography, and forcing this lane's pin-keyed site dir onto a
+# different interpreter makes a cp314 extension module fail to load.
+SITE="$("$INSTALLER" --print-site)"
+if [ -n "$SITE" ]; then
+  export PYTHONPATH="$SITE"
+else
+  unset PYTHONPATH
+fi
+
+# CPython writes __pycache__ beside every source unless it is told where to put
+# it, and a checkout never carries build output.
+if CACHE="$("$INSTALLER" --print-cache)"; then
+  export PYTHONPYCACHEPREFIX="$CACHE/build/v1"
+fi
+export PYTHONNOUSERSITE=1
+
+# `-s` keeps the user site-packages directory off sys.path, so a stray
+# cryptography in ~/.local cannot be what answered.
+exec "$PYTHON" -s "$HERE/bridge.py" "$@"

@@ -1,0 +1,47 @@
+#!/usr/bin/env bash
+# The launcher for the Go probe: it resolves the pinned toolchain the public Go
+# lane installs, compiles probe.go into that lane's cache, and runs it.
+#
+# The toolchain is asked for, never guessed and never downloaded here.
+# ../../../conformance-primitives/go/install-toolchain manages the pin and the cache,
+# and both are read off it through its --print queries, which install nothing.
+# It is called by relative path from this directory, and it answers from any
+# working directory because it reads its own location.
+#
+# GOTOOLCHAIN=local so a `go` line in a go.mod cannot send this build off to
+# fetch a different Go than the one the installer verified. GOCACHE and GOPATH
+# point into the lane's cache, and the binary lands there too, so the checkout
+# carries no build output.
+set -euo pipefail
+
+HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+INSTALLER="$HERE/../../../conformance-primitives/go/install-toolchain"
+
+if [ ! -x "$INSTALLER" ]; then
+  echo "probe: no installer at $INSTALLER, so no toolchain could be resolved." >&2
+  exit 2
+fi
+
+BIN="$("$INSTALLER" --print-bin)"
+CACHE="$("$INSTALLER" --print-cache)"
+if [ ! -x "$BIN" ]; then
+  echo "probe: no Go toolchain at $BIN; run $INSTALLER once on a machine with network." >&2
+  exit 2
+fi
+
+# One source tree, one build directory: the key is the absolute path of this
+# directory, so two checkouts never read back each other's binary.
+KEY="$(printf '%s' "$HERE" | sha256sum | cut -c1-16)"
+BUILD="$CACHE/build/ecdh-envelope-size/$KEY"
+mkdir -p "$BUILD"
+
+export GOTOOLCHAIN=local
+export GOCACHE="$CACHE/build" GOPATH="$CACHE/gopath"
+
+if ! (cd "$HERE" && "$BIN" build -o "$BUILD/probe" .) >&2; then
+  echo "probe: the Go probe did not compile, so nothing was observed." >&2
+  exit 2
+fi
+
+export DCA_EXPERIMENT_DIR="$(cd "$HERE/.." && pwd)"
+exec "$BUILD/probe" "$@"

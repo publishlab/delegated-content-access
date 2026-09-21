@@ -1,0 +1,222 @@
+#!/bin/sh
+# The one command a maintainer runs to prove this framework's own failure model
+# still holds: that the driver steps fold the way the exit codes are defined,
+# and that the aggregator refuses every record that would turn a table into a
+# statement nobody made.
+#
+#   ./harness.test
+#
+# Fail fast, by stage. A stage that fails stops the run, because the stages
+# below it read the same code and would report the same one cause again under
+# new names.
+#
+# The path is a variable rather than a literal so the aggregator fixtures can
+# be pointed at a broken copy of aggregate-results, which proves those fixtures
+# able to fail.
+set -u
+
+here=$(CDPATH= cd -- "$(dirname "$0")" && pwd)
+aggregator=${DCA_AGGREGATOR:-$here/aggregate-results}
+
+scratch=$(mktemp -d) || exit 2
+trap 'rm -rf "$scratch"' EXIT INT TERM
+
+stages=0
+banner() {
+    stages=$((stages + 1))
+    echo ""
+    echo "== stage $stages: $1 =="
+}
+
+fail() {
+    echo "harness.test: $1" >&2
+    exit 1
+}
+
+# ---- stage 1: the sibling suites ---------------------------------------------
+
+# This file is the entry point, so the suites beside it run from here too: a
+# maintainer runs one command instead of remembering each sibling suite's own.
+run_suite() {
+    suite_status=0
+    "$1" "$2" > "$scratch/suite.out" 2>&1 || suite_status=$?
+    if [ "$suite_status" -ne 0 ]; then
+        cat "$scratch/suite.out" >&2
+        fail "${2##*/} exited $suite_status"
+    fi
+    echo "  ${2##*/}: exit 0"
+}
+
+stage_sibling_suites() {
+    banner "the sibling suites"
+    # Only conformance's own suites. The vector tests and JavaScript package
+    # gate have their own entry points and do not belong in this aggregator.
+    run_suite bash "$here/driver-steps.test"
+    run_suite sh "$here/../check.test"
+}
+
+# ---- stage 2: the aggregator --------------------------------------------------
+
+run_aggregate() {
+    aggregate_label=$1
+    shift
+    aggregate_status=0
+    "$aggregator" "$@" > "$scratch/$aggregate_label.out" 2> "$scratch/$aggregate_label.err" \
+        || aggregate_status=$?
+}
+
+expect_aggregate_exit() {
+    if [ "$aggregate_status" -ne "$2" ]; then
+        cat "$scratch/$1.out" "$scratch/$1.err" >&2
+        fail "aggregate $1 exited $aggregate_status, not $2"
+    fi
+    echo "  $1: exit $aggregate_status"
+}
+
+expect_aggregate_said() {
+    if ! grep -qF "$2" "$scratch/$1.out" "$scratch/$1.err"; then
+        cat "$scratch/$1.out" "$scratch/$1.err" >&2
+        fail "aggregate $1 did not say: $2"
+    fi
+}
+
+stage_aggregator() {
+    banner "the aggregator over lane records"
+
+    # Two lanes, the shape every lane check writes: lane=, one set= row per
+    # corpus set, exit=. Every record below that is meant to compare cleanly
+    # against another carries this same full row set, because the aggregator
+    # refuses two records that cover different rows: a record with fewer rows is
+    # reserved for the dedicated mismatch case further down.
+    cat > "$scratch/php-held.record" <<'RECORD'
+lane=php
+set=encoding status=held
+set=aes-gcm-128 status=held
+set=hkdf status=held
+set=aes-gcm-256 status=held
+set=ecdh status=unsupported
+set=rsa-oaep status=held
+exit=0
+RECORD
+    cat > "$scratch/go-held.record" <<'RECORD'
+lane=go
+set=encoding status=held
+set=aes-gcm-128 status=held
+set=hkdf status=held
+set=aes-gcm-256 status=held
+set=ecdh status=unsupported
+set=rsa-oaep status=held
+exit=0
+RECORD
+    run_aggregate two-lanes "$scratch/php-held.record" "$scratch/go-held.record"
+    expect_aggregate_exit two-lanes 0
+    expect_aggregate_said two-lanes 'set encoding: php held, go held'
+    expect_aggregate_said two-lanes 'set ecdh: php unsupported, go unsupported'
+    expect_aggregate_said two-lanes 'RESULT: 0. Every answered set held; these lanes explicitly do not support one or more corpus sets: php go.'
+
+    # A record with no lane= line says less than a record claims to, and the
+    # implementation it would have named cannot be compared with any other.
+    grep -v '^lane=' "$scratch/go-held.record" > "$scratch/no-lane.record" || exit 2
+    run_aggregate no-lane "$scratch/no-lane.record"
+    expect_aggregate_exit no-lane 2
+    expect_aggregate_said no-lane 'no lane= line'
+
+    # The refold. Both the rows and the exit line are written down only so
+    # they can be refolded against each other. No cross-lane statement may rest
+    # on a record whose exit line disagrees with its own rows, whichever half is wrong. Run alone,
+    # so this never also trips the row-set comparison below.
+    cat > "$scratch/self-contradicting.record" <<'RECORD'
+lane=jvm
+set=encoding status=incomplete
+set=hkdf status=held
+exit=0
+RECORD
+    run_aggregate self-contradicting "$scratch/self-contradicting.record"
+    expect_aggregate_exit self-contradicting 2
+    expect_aggregate_said self-contradicting 'refold'
+
+    # A record with no set= row answers nothing about any check, so every record
+    # has to carry at least one. Run alone, for the same reason as self-contradicting
+    # above.
+    cat > "$scratch/empty.record" <<'RECORD'
+lane=python
+exit=0
+RECORD
+    run_aggregate empty-record "$scratch/empty.record"
+    expect_aggregate_exit empty-record 2
+    expect_aggregate_said empty-record 'no set= row'
+
+    # A record whose rows a lane could not even name makes no claim about the
+    # corpus, and an unsupported row is never a hold: a lane reporting every set
+    # unsupported verified nothing about bytes, and the aggregator still reads
+    # its own exit line, which the lane wrote from the same rows.
+    cat > "$scratch/unknown-status.record" <<'RECORD'
+lane=python
+set=encoding status=skipped
+exit=0
+RECORD
+    run_aggregate unknown-status "$scratch/unknown-status.record"
+    expect_aggregate_exit unknown-status 2
+    expect_aggregate_said unknown-status 'not a status word a corpus set may answer'
+
+    # Two records covering a different set of rows answer different
+    # questions, most likely because one is a stale record written before a set was added to
+    # the corpus, and the aggregator refuses the pair rather than printing n/a
+    # for the rows the shorter one never answered.
+    cat > "$scratch/stale.record" <<'RECORD'
+lane=python
+set=encoding status=held
+set=aes-gcm-128 status=held
+set=hkdf status=held
+exit=0
+RECORD
+    run_aggregate different-rows "$scratch/php-held.record" "$scratch/stale.record"
+    expect_aggregate_exit different-rows 2
+    expect_aggregate_said different-rows 'covers a different claim universe'
+    expect_aggregate_said different-rows 'only there: aes-gcm-256 ecdh rsa-oaep'
+
+    # One lane disagreed and no lane was incomplete; only this shape
+    # folds to 1 across lanes.
+    cat > "$scratch/go-disagreed.record" <<'RECORD'
+lane=go
+set=encoding status=disagreed
+set=aes-gcm-128 status=held
+set=hkdf status=held
+set=aes-gcm-256 status=held
+set=ecdh status=unsupported
+set=rsa-oaep status=held
+exit=1
+RECORD
+    run_aggregate one-disagreed "$scratch/php-held.record" "$scratch/go-disagreed.record"
+    expect_aggregate_exit one-disagreed 1
+    expect_aggregate_said one-disagreed 'RESULT: 1.'
+
+    # Incomplete wins over disagreement across lanes for the reason it wins
+    # inside one: a lane that verified less than it set out to did not finish,
+    # and reporting the pair as a disagreement would claim it did.
+    cat > "$scratch/jvm-incomplete.record" <<'RECORD'
+lane=jvm
+set=encoding status=incomplete
+set=aes-gcm-128 status=held
+set=hkdf status=held
+set=aes-gcm-256 status=held
+set=ecdh status=unsupported
+set=rsa-oaep status=held
+exit=2
+RECORD
+    run_aggregate incomplete-wins "$scratch/go-disagreed.record" "$scratch/jvm-incomplete.record"
+    expect_aggregate_exit incomplete-wins 2
+    expect_aggregate_said incomplete-wins 'RESULT: 2.'
+
+    # One lane makes one claim. Two records under one lane name give two answers
+    # for one implementation, and the table would report whichever came last.
+    run_aggregate duplicate-lane "$scratch/php-held.record" "$scratch/php-held.record"
+    expect_aggregate_exit duplicate-lane 2
+    expect_aggregate_said duplicate-lane 'a second record claims lane php'
+}
+
+stage_sibling_suites
+stage_aggregator
+
+echo ""
+printf 'harness fixtures: PASS (%s stages)\n' "$stages"

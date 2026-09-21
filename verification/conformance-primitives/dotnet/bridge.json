@@ -1,0 +1,9 @@
+{
+    "script": "dotnet/v1/bridge/Bridge.cs",
+    "command": "dotnet/v1/bridge/start",
+    "prepare": { "command": "dotnet/v1/bridge/prepare" },
+    "operations": [
+        "decode-base64url", "hkdf-sha256", "open-aes-gcm", "seal-aes-gcm", "ecdh-p256", "p256-point",
+        "open-rsa-oaep"
+    ]
+}

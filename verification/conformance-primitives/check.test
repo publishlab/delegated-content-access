@@ -1,0 +1,63 @@
+#!/bin/sh
+# The top-level check must take its final wording from lane records, not from
+# their exit-zero stdout: a corpus set a lane does not support is an exit-zero
+# lane result and not a universal hold.
+set -u
+
+here=$(CDPATH= cd -- "$(dirname "$0")" && pwd)
+scratch=$(mktemp -d) || exit 2
+trap 'rm -rf "$scratch"' EXIT INT TERM
+
+fail() {
+    echo "conformance-primitives/check.test: $1" >&2
+    exit 1
+}
+
+mkdir -p "$scratch/_shared" "$scratch/node" "$scratch/php" || exit 2
+cp "$here/check" "$scratch/check" || exit 2
+cp "$here/_shared/aggregate-results" "$scratch/_shared/aggregate-results" || exit 2
+chmod +x "$scratch/check" "$scratch/_shared/aggregate-results" || exit 2
+
+write_lane() {
+    lane=$1
+    ecdh_status=$2
+    record_lane=${3:-$lane}
+    {
+        printf '%s\n' '#!/bin/sh'
+        printf '%s\n' '[ "$1" = --record ] && [ "$#" -eq 2 ] || exit 2'
+        printf '%s\n' "printf '%s\\n' 'lane=$record_lane' 'set=encoding status=held' 'set=ecdh status=$ecdh_status' 'exit=0' > \"\$2\""
+    } > "$scratch/$lane/check"
+    chmod +x "$scratch/$lane/check" || exit 2
+}
+
+write_lane node held
+write_lane php unsupported
+
+if ! "$scratch/check" > "$scratch/out" 2> "$scratch/err"; then
+    cat "$scratch/out" "$scratch/err" >&2
+    fail "an explicit unsupported row should retain the settled zero exit"
+fi
+grep -qF 'set ecdh: node held, php unsupported' "$scratch/out" \
+    || fail "the aggregate did not name the unsupported set and lane"
+grep -qF 'Every answered set held; these lanes explicitly do not support one or more corpus sets: php.' "$scratch/out" \
+    || fail "the final result did not distinguish unsupported from held"
+if grep -qF 'every conformance lane held' "$scratch/out"; then
+    fail "the old universal-hold claim survived an unsupported record"
+fi
+
+# The top-level check identifies a lane by the child path it invoked. A record that claims a
+# different lane must not be attributed to whichever runtime name it carries;
+# a metacharacter in a discovered directory name is literal, not a regex.
+rm -rf "$scratch/php"
+mkdir -p "$scratch/p.hp"
+write_lane p.hp unsupported pxhp
+if "$scratch/check" > "$scratch/mismatched.out" 2> "$scratch/mismatched.err"; then
+    fail "a child writing another lane identity should fail closed"
+fi
+grep -qF 'p.hp/check wrote a record without exactly one lane=p.hp identity' "$scratch/mismatched.out" \
+    || fail "the mismatched child record was not attributed and refused"
+if grep -qF 'CROSS-LANE RECORDS' "$scratch/mismatched.out"; then
+    fail "a mismatched identity reached cross-lane aggregation"
+fi
+
+printf 'conformance top-level record aggregation: PASS\n'

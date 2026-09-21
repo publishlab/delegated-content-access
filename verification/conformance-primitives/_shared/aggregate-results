@@ -1,0 +1,340 @@
+#!/bin/sh
+# The cross-lane statement, computed from the records the lanes wrote.
+#
+#   ./aggregate-results <record-file>...
+#
+# Each argument is one lane record, the key=value file conformance-primitives/_shared/driver-steps.sh
+# writes when a check is run with --record. The header names the lane, then one
+# row per corpus set, then the exit code.
+#
+# Every lane used to print its own prose and exit on its own, and the sentence
+# that the lanes agree was assembled by a human reading five transcripts side by
+# side. A reader comparing five walls of text misses a lane that answered fewer
+# sets than another, a lane that exited 0 over a set it never answered, and a
+# lane whose summary and exit code say different things, and none of those is
+# visible in any one transcript. This reads the records instead and refolds
+# them: the claim that the lanes agree is computed here, and never scraped from
+# text.
+#
+# It refuses before it reports. A record that is not a record, a record whose
+# exit line disagrees with its own rows, two records claiming one lane, a
+# record covering a different set of rows than the others, and a record that
+# answers nothing at all are all refusals rather than rows in a table, because
+# each of them turns the table into a statement nobody made. Every problem is
+# named before the refusal, so one run tells the operator everything that has
+# to be fixed rather than the first thing.
+#
+# Exit codes, the three the README names, folded across lanes the way
+# driver-steps.sh folds across sets:
+#
+#   0  every lane's record holds
+#   1  no lane was incomplete and at least one lane answered something that
+#      disagreed
+#   2  at least one lane verified less than it set out to, or any refusal above
+#
+# 2 wins over 1 here for the reason it wins inside a lane: a run that verified
+# less than it set out to is not a completed result, and reporting it as a
+# disagreement would claim it was.
+set -u
+
+usage() {
+    echo "usage: $0 <record-file>..." >&2
+    echo "Each file is one lane record, written by a lane check run with --record." >&2
+}
+
+if [ $# -eq 0 ]; then
+    echo "no record files given, and a cross-lane statement needs at least one lane's record." >&2
+    usage
+    exit 2
+fi
+
+scratch=$(mktemp -d) || exit 2
+trap 'rm -rf "$scratch"' EXIT INT TERM
+
+# Every problem is reported as it is found and the refusal comes at the end, so
+# an operator fixing records sees the whole list rather than one line per run.
+problems=0
+refuse() {
+    echo "$1" >&2
+    problems=$((problems + 1))
+}
+
+# ---- reading one record ------------------------------------------------------
+
+# One record, read into files under the scratch dir: $1 is the index this run
+# calls it by and $2 is the path. Sets rec_ok to 1 when the record is usable in
+# the cross-record checks below and to 0 when it is not.
+read_record() {
+    rec_index=$1
+    rec_file=$2
+    rec_ok=1
+
+    if [ ! -f "$rec_file" ] || [ ! -r "$rec_file" ]; then
+        refuse "$rec_file: not a readable file, so this lane's record cannot be read."
+        rec_ok=0
+        return 0
+    fi
+
+    rec_lane=""
+    rec_exit=""
+    rec_lane_seen=0
+    rec_exit_seen=0
+    # One set= row per named corpus set, each held, disagreed, incomplete or
+    # unsupported. rec_set_seen marks whether this record carries a row at
+    # all: a record with none answers nothing about any check.
+    rec_set_seen=0
+    rec_set_names=""
+    rec_set_held=0
+    rec_set_disagreed=0
+    rec_set_incomplete=0
+    rec_set_unsupported=0
+    : > "$scratch/$rec_index.rows"
+
+    while IFS= read -r rec_line || [ -n "$rec_line" ]; do
+        case "$rec_line" in
+            lane=*) rec_lane_seen=$((rec_lane_seen + 1)); rec_lane=${rec_line#lane=} ;;
+            exit=*) rec_exit_seen=$((rec_exit_seen + 1)); rec_exit=${rec_line#exit=} ;;
+            set=*) read_set_row "$rec_line" ;;
+            *) refuse "$rec_file: \"$rec_line\" is not a record header or a set= row."
+               rec_ok=0 ;;
+        esac
+    done < "$rec_file"
+
+    # Each header exactly once. A record missing one says less than a record
+    # claims to, and a record carrying one twice has two answers to a question
+    # that has one.
+    check_header_count "$rec_file" lane "$rec_lane_seen"
+    check_header_count "$rec_file" exit "$rec_exit_seen"
+
+    if [ "$rec_lane_seen" -eq 1 ] && [ -z "$rec_lane" ]; then
+        refuse "$rec_file: lane= names no lane, and a record nobody can attribute to a lane is not a lane claim."
+        rec_ok=0
+    fi
+
+    # The minimum for any claim at all: a record with no set= row says nothing
+    # about any check.
+    if [ "$rec_set_seen" -eq 0 ]; then
+        refuse "$rec_file: no set= row, so this record says nothing about any check."
+        rec_ok=0
+    fi
+
+    case "$rec_exit" in
+        0|1|2) ;;
+        *) if [ "$rec_exit_seen" -eq 1 ]; then
+               refuse "$rec_file: exit=$rec_exit, and the exit codes are 0, 1 and 2."
+               rec_ok=0
+           fi ;;
+    esac
+
+    # The refold, which is the whole reason the rows and the exit line are both
+    # written down: the exit code a lane left with has to be the one its own
+    # rows produce, and no cross-lane statement may stand on a record that
+    # disagrees with itself. 2 beats 1 beats 0, and an unsupported
+    # set reaches neither.
+    if [ "$rec_set_incomplete" -gt 0 ]; then
+        rec_refold=2
+    elif [ "$rec_set_disagreed" -gt 0 ]; then
+        rec_refold=1
+    else
+        rec_refold=0
+    fi
+    if [ "$rec_ok" -eq 1 ] && [ "$rec_exit" != "$rec_refold" ]; then
+        refuse "$rec_file: exit=$rec_exit, and its own rows refold to $rec_refold."
+        rec_ok=0
+    fi
+
+    if [ "$rec_ok" -eq 1 ]; then
+        printf '%s\n' "$rec_lane" > "$scratch/$rec_index.lane"
+        printf '%s\n' "$rec_exit" > "$scratch/$rec_index.exit"
+        printf '%s\n' "$rec_file" > "$scratch/$rec_index.file"
+        printf '%s %s %s %s\n' \
+            "$rec_set_held" "$rec_set_disagreed" "$rec_set_incomplete" "$rec_set_unsupported" \
+            > "$scratch/$rec_index.counts"
+        # The universe this record covers: one name per set= row, sorted so two
+        # records naming the same rows in a different order still compare
+        # equal. Every lane check answers the same corpus, so in the ordinary
+        # case every record's universe is identical; a mismatch comes from a stale
+        # record, most likely one written before a set was added to the corpus.
+        # shellcheck disable=SC2086
+        printf '%s\n' $rec_set_names | sort > "$scratch/$rec_index.universe"
+    fi
+    return 0
+}
+
+check_header_count() {
+    if [ "$3" -eq 0 ]; then
+        refuse "$1: no $2= line, and a record says both lane and exit."
+        rec_ok=0
+    elif [ "$3" -gt 1 ]; then
+        refuse "$1: $3 $2= lines, and a record answers that question once."
+        rec_ok=0
+    fi
+    return 0
+}
+
+# One corpus-set row: set=, status=. One per set name. `unsupported`
+# deliberately carries no verdict about bytes: it means the set asks for an operation
+# this lane has not declared, so no bridge started and the row has no place in
+# the held/disagreed/incomplete fold.
+read_set_row() {
+    row_line=$1
+    set -f
+    # shellcheck disable=SC2086
+    set -- $row_line
+    set +f
+    if [ $# -ne 2 ]; then
+        refuse "$rec_file: \"$row_line\" is not a set row of set=, status=."
+        rec_ok=0
+        return 0
+    fi
+    row_name=${1#set=}
+    row_status=${2#status=}
+    case "$2" in
+        status=*) ;;
+        *) refuse "$rec_file: \"$row_line\" is not a set row of set=, status=."
+           rec_ok=0
+           return 0 ;;
+    esac
+    if [ -z "$row_name" ]; then
+        refuse "$rec_file: \"$row_line\" names no corpus set."
+        rec_ok=0
+        return 0
+    fi
+    case " $rec_set_names " in
+        *" $row_name "*)
+            refuse "$rec_file: names $row_name more than once among set= rows, and a record answers for a set once."
+            rec_ok=0
+            return 0 ;;
+    esac
+    case "$row_status" in
+        held|disagreed|incomplete|unsupported) ;;
+        *) refuse "$rec_file: set=$row_name carries status=$row_status, which is not a status word a corpus set may answer."
+           rec_ok=0
+           return 0 ;;
+    esac
+    rec_set_seen=1
+    rec_set_names="$rec_set_names $row_name"
+    case "$row_status" in
+        held)        rec_set_held=$((rec_set_held + 1)) ;;
+        disagreed)   rec_set_disagreed=$((rec_set_disagreed + 1)) ;;
+        incomplete)  rec_set_incomplete=$((rec_set_incomplete + 1)) ;;
+        unsupported) rec_set_unsupported=$((rec_set_unsupported + 1)) ;;
+    esac
+    printf 'set %s %s\n' "$row_name" "$row_status" >> "$scratch/$rec_index.rows"
+    return 0
+}
+
+# ---- reading every record ----------------------------------------------------
+
+index=0
+ok_indexes=""
+for record_path in "$@"; do
+    index=$((index + 1))
+    read_record "$index" "$record_path"
+    [ "$rec_ok" -eq 1 ] && ok_indexes="$ok_indexes $index"
+done
+
+# One lane, one record. Two records claiming the same lane give two answers for
+# one implementation, and the table below would report whichever came last.
+seen_lanes=""
+for i in $ok_indexes; do
+    lane=$(cat "$scratch/$i.lane")
+    case " $seen_lanes " in
+        *" $lane "*)
+            refuse "$(cat "$scratch/$i.file"): a second record claims lane $lane, and one lane makes one claim." ;;
+        *) seen_lanes="$seen_lanes $lane" ;;
+    esac
+done
+
+# Every record has to cover the same rows. Records over different row sets
+# answer different questions, and putting them in one table would report
+# the lane that answered fewer rows as agreeing about rows it never saw: the
+# matrix below prints n/a for a row a lane's own rows file has nothing for,
+# and a fold that let that pass would report "held" for a lane that was never
+# asked.
+first_universe=""
+for i in $ok_indexes; do
+    if [ -z "$first_universe" ]; then
+        first_universe=$i
+        continue
+    fi
+    if ! cmp -s "$scratch/$first_universe.universe" "$scratch/$i.universe"; then
+        only_first=$(comm -23 "$scratch/$first_universe.universe" "$scratch/$i.universe" | tr '\n' ' ')
+        only_this=$(comm -13 "$scratch/$first_universe.universe" "$scratch/$i.universe" | tr '\n' ' ')
+        [ -n "$only_first" ] || only_first="(none)"
+        [ -n "$only_this" ] || only_this="(none)"
+        refuse "$(cat "$scratch/$i.file"): covers a different claim universe from $(cat "$scratch/$first_universe.file"): only there: $only_first; only here: $only_this"
+    fi
+done
+
+if [ "$problems" -gt 0 ]; then
+    echo "RESULT: $problems problem(s) in the records above. No cross-lane statement was computed." >&2
+    exit 2
+fi
+
+# ---- the statement -----------------------------------------------------------
+
+# One line per lane first, because a reader comparing lanes wants to see what
+# each one answered before reading what they agreed about.
+for i in $ok_indexes; do
+    lane=$(cat "$scratch/$i.lane")
+    lane_exit=$(cat "$scratch/$i.exit")
+    read -r set_held set_disagreed set_incomplete set_unsupported < "$scratch/$i.counts"
+    printf 'lane %s: exit %s, sets %s held / %s disagreed / %s incomplete / %s unsupported\n' \
+        "$lane" "$lane_exit" "$set_held" "$set_disagreed" "$set_incomplete" "$set_unsupported"
+done
+
+# The matrix, in the first record's order, since every lane check answers the
+# same corpus.
+echo ""
+first=$(set -- $ok_indexes; echo "$1")
+if [ -n "$first" ]; then
+    # Read the first record's own rows file, one row per line, "set <name>
+    # <status>", in the order that record wrote them.
+    while IFS=' ' read -r _kind name _status; do
+        line="set $name:"
+        sep=" "
+        for i in $ok_indexes; do
+            lane=$(cat "$scratch/$i.lane")
+            cell=$(awk -v want="$name" '$1 == "set" && $2 == want { print $3 }' "$scratch/$i.rows")
+            [ -n "$cell" ] || cell=n/a
+            line="$line$sep$lane $cell"
+            sep=", "
+        done
+        printf '%s\n' "$line"
+    done < "$scratch/$first.rows"
+fi
+
+# The fold across lanes. Incomplete wins over disagreement, so the lanes that
+# verified less than they set out to are named first and alone: a run that did
+# not answer everything it set out to is not a completed conformance result,
+# and reporting it as a disagreement would claim it was.
+incomplete_lanes=""
+disagreed_lanes=""
+unsupported_lanes=""
+for i in $ok_indexes; do
+    lane=$(cat "$scratch/$i.lane")
+    case $(cat "$scratch/$i.exit") in
+        2) incomplete_lanes="$incomplete_lanes $lane" ;;
+        1) disagreed_lanes="$disagreed_lanes $lane" ;;
+    esac
+    if awk '$1 == "set" && $3 == "unsupported" { found = 1 } END { exit !found }' "$scratch/$i.rows"; then
+        unsupported_lanes="$unsupported_lanes $lane"
+    fi
+done
+
+echo ""
+if [ -n "$incomplete_lanes" ]; then
+    echo "RESULT: 2. These lanes verified less than they set out to:${incomplete_lanes}. Incomplete wins over disagreement, so the lanes are not claimed to agree."
+    exit 2
+fi
+if [ -n "$disagreed_lanes" ]; then
+    echo "RESULT: 1. These lanes answered something that disagreed:${disagreed_lanes}."
+    exit 1
+fi
+if [ -n "$unsupported_lanes" ]; then
+    echo "RESULT: 0. Every answered set held; these lanes explicitly do not support one or more corpus sets:${unsupported_lanes}."
+    exit 0
+fi
+echo "RESULT: 0. Every lane's record holds."
+exit 0

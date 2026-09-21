@@ -1,0 +1,298 @@
+<!doctype html>
+<!--
+
+  This page runs the protocol, on the same scenario the test suite asserts over:
+  demo/browser/scenario.js takes the steps, demo/browser/page.js puts them on screen.
+
+  The controls carry no values. Every one of them is an argument `run()` takes,
+  and page.js fills them from the first run's own world. A default written in
+  here as well would put the scenario's defaults in a second place, and the two
+  would drift. The scenario refuses a name it has no knob for rather than
+  ignoring it, so a control cannot get ahead of what runs.
+
+  From this public tree's root, run:
+      cd js/v1 && python3 -m http.server 8000
+  Then open http://localhost:8000/demo/browser/. No build, dependencies, or
+  external assets are needed.
+
+  The imports are relative and the cores are browser-clean, so the page loads
+  the same files the test suite runs.
+-->
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Delegated content access: one unlock, two articles</title>
+<style>
+:root {
+    color-scheme: light dark;
+    --bg: #fbfaf8;
+    --fg: #1c1b19;
+    --muted: #6b6862;
+    --rule: #e2ded6;
+    --card: #ffffff;
+    --sealed: #8a6d3b;
+    --wire: #2f6f8f;
+    --time: #6b5b95;
+    --open: #2d6a4f;
+    --alarm: #a4343a;
+}
+
+@media (prefers-color-scheme: dark) {
+    :root {
+        --bg: #17181a;
+        --fg: #e9e7e3;
+        --muted: #97948d;
+        --rule: #2e3033;
+        --card: #1e2023;
+        --sealed: #d0a95f;
+        --wire: #79b8d4;
+        --time: #a798d0;
+        --open: #74c69d;
+        --alarm: #e08b90;
+    }
+}
+
+* { box-sizing: border-box; }
+
+body {
+    margin: 0;
+    padding: 2.5rem 1.25rem 6rem;
+    background: var(--bg);
+    color: var(--fg);
+    font: 16px/1.55 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+}
+
+.page { max-width: 46rem; margin: 0 auto; }
+
+h1 { font-size: 1.5rem; margin: 0 0 .35rem; letter-spacing: -.01em; }
+
+.standfirst { color: var(--muted); margin: 0 0 2rem; }
+
+section { margin: 0 0 1rem; }
+
+.world, .step, .conclusion {
+    background: var(--card);
+    border: 1px solid var(--rule);
+    border-radius: 6px;
+    padding: 1rem 1.15rem;
+}
+
+.world { display: grid; gap: .3rem; }
+
+.controls {
+    background: var(--card);
+    border: 1px solid var(--rule);
+    border-radius: 6px;
+    padding: .9rem 1.15rem;
+    margin: 0 0 1rem;
+    display: flex;
+    flex-wrap: wrap;
+    gap: .75rem 1.1rem;
+    align-items: flex-end;
+}
+
+.control { display: grid; gap: .25rem; }
+
+.control label {
+    color: var(--muted);
+    font-size: .75rem;
+    text-transform: uppercase;
+    letter-spacing: .05em;
+}
+
+.control input[type="text"],
+.control input[type="number"],
+.control select {
+    font: inherit;
+    font-size: .9rem;
+    color: var(--fg);
+    background: var(--bg);
+    border: 1px solid var(--rule);
+    border-radius: 4px;
+    padding: .3rem .4rem;
+}
+
+.control input[type="number"] { width: 6rem; }
+.control input[type="text"] { width: 14rem; }
+
+.control.switch {
+    display: flex;
+    align-items: center;
+    gap: .4rem;
+    padding-bottom: .35rem;
+}
+
+.control.switch label { text-transform: none; letter-spacing: 0; font-size: .85rem; }
+
+.controls .note {
+    flex-basis: 100%;
+    margin: 0;
+    color: var(--muted);
+    font-size: .8rem;
+}
+
+.controls[data-running="yes"] { opacity: .6; }
+
+.step { border-left: 3px solid var(--rule); }
+.step.sealed { border-left-color: var(--sealed); }
+.step.wire { border-left-color: var(--wire); }
+.step.time { border-left-color: var(--time); }
+.step.failed { border-left-color: var(--alarm); }
+
+.step > header {
+    display: flex;
+    align-items: baseline;
+    gap: .6rem;
+    margin-bottom: .7rem;
+}
+
+.step h2 { font-size: 1rem; margin: 0; font-weight: 600; }
+
+.ordinal {
+    color: var(--muted);
+    font-variant-numeric: tabular-nums;
+    font-size: .8rem;
+    min-width: 1.1rem;
+}
+
+.article {
+    margin-left: auto;
+    color: var(--muted);
+    font-size: .8rem;
+    text-transform: uppercase;
+    letter-spacing: .06em;
+}
+
+.body { display: grid; gap: .5rem; }
+
+.field { display: flex; gap: .6rem; align-items: baseline; flex-wrap: wrap; }
+
+.label {
+    color: var(--muted);
+    font-size: .8rem;
+    min-width: 11rem;
+}
+
+.value { font-variant-numeric: tabular-nums; }
+
+.caption { color: var(--muted); font-size: .8rem; margin-bottom: .25rem; }
+
+.mono {
+    font: 12.5px/1.5 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    margin: 0;
+    padding: .6rem .7rem;
+    background: color-mix(in srgb, var(--fg) 5%, transparent);
+    border-radius: 4px;
+    max-height: 16rem;
+    overflow: auto;
+    white-space: pre-wrap;
+    word-break: break-all;
+}
+
+.mono.gibberish { color: var(--sealed); }
+.mono.plaintext { color: var(--open); word-break: normal; }
+
+.chips { display: flex; flex-wrap: wrap; gap: .3rem; }
+
+.chip {
+    font: 12px/1 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    padding: .3rem .45rem;
+    border: 1px solid var(--rule);
+    border-radius: 3px;
+    color: var(--muted);
+}
+
+.chip.held { color: var(--fg); border-color: color-mix(in srgb, var(--open) 45%, var(--rule)); }
+.chip.empty { border-style: dashed; }
+
+.refused { color: var(--alarm); margin: 0; font-weight: 600; }
+
+.aside { color: var(--muted); font-size: .85rem; margin: 0; }
+
+.json summary { color: var(--muted); font-size: .85rem; cursor: pointer; margin-bottom: .35rem; }
+.json[open] summary { color: var(--fg); }
+
+.footer {
+    display: flex;
+    align-items: center;
+    gap: .6rem;
+    flex-wrap: wrap;
+    margin-top: .9rem;
+    padding-top: .7rem;
+    border-top: 1px solid var(--rule);
+}
+
+.count {
+    font: 12px/1 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    color: var(--wire);
+    font-weight: 700;
+}
+
+.count.zero { color: var(--muted); }
+
+.conclusion { border-left: 3px solid var(--open); }
+.conclusion h2 { margin: 0 0 .4rem; font-size: 1rem; }
+.conclusion p { margin: 0 0 .7rem; color: var(--muted); }
+
+.loading { color: var(--muted); }
+</style>
+</head>
+<body>
+<div class="page">
+<h1>Delegated content access</h1>
+<p class="standfirst">
+    Simulation only: a publisher seals two articles. A client unlocks the first one, the clock crosses a period
+    boundary, and the second article opens out of the cache without reaching the issuer. When selected, the fallback
+    can authorize only while the server's time-bounded demo emergency window is active; primary failure alone
+    grants nothing.
+</p>
+<form class="controls" id="controls" autocomplete="off">
+    <div class="control">
+        <label for="at">clock starts</label>
+        <input id="at" name="at" type="text" spellcheck="false">
+    </div>
+    <div class="control">
+        <label for="seed">seed</label>
+        <input id="seed" name="seed" type="number" min="1" step="1">
+    </div>
+    <div class="control">
+        <label for="length">period minutes</label>
+        <input id="length" name="length" type="number" min="1" step="1">
+    </div>
+    <div class="control">
+        <label for="slots">slots</label>
+        <input id="slots" name="slots" type="number" min="1" step="1">
+    </div>
+    <div class="control">
+        <label for="advance">clock jumps, minutes</label>
+        <input id="advance" name="advance" type="number" min="0" step="5">
+    </div>
+    <div class="control">
+        <label for="transportMode">transport</label>
+        <select id="transportMode" name="transportMode">
+            <option value="direct">direct</option>
+            <option value="client-bound">client-bound</option>
+        </select>
+    </div>
+    <div class="control switch">
+        <input id="fallback" name="fallback" type="checkbox">
+        <label for="fallback">a simulated, time-bounded fallback issuer</label>
+    </div>
+    <div class="control switch">
+        <input id="primaryOffline" name="primaryOffline" type="checkbox">
+        <label for="primaryOffline">the primary is down</label>
+    </div>
+    <p class="note">
+        Each control is an argument to <code>run()</code>. Client-bound hands the client key handles
+        rather than bytes, which a store of strings cannot keep, so that run caches in memory, the
+        way a real one would need IndexedDB. The emergency window belongs to this demo rather than to any
+        deployment profile: the simulated emergency authorization is constructed on the issuer, and these controls and
+        request fields cannot enable it.
+    </p>
+</form>
+<main><p class="loading">Running the scenario…</p></main>
+</div>
+<script type="module" src="./page.js"></script>
+</body>
+</html>

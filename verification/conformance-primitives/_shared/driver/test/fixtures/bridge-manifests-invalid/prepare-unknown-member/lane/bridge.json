@@ -1,0 +1,1 @@
+{ "script": "lane/bridge.mjs", "command": "lane/run.sh", "operations": [], "prepare": { "command": "lane/prep.sh", "cwd": "lane" } }

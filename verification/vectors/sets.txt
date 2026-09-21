@@ -1,0 +1,17 @@
+# The complete vector-set walk. `read-sets.sh` and `check-sums.sh` read this
+# file.
+#
+# One set directory per data line, relative to this one. `check-sums.sh` hashes
+# every listed set the same way, and a set that fails ends the walk red.
+#
+# A reader must refuse an incomplete walk when a directory named here is
+# missing, or when a set directory beside this file is absent from these lines.
+# Silence about a set nobody walks is the failure this file exists to prevent.
+
+v1
+v1-profile--client-bound-ecdh-p256
+v1-profile--client-bound-rsa-oaep
+v1-profile--period-chain-primitives
+
+# The focused bound-carrier fixture. `js/check` does not read it.
+v1-alt--bind-on-renderId-and-slot

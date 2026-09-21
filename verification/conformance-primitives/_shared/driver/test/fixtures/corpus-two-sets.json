@@ -1,0 +1,69 @@
+{
+  "note": "A fixture corpus for the harness tests. The real corpus is at conformance-primitives/_shared/cases/v1/cases.json; the tests use these values to exercise the loader, the selectors and the fold, and no value here is a conformance fact.",
+  "cases": [
+    {
+      "id": "encoding/01",
+      "set": "encoding",
+      "label": "canonical value",
+      "op": "decode-base64url",
+      "input": { "value": "AQID" },
+      "expected": { "bytesHex": "010203" },
+      "rationale": "a fixture row, so the loader and the selectors have a success case to carry."
+    },
+    {
+      "id": "encoding/02",
+      "set": "encoding",
+      "label": "padded spelling",
+      "op": "decode-base64url",
+      "input": { "value": "AQI=" },
+      "expected": { "refused": "invalid_base64url" },
+      "rationale": "a fixture row, so the fold has a defined refusal to carry."
+    },
+    {
+      "id": "encoding/03",
+      "set": "encoding",
+      "label": "recorded ciphertext",
+      "op": "open-rsa-oaep",
+      "input": { "ciphertextBase64url": "AQID", "privateKeyJwk": { "kty": "RSA", "n": "AQID", "e": "AQAB" } },
+      "expected": { "plaintextBase64url": "aGVsbG8" },
+      "rationale": "a fixture row under a second operation, so a run can select on an operation and a set separately."
+    },
+    {
+      "id": "encoding/04",
+      "set": "encoding",
+      "label": "ciphertext that does not open",
+      "op": "open-rsa-oaep",
+      "input": { "ciphertextBase64url": "AQIE", "privateKeyJwk": { "kty": "RSA", "n": "AQID", "e": "AQAB" } },
+      "expected": { "refused": "unseal_failed" },
+      "rationale": "a fixture row, so a second operation's defined refusal is carried too."
+    },
+    {
+      "id": "crypto/01",
+      "set": "crypto",
+      "label": "known answer",
+      "op": "open-aes-gcm",
+      "input": {
+        "keyBase64url": "AAAA",
+        "nonceBase64url": "AAAA",
+        "ciphertextBase64url": "AAAA",
+        "aadBase64url": "AAAA"
+      },
+      "expected": { "plaintextBase64url": "aGVsbG8" },
+      "rationale": "a fixture row in a second set, so a --set selection has something to leave out."
+    },
+    {
+      "id": "crypto/02",
+      "set": "crypto",
+      "label": "carrier under other additional data",
+      "op": "open-aes-gcm",
+      "input": {
+        "keyBase64url": "AAAA",
+        "nonceBase64url": "AAAA",
+        "ciphertextBase64url": "AAAA",
+        "aadBase64url": "AQAA"
+      },
+      "expected": { "refused": "authentication_failed" },
+      "rationale": "a fixture row, so the second set carries a refusal beside its value."
+    }
+  ]
+}

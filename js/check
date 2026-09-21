@@ -1,0 +1,16 @@
+#!/bin/sh
+# Run the public, Node-only gate for this demo.
+#
+#     sh check
+#
+# This forwards to `pnpm run check` in js/v1. The install steps in
+# js/README.md use pnpm. The stages and rules live in
+# js/v1/test-tools/run-gate.js.
+#
+# Exit codes:
+#   0  every required public-gate stage held
+#   1  a required stage ran and failed
+#   2  a required stage could not run or verified less than it set out to
+
+cd "$(dirname "$0")/v1" || exit 2
+exec pnpm run check

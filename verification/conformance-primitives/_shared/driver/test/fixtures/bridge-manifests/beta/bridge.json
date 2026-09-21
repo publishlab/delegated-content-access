@@ -1,0 +1,5 @@
+{
+    "script": "beta/bridge.mjs",
+    "command": "beta/run.sh",
+    "operations": ["open-aes-gcm"]
+}

@@ -1,0 +1,8 @@
+{
+  "set": "v1-profile--period-chain-primitives",
+  "phase": "devel",
+  "profile": "dca-period-chain-v1",
+  "operations": [
+    "hkdf-sha256"
+  ]
+}

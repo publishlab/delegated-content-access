@@ -1,0 +1,18 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!-- The whole build definition for the .NET probe. It is the ecosystem's own
+       project file, and it names no PackageReference: System.Text.Json and
+       System.Security.Cryptography carry every primitive this probe needs, so a
+       restore reads the SDK and never the network. -->
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net10.0</TargetFramework>
+    <AssemblyName>probe</AssemblyName>
+    <RootNamespace>Probe</RootNamespace>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <InvariantGlobalization>true</InvariantGlobalization>
+    <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
+  </PropertyGroup>
+
+</Project>

@@ -1,0 +1,73 @@
+#!/usr/bin/env bash
+# Opt-in PHP conformance check. It is not part of the default public gate.
+#
+# The normal `sh js/check` run needs only Node. This command runs the opt-in
+# PHP lane: every corpus set this lane declares, through this lane's own
+# operation bridge.
+#
+#   ./check                     # every corpus set this lane declares
+#   ./check --record <file>     # also write this run's lane record to that file
+#
+# The corpus run goes through this lane's own bridge.json, which owns a
+# separate toolchain install with no flags of its own; this script asks
+# install-toolchain the same, flagless way, only to print the version banner
+# below, so what it names is what answered.
+#
+# The first run may download the pinned build. It is kept in the cache
+# directory the installer names; later runs reuse it and need no network.
+#
+# Exit codes, the three ../README.md names:
+#   0  every corpus set this lane was asked held
+#   1  the bridge answered inside the contract and answered wrongly
+#   2  a set verified nothing, or no usable PHP toolchain was found
+
+set -euo pipefail
+
+HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
+# The corpus-set driver step this check is built from.
+# shellcheck source=../_shared/driver-steps.sh
+. "$HERE/../_shared/driver-steps.sh"
+
+# What this lane calls itself in a record, which is the name the cross-lane
+# aggregator keys every comparison it makes on.
+DCA_LANE=php
+# Where a record goes, empty until --record names a file and no record written
+# while it stays empty.
+DCA_RECORD=""
+
+while [ $# -gt 0 ]; do
+    case "$1" in
+        --record)
+            [ $# -ge 2 ] || { echo "--record needs a file path to write the lane record to" >&2; exit 2; }
+            DCA_RECORD="$2"; shift 2 ;;
+        *)
+            echo "php/check takes no argument beside --record: it always answers the whole case corpus through the driver." >&2
+            exit 2 ;;
+    esac
+done
+
+# The pin and cache location are set in the installer and nowhere else. Normalise
+# any installation refusal to the lane's partial status rather than leaking an
+# incidental downloader exit code. Called with no flags, the same way this
+# lane's own toolchain install calls it, so the banner below names the PHP that
+# actually answers the corpus.
+if ! BASE="$("$HERE/install-toolchain")"; then
+    echo "no usable pinned PHP, so nothing was verified." >&2
+    exit 2
+fi
+PHP_BIN="$BASE/php"
+if [ ! -x "$PHP_BIN" ]; then
+    echo "installer named $BASE, which holds no executable PHP binary." >&2
+    exit 2
+fi
+
+echo "== $("$PHP_BIN" -v | head -1) ==" >&2
+echo "== $("$PHP_BIN" -r 'echo OPENSSL_VERSION_TEXT;' 2>/dev/null || true) ==" >&2
+
+run_driver_steps
+
+if [ -n "${DCA_RECORD:-}" ]; then
+    write_driver_record || DCA_WALK_STATUS=2
+fi
+exit "$DCA_WALK_STATUS"

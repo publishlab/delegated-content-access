@@ -1,0 +1,275 @@
+#!/usr/bin/env bash
+# Focused fixtures for driver-steps.sh, run with bash from any cwd. Nothing here
+# starts node or a real bridge: DCA_DRIVER_RUN is pointed at a stub process
+# after driver-steps.sh is sourced, so answer_corpus_sets is driven against a
+# stub standing in for the set selector and a bridge run.
+#
+# This file proves the step itself, the DCA_JS mapping, the per-set fold
+# and the record writer, so a fold that always returned 0, or a step that never
+# started a process, fails this file even though every other suite in the tree
+# stays green without it.
+set -u
+
+here=$(CDPATH= cd -- "$(dirname "$0")" && pwd)
+steps=${DCA_DRIVER_STEPS:-$here/driver-steps.sh}
+
+scratch=$(mktemp -d) || exit 2
+trap 'rm -rf "$scratch"' EXIT INT TERM
+
+fail() {
+    echo "driver-steps.test: $1" >&2
+    exit 1
+}
+
+# The stub every DCA_DRIVER_RUN override in this file points at. Asked for the
+# set selection it prints three sets, one of them outside the lane's declared
+# operations; asked to run a set it answers off STUB_EXIT, the way a bridge
+# process answers 0, 1 or 2 and nothing else about the batch matters here.
+stub="$scratch/stub-driver"
+{
+    echo '#!/bin/sh'
+    echo 'case "$1" in'
+    echo '  *select-sets.mjs)'
+    echo "    printf '%s\\n' 'encoding supported' 'hkdf supported' 'rsa-oaep unsupported'"
+    echo '    exit "${STUB_SELECT_EXIT:-0}" ;;'
+    echo 'esac'
+    echo 'exit "${STUB_EXIT:-0}"'
+} > "$stub"
+chmod +x "$stub"
+
+# A second stub that picks its exit code from the set name answer_corpus_sets hands
+# it, so one call answers differently per set, as a real bridge disagreeing
+# on one set would.
+stub_mixed="$scratch/stub-driver-mixed"
+{
+    echo '#!/bin/sh'
+    echo 'case "$1" in'
+    echo '  *select-sets.mjs)'
+    echo "    printf '%s\\n' 'encoding supported' 'hkdf supported' 'rsa-oaep unsupported'"
+    echo '    exit 0 ;;'
+    echo 'esac'
+    echo 'last=""'
+    echo 'for a; do last=$a; done'
+    echo 'case "$last" in'
+    echo '  encoding) exit 1 ;;'
+    echo '  *) exit 0 ;;'
+    echo 'esac'
+} > "$stub_mixed"
+chmod +x "$stub_mixed"
+
+# ---- DCA_JS mapping ------------------------------------------------------
+
+check_runtime() {
+    label=$1
+    js=$2
+    want=$3
+    got=$(
+        unset DCA_JS
+        [ -z "$js" ] || DCA_JS=$js
+        . "$steps" 2>"$scratch/$label.err"
+        printf '%s' "$DCA_DRIVER_RUN"
+    )
+    [ "$got" = "$want" ] || fail "$label: DCA_DRIVER_RUN was \"$got\", not \"$want\""
+    echo "  $label: DCA_DRIVER_RUN=\"$got\""
+}
+check_runtime default-node "" node
+check_runtime explicit-node node node
+check_runtime deno deno "deno run -A"
+check_runtime unknown-js bogus ""
+grep -qF 'DCA_JS is "bogus"' "$scratch/unknown-js.err" \
+    || fail "an unknown DCA_JS did not report the reason"
+
+# ---- answer_corpus_sets, stubbed ------------------------------------------
+
+run_sets() {
+    sets_case=$1
+    driver=$2
+    stub_exit=$3
+    (
+        . "$steps"
+        DCA_DRIVER_RUN=$driver
+        STUB_EXIT=$stub_exit
+        export STUB_EXIT
+        DCA_LANE=stublane
+        answer_corpus_sets
+        printf '%s\n' "$DCA_SETS_STATUS" > "$scratch/$sets_case.status"
+        printf '%s' "$DCA_DRIVER_ROWS" > "$scratch/$sets_case.rows"
+    ) > "$scratch/$sets_case.out" 2> "$scratch/$sets_case.err"
+}
+
+run_sets sets-held "$stub" 0
+[ "$(cat "$scratch/sets-held.status")" = 0 ] || fail "sets-held: DCA_SETS_STATUS was not 0"
+grep -qF 'set=encoding status=held' "$scratch/sets-held.rows" \
+    || fail "sets-held: a supported set's row should say held"
+grep -qF 'set=hkdf status=held' "$scratch/sets-held.rows" \
+    || fail "sets-held: the second supported set's row is missing"
+grep -qF 'set=rsa-oaep status=unsupported' "$scratch/sets-held.rows" \
+    || fail "sets-held: a set outside the lane's declared operations must be explicitly unsupported, not run as held"
+grep -qF '== corpus set encoding through the stublane bridge: held ==' "$scratch/sets-held.err" \
+    || fail "sets-held did not print its row"
+grep -qF '== corpus set rsa-oaep through the stublane bridge: unsupported ==' "$scratch/sets-held.err" \
+    || fail "sets-held did not print the unsupported set explicitly"
+
+run_sets sets-disagreed "$stub" 1
+[ "$(cat "$scratch/sets-disagreed.status")" = 1 ] || fail "sets-disagreed: DCA_SETS_STATUS was not 1"
+
+run_sets sets-incomplete "$stub" 2
+[ "$(cat "$scratch/sets-incomplete.status")" = 2 ] || fail "sets-incomplete: DCA_SETS_STATUS was not 2"
+
+run_sets sets-crashed "$stub" 137
+[ "$(cat "$scratch/sets-crashed.status")" = 2 ] || fail "sets-crashed: an exit outside 0/1/2 must fold to incomplete"
+
+echo "  answer_corpus_sets: held, disagreed, incomplete, unsupported and a stray exit all read correctly"
+
+# An unsupported set never reaches the exit code: the lane holds over what it
+# was asked and says plainly what it was not.
+[ "$(cat "$scratch/sets-held.status")" = 0 ] \
+    || fail "sets-held: an unsupported set must not fold into the lane's status"
+
+# Each set gets its own answer rather than one joint status for the whole run: one process per set,
+# so a disagreement on one set marks that set's row alone.
+run_sets sets-mixed "$stub_mixed" 0
+[ "$(cat "$scratch/sets-mixed.status")" = 1 ] || fail "sets-mixed: one disagreed set should fold DCA_SETS_STATUS to 1"
+grep -qF 'set=encoding status=disagreed' "$scratch/sets-mixed.rows" \
+    || fail "sets-mixed: the disagreeing set's own row should say disagreed"
+grep -qF 'set=hkdf status=held' "$scratch/sets-mixed.rows" \
+    || fail "sets-mixed: a set that held should still say held, not the disagreeing set's status"
+
+echo "  answer_corpus_sets: one process and one measured row per set, not one joint status"
+
+# A selector that cannot name the sets leaves nothing to run, so the lane
+# verified nothing.
+run_selector_refused() {
+    (
+        . "$steps"
+        DCA_DRIVER_RUN=$stub
+        STUB_SELECT_EXIT=2
+        export STUB_SELECT_EXIT
+        DCA_LANE=stublane
+        answer_corpus_sets
+        printf '%s\n' "$DCA_SETS_STATUS" > "$scratch/selector-refused.status"
+        printf '%s' "${DCA_DRIVER_ROWS:-}" > "$scratch/selector-refused.rows"
+    ) > "$scratch/selector-refused.out" 2> "$scratch/selector-refused.err"
+}
+run_selector_refused
+[ "$(cat "$scratch/selector-refused.status")" = 2 ] \
+    || fail "selector-refused: a set selection nobody could read must be incomplete"
+[ ! -s "$scratch/selector-refused.rows" ] \
+    || fail "selector-refused: a run that named no set must claim no row"
+
+echo "  answer_corpus_sets: a refused selection verifies nothing"
+
+# ---- fold_set_status: 2 beats 1 beats 0 -----------------------------------
+
+check_fold() {
+    fold_start=$1
+    fold_one=$2
+    fold_want=$3
+    (
+        . "$steps"
+        DCA_SETS_STATUS=$fold_start
+        fold_set_status "$fold_one"
+        [ "$DCA_SETS_STATUS" = "$fold_want" ] || exit 1
+    ) 2> "$scratch/fold.err" || fail "fold_set_status(from=$fold_start, set=$fold_one) did not fold to $fold_want"
+}
+for start in 0 1 2; do
+    for one in 0 1 2 137; do
+        case "$start$one" in
+            *2*|*137) want=2 ;;
+            *1*) want=1 ;;
+            *)   want=0 ;;
+        esac
+        check_fold "$start" "$one" "$want"
+    done
+done
+echo "  fold_set_status: 2 beats 1 beats 0 across every pair, and a stray exit folds to 2"
+
+# ---- run_driver_steps ------------------------------------------------------
+
+run_entry() {
+    (
+        . "$steps"
+        DCA_DRIVER_RUN=$stub
+        STUB_EXIT=0
+        export STUB_EXIT
+        DCA_LANE=stublane
+        run_driver_steps
+        printf '%s\n' "${DCA_WALK_STATUS:-unset}" > "$scratch/entry.status"
+        printf '%s' "${DCA_DRIVER_ROWS:-}" > "$scratch/entry.rows"
+    ) > "$scratch/entry.out" 2> "$scratch/entry.err"
+}
+run_entry
+[ "$(cat "$scratch/entry.status")" = 0 ] || fail "run_driver_steps: the entry point did not leave a walk status"
+grep -qF 'set=encoding status=held' "$scratch/entry.rows" \
+    || fail "run_driver_steps: the step did not run"
+echo "  run_driver_steps: the step runs and leaves DCA_WALK_STATUS"
+
+# ---- write_driver_record ---------------------------------------------------
+
+# Only write_driver_record turns DCA_LANE, DCA_DRIVER_ROWS
+# and DCA_WALK_STATUS into the file _shared/aggregate-results reads.
+# harness.test's stage_aggregator retypes that format by hand into heredocs to
+# prove the reader; this proves the writer, directly, against the same three
+# inputs a lane check leaves it, so the two cannot drift silently apart with
+# both suites green.
+run_write_record() {
+    write_case=$1
+    lane=$2
+    rows=$3
+    walk_status=$4
+    (
+        . "$steps"
+        DCA_LANE=$lane
+        DCA_DRIVER_ROWS=$rows
+        DCA_WALK_STATUS=$walk_status
+        DCA_RECORD="$scratch/$write_case.record"
+        write_driver_record
+        exit $?
+    ) > "$scratch/$write_case.out" 2> "$scratch/$write_case.err"
+    printf '%s\n' "$?" > "$scratch/$write_case.status"
+}
+
+held_rows="set=encoding status=held
+set=hkdf status=held
+set=rsa-oaep status=unsupported
+"
+run_write_record record-held stublane "$held_rows" 0
+[ "$(cat "$scratch/record-held.status")" = 0 ] || fail "record-held: write_driver_record did not return 0"
+cat > "$scratch/record-held.expected" <<'RECORD'
+lane=stublane
+set=encoding status=held
+set=hkdf status=held
+set=rsa-oaep status=unsupported
+exit=0
+RECORD
+if ! diff -u "$scratch/record-held.expected" "$scratch/record-held.record"; then
+    fail "record-held: the file write_driver_record wrote is not the record the format defines"
+fi
+echo "  write_driver_record: content matches, header first, rows in order, exit line last"
+
+# With no DCA_LANE set, write_driver_record refuses and writes nothing, because the aggregator
+# cannot key a record on a lane when nobody can attribute it to one.
+run_write_record record-no-lane "" "$held_rows" 0
+[ "$(cat "$scratch/record-no-lane.status")" = 1 ] || fail "record-no-lane: write_driver_record should return 1 with no DCA_LANE"
+if [ -e "$scratch/record-no-lane.record" ]; then
+    fail "record-no-lane: a record was written despite no lane name"
+fi
+grep -qF 'no lane name was set' "$scratch/record-no-lane.err" \
+    || fail "record-no-lane: the refusal did not say why"
+echo "  write_driver_record: refused, and no record written, with no DCA_LANE set"
+
+# A record over one set, the way a lane that could answer one of them leaves it.
+run_write_record record-one-set stublane "set=encoding status=disagreed
+" 1
+[ "$(cat "$scratch/record-one-set.status")" = 0 ] || fail "record-one-set: write_driver_record did not return 0"
+cat > "$scratch/record-one-set.expected" <<'RECORD'
+lane=stublane
+set=encoding status=disagreed
+exit=1
+RECORD
+if ! diff -u "$scratch/record-one-set.expected" "$scratch/record-one-set.record"; then
+    fail "record-one-set: a record over one set still did not match"
+fi
+echo "  write_driver_record: a record over one set writes lane=/set=/exit= exactly"
+
+printf 'driver-steps fixtures: PASS\n'

@@ -1,0 +1,92 @@
+#!/bin/sh
+# Runs every runtime probe, then runs `_shared/compare.mjs`, which states the result.
+# The probes write observations, this script writes no verdict.
+#
+#     ./check
+#
+# Exit codes follow the primitive-conformance lanes: 0 every runtime agreed,
+# 1 a runtime answered inside the contract and answered wrongly, 2 a runtime
+# did not answer, so nothing was verified. A runtime that says `unsupported`
+# for the compressed profile answered, and is printed rather than counted
+# against the run.
+#
+# Node and PHP run off PATH. `DCA_PHP` names the PHP binary; `php8.3` and then
+# `php` are tried otherwise. The python, go, jvm and dotnet probes carry a
+# launcher that resolves a pinned toolchain through the public lane's own
+# install-toolchain, which downloads on a cold cache and answers offline after
+# that.
+#
+# Observations go to a run directory outside the repository, and the path is
+# printed so a reader can open the full JSON.
+
+set -u
+
+HERE=$(cd "$(dirname "$0")" && pwd) || exit 2
+RUN=${TMPDIR:-/tmp}/dca-ecdh-envelope-size
+mkdir -p "$RUN" || exit 2
+
+partial=0
+
+# One probe, one observation file. When a probe fails, `answer` removes its file, so
+# the comparison never reads a half-written answer as an observation.
+answer() {
+    name=$1
+    shift
+    if "$@" >"$RUN/$name.json" 2>"$RUN/$name.err"; then
+        return 0
+    fi
+    echo "$name probe failed; stderr in $RUN/$name.err" >&2
+    rm -f "$RUN/$name.json"
+    partial=1
+}
+
+if command -v node >/dev/null 2>&1; then
+    answer node node "$HERE/node/probe.mjs"
+else
+    echo "no node on PATH, so the Node row was not answered" >&2
+    rm -f "$RUN/node.json"
+    partial=1
+fi
+
+PHP=${DCA_PHP:-}
+if [ -z "$PHP" ]; then
+    for candidate in php8.3 php; do
+        if command -v "$candidate" >/dev/null 2>&1; then
+            PHP=$candidate
+            break
+        fi
+    done
+fi
+if [ -n "$PHP" ]; then
+    answer php "$PHP" "$HERE/php/probe.php"
+else
+    echo "no PHP on PATH, so the PHP row was not answered" >&2
+    rm -f "$RUN/php.json"
+    partial=1
+fi
+
+for lane in python go jvm dotnet; do
+    answer "$lane" "$HERE/$lane/probe"
+done
+
+observations=""
+for name in node php python go jvm dotnet; do
+    [ -f "$RUN/$name.json" ] && observations="$observations $RUN/$name.json"
+done
+
+if [ -z "$observations" ]; then
+    echo "RESULT: partial. No probe answered, so nothing was verified."
+    exit 2
+fi
+
+# shellcheck disable=SC2086
+node "$HERE/_shared/compare.mjs" $observations
+status=$?
+
+echo "observations: $RUN"
+
+if [ "$partial" -eq 1 ] && [ "$status" -eq 0 ]; then
+    echo "RESULT: partial. A runtime did not answer, so the agreement above is incomplete."
+    exit 2
+fi
+exit "$status"

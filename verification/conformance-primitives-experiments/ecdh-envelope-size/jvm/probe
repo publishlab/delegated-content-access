@@ -1,0 +1,47 @@
+#!/usr/bin/env bash
+# The launcher for the JVM probe: it resolves the pinned JDK the public JVM lane
+# installs, compiles Probe.java and Json.java into that lane's cache, and runs
+# the result.
+#
+# The JDK is asked for, never guessed and never downloaded here.
+# ../../../conformance-primitives/jvm/install-toolchain holds the pin and manages the cache.
+# It is called by relative path from this directory, with no flags on the first
+# call so a cold cache installs, and it answers from any working directory
+# because it reads its own location. No class file is committed: the build
+# output lives in the lane's cache dir, keyed by the absolute path of these
+# sources, so two checkouts never read back each other's classes.
+set -euo pipefail
+
+HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+LANE="$HERE/../../../conformance-primitives/jvm"
+INSTALLER="$LANE/install-toolchain"
+
+if [ ! -x "$INSTALLER" ]; then
+  echo "probe: no installer at $INSTALLER, so no JDK could be resolved." >&2
+  exit 2
+fi
+
+if ! BASE="$("$INSTALLER")" || [ ! -x "$BASE/bin/javac" ]; then
+  echo "probe: no JDK; run $INSTALLER once on a machine with network." >&2
+  exit 2
+fi
+
+KEY="$(printf '%s' "$HERE" | sha256sum | cut -c1-16)"
+CACHE="$("$INSTALLER" --print-cache)"
+BUILD="$CACHE/build/ecdh-envelope-size/$KEY"
+LOCK="$CACHE/build/ecdh-envelope-size/$KEY.lock"
+mkdir -p "$BUILD"
+
+# One cache dir is shared across containers and across concurrent runs, so the
+# script takes the lock for the compile and the JVM holds it shared for as long as it
+# runs, because a file descriptor survives exec.
+exec 9>"$LOCK"
+flock 9
+if ! "$BASE/bin/javac" -Xlint:all -d "$BUILD" "$HERE/Probe.java" "$HERE/Json.java" "$HERE/Decompress.java" >&2; then
+  echo "probe: the JVM probe did not compile, so nothing was observed." >&2
+  exit 2
+fi
+flock -s 9
+
+export DCA_EXPERIMENT_DIR="$(cd "$HERE/.." && pwd)"
+exec "$BASE/bin/java" -cp "$BUILD" Probe "$@"

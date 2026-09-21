@@ -1,0 +1,211 @@
+#!/usr/bin/env bash
+# Install a pinned Go toolchain into a cache dir. Nothing system-wide.
+#
+# Separated from check so the download can be done once, ahead
+# of time, on a machine that has egress, and the run can then happen with no
+# network at all. The run script calls this when the toolchain is missing, so
+# calling it by hand is optional.
+#
+#   ./install-toolchain                    # install if absent, then print BASE
+#   ./install-toolchain --base <dir>       # use this toolchain as is, download nothing
+#   ./install-toolchain --cache-root <dir> # put or find the toolchain under this root
+#   ./install-toolchain --print-base       # print where BASE is or would be, install nothing
+#   ./install-toolchain --print-bin        # print the go binary a caller drives, install nothing
+#   ./install-toolchain --print-cache      # print this lane's cache dir, install nothing
+#   ./install-toolchain --force            # re-download over an existing install
+#   ./install-toolchain --help             # this text
+#
+# Run it directly: the shebang names bash.
+#
+# BASE is the unpacked toolchain: the directory GOROOT names, with bin/go under
+# it. A caller is given it, or is given the root the lanes live under; nothing
+# here searches PATH and nothing here is put on PATH.
+#
+# --cache-root and --print-cache are one level apart, which is why the flag
+# carries the word root: the root holds every lane and this lane's directory is
+# `go` under it, so --print-cache answers <root>/go and feeding that back in as
+# a root would install into go/go.
+#
+# Where it lands, first match wins:
+#   --base <dir>        an already-installed toolchain to use as is, nothing downloaded.
+#                       --force is refused with it given: this script deletes only what it created.
+#   --cache-root <dir>  root to install into, as <root>/go
+#   $DCA_CACHE/go
+#   $XDG_CACHE_HOME/dca/go
+#   $HOME/.cache/dca/go
+set -euo pipefail
+
+# Pinned by exact version. Bumping the pin means changing the version and both
+# checksums together, read off the release table, which publishes SHA-256 per
+# archive:
+#   https://go.dev/dl/
+GO_VERSION=1.27.0            # keep in step with go/v1/go.mod
+SHA256_amd64=675c26c449cbb18fc24b74650de1eabbae6e16f64326fd85a283fb3b58280685
+SHA256_arm64=51798d2c42d0e1c6ed7fd9f48728b4193abac9e8aad6dbac2fe96a81f5909bda
+
+# Which pinned archive this host would download, resolved on the leg that
+# downloads one and nowhere else.
+#
+# An OS or an architecture the pin does not cover is a reason to refuse a
+# download. It is not a reason to refuse --base, which is the flag an operator
+# on such a host reaches for and which the refusals below tell them to pass, and
+# it is not a reason to refuse the print queries, which name a path and install
+# nothing. So this is a function the install branch calls rather than a gate at
+# the top of the file: run before the argument line is read, it answered every
+# invocation on those hosts with the advice to pass a flag it had already made
+# unreachable. The OS is tested here because the archive below is a Linux build
+# whatever this host is: without the refusal a Mac downloads it, passes the
+# checksum, unpacks a Linux tree and dies on the first exec. That first exec is
+# the `go version` line after the rename below, so the failure also happens after
+# the rename has promoted the tree into $BASE, and every later run treats the poisoned
+# install as already present.
+pinned_platform() {
+  case "$(uname -s)" in
+    Linux) ;;
+    *) echo "unsupported OS $(uname -s); the pinned archive is a Linux build." >&2
+       echo "Install Go ${GO_VERSION} by hand and pass --base naming the directory holding it." >&2
+       exit 2 ;;
+  esac
+
+  case "$(uname -m)" in
+    x86_64|amd64)  GARCH=amd64 ;;
+    aarch64|arm64) GARCH=arm64 ;;
+    *) echo "unsupported arch $(uname -m); install Go ${GO_VERSION} by hand and pass --base" >&2; exit 2 ;;
+  esac
+  sha_var="SHA256_${GARCH}"; WANT_SHA="${!sha_var}"
+  TARBALL="go${GO_VERSION}.linux-${GARCH}.tar.gz"
+}
+
+HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
+# The cache dir rule is written once, in the file sourced below: DCA_CACHE, or the OS
+# cache dir, or a refusal naming DCA_CACHE.
+# shellcheck source=../_shared/cache.sh
+. "$HERE/../_shared/cache.sh"
+
+# The whole argument line is read before anything is resolved, because
+# --cache-root moves where BASE would be and the print actions have to answer
+# for the flags this invocation was given rather than for the defaults. Both
+# path values are made absolute here, at the one place they are read; cache.sh
+# explains why.
+base=""
+cache_root=""
+print=""
+force=0
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --base)
+      [ $# -ge 2 ] || { echo "--base needs the directory holding the toolchain" >&2; exit 2; }
+      resolve_absolute_path "$2"; base="$DCA_ABSOLUTE_PATH"; shift 2 ;;
+    --cache-root)
+      [ $# -ge 2 ] || { echo "--cache-root needs a directory to hold the lanes" >&2; exit 2; }
+      resolve_absolute_path "$2"; cache_root="$DCA_ABSOLUTE_PATH"; shift 2 ;;
+    --print-base)  print=base; shift ;;
+    --print-bin)   print=bin; shift ;;
+    --print-cache) print=cache; shift ;;
+    --force)       force=1; shift ;;
+    --help|-h)     awk 'NR>1 && /^#/ { sub(/^# ?/, ""); print; next } NR>1 { exit }' "${BASH_SOURCE[0]}"; exit 0 ;;
+    *) echo "unknown argument: $1" >&2; exit 2 ;;
+  esac
+done
+
+if [ -n "$cache_root" ]; then
+  CACHE="$cache_root/go"
+else
+  resolve_cache_dir go
+  CACHE="$DCA_CACHE_DIR"
+fi
+
+# --print-cache answers from the root and the lane name alone, so it answers
+# first, ahead of everything that depends on the pin.
+if [ "$print" = cache ]; then printf '%s\n' "$CACHE"; exit 0; fi
+
+BASE="${base:-$CACHE/go${GO_VERSION}}"
+GO_BIN="$BASE/bin/go"
+
+# The other two queries answer and stop, before the install branch and before
+# any directory is created. A caller that must not download asks one of these,
+# and a cold cache root is still cold afterwards.
+case "$print" in
+  base)  printf '%s\n' "$BASE"; exit 0 ;;
+  bin)   printf '%s\n' "$GO_BIN"; exit 0 ;;
+esac
+
+# --force and --base name opposite things, and taken together this script
+# deletes a directory it did not create: --force enters the install branch even
+# for a toolchain that is already there and complete, and `rm -rf "$BASE"`
+# below takes whatever --base pointed at. The pair is refused by name rather
+# than the rm made conditional: an installer may delete what it created and
+# nothing else.
+if [ -n "$base" ] && [ "$force" = 1 ]; then
+  echo "--force re-downloads the pinned toolchain over the install directory, and it starts by" >&2
+  echo "deleting that directory. --base $base is a directory you pointed this" >&2
+  echo "script at rather than one it created, so this run would delete yours. Refusing." >&2
+  echo "Drop --base to re-download into the cache dir, or remove $base" >&2
+  echo "yourself first if replacing it is what you meant." >&2
+  exit 2
+fi
+
+# This block checks the directory --base names.
+# The binary has to be there and also run: a toolchain unpacked for another
+# architecture answers -x and then fails the first build with a message about
+# the build, which sends the reader looking in the wrong place.
+if [ -n "$base" ]; then
+  if [ ! -x "$GO_BIN" ]; then
+    echo "--base $base has no bin/go; point it at an unpacked Go toolchain" >&2
+    exit 2
+  fi
+  # GOTOOLCHAIN=local so a toolchain line somewhere on this host cannot send
+  # the check off to fetch a different Go than the one being verified.
+  if ! GOTOOLCHAIN=local "$GO_BIN" version >/dev/null 2>&1; then
+    echo "--base $base has a bin/go that will not run on this host" >&2
+    exit 2
+  fi
+fi
+
+installed=0
+if [ "$force" = 1 ] || [ ! -x "$GO_BIN" ]; then
+  # This branch downloads, so this is where it checks that the pin covers
+  # the host.
+  pinned_platform
+  mkdir -p "$CACHE"
+  # The cache dir is shared: $HOME is a bind mount that several concurrent runs
+  # see at once. One exclusive lock covers the whole install, so a second caller
+  # waits here instead of writing over the first caller's download or reading a
+  # GOROOT that is still being unpacked.
+  exec 9>"$CACHE/.install.lock"
+  flock 9
+  # Re-tested under the lock, because the caller that held it first may have
+  # finished the install while this one waited. A --force run always installs.
+  if [ "$force" = 1 ] || [ ! -x "$GO_BIN" ]; then
+    # Armed before either temp exists, so a failing `mktemp -d` cannot leave the
+    # tarball temp file behind. `rm` on an empty name is a silent no-op, which is
+    # what the trap sees when it fires before the second mktemp has answered.
+    go_tar=""
+    go_tmp=""
+    trap 'rm -f "$go_tar"; rm -rf "$go_tmp"' EXIT
+    go_tar="$(mktemp "$CACHE/.${TARBALL}.XXXXXX")"
+    go_tmp="$(mktemp -d "${BASE}.XXXXXX")"
+    echo "fetching $TARBALL (~70 MB, needs network) ..." >&2
+    curl -fSL --max-time 300 -o "$go_tar" "https://go.dev/dl/$TARBALL"
+    echo "${WANT_SHA}  $go_tar" | sha256sum -c - >&2
+    tar -xzf "$go_tar" -C "$go_tmp" --strip-components=1
+    rm -f "$go_tar"
+    # The rename is the last step, so $BASE is either absent or a complete
+    # toolchain. Nobody outside the lock sees a half-unpacked tree.
+    rm -rf "$BASE"
+    mv "$go_tmp" "$BASE"
+    trap - EXIT
+    installed=1
+    echo "installed to $BASE (~240 MB extracted)" >&2
+    # Only on a fresh install. GOTOOLCHAIN=local so a stray go.mod cannot send
+    # this line off to fetch a different toolchain than the one just verified.
+    GOTOOLCHAIN=local "$GO_BIN" version >&2
+  fi
+  exec 9>&-
+fi
+# Said on the reuse path too. If nobody can name a toolchain that is off PATH,
+# the next caller downloads it again, or concludes it is not there.
+[ "$installed" = 1 ] || echo "already present at $BASE" >&2
+
+printf '%s\n' "$BASE"

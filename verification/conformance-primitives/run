@@ -1,0 +1,52 @@
+#!/bin/sh
+# Manual operation-bridge entry point. The framework proves its own verdict and
+# exit-code machinery before it starts the selected language.
+#
+# DCA_JS names the JavaScript runtime that runs the harness itself, `node` by
+# default and `deno` for the other one. It selects a runtime and never a
+# behaviour: both spellings run the same test files and the same runner, and
+# a bridge gets the same verdict under either.
+
+set -u
+
+here=$(CDPATH= cd -- "$(dirname "$0")" && pwd) || exit 2
+
+: "${DCA_JS:=node}"
+case "$DCA_JS" in
+    node) js_test="node --test"; js_run="node" ;;
+    deno) js_test="deno test -A"; js_run="deno run -A" ;;
+    *)
+        echo "conformance-primitives/run: DCA_JS is \"$DCA_JS\"; this runs under node or deno." >&2
+        exit 2
+        ;;
+esac
+
+test_count=0
+for test_file in "$here"/_shared/driver/test/*.test.mjs; do
+    [ -f "$test_file" ] || continue
+    test_count=$((test_count + 1))
+done
+
+if [ "$test_count" -eq 0 ]; then
+    echo "conformance-primitives/run: no $DCA_JS harness tests found; no bridge was started." >&2
+    exit 2
+fi
+
+echo "== framework self-check: $test_count $DCA_JS test files =="
+# Unquoted on purpose: the value is the two words of a command, and word
+# splitting turns it into one.
+if ! $js_test "$here"/_shared/driver/test/*.test.mjs; then
+    echo "conformance-primitives/run: $DCA_JS harness self-check failed; no bridge was started." >&2
+    exit 2
+fi
+
+echo ""
+echo "== framework self-check: shell harness fixtures =="
+if ! "$here/_shared/harness.test"; then
+    echo "conformance-primitives/run: shell harness self-check failed; no bridge was started." >&2
+    exit 2
+fi
+
+echo ""
+echo "== operation bridge =="
+exec $js_run "$here/_shared/driver/run.mjs" "$@"

@@ -1,0 +1,456 @@
+{
+  "cases": [
+    {
+      "id": "encoding/01",
+      "set": "encoding",
+      "label": "canonical value",
+      "op": "decode-base64url",
+      "input": {
+        "value": "3q2-7w"
+      },
+      "expected": {
+        "bytesHex": "deadbeef"
+      },
+      "rationale": "the shortest spelling that satisfies all four canonical rules; a decoder that refuses a length of 2 modulo 4, or that answers uppercase hex, answers wrongly here."
+    },
+    {
+      "id": "encoding/02",
+      "set": "encoding",
+      "label": "padded spelling",
+      "op": "decode-base64url",
+      "input": {
+        "value": "3q2-7w=="
+      },
+      "expected": {
+        "refused": "invalid_base64url"
+      },
+      "rationale": "the same octets with padding; every mainstream decoder accepts this spelling, and the strict field rule refuses it."
+    },
+    {
+      "id": "encoding/03",
+      "set": "encoding",
+      "label": "trailing bits set",
+      "op": "decode-base64url",
+      "input": {
+        "value": "3q2-7x"
+      },
+      "expected": {
+        "refused": "invalid_base64url"
+      },
+      "rationale": "unused trailing bits set; no runtime decoder enforces this rule by itself, so a bridge that decodes without re-encoding and comparing answers the same octets as the first case."
+    },
+    {
+      "id": "encoding/04",
+      "set": "encoding",
+      "label": "standard-alphabet spelling",
+      "op": "decode-base64url",
+      "input": {
+        "value": "3q2+7w"
+      },
+      "expected": {
+        "refused": "invalid_base64url"
+      },
+      "rationale": "the standard base64 alphabet in place of the url alphabet; a bridge that routes the value through a permissive decoder accepting both alphabets answers the octets."
+    },
+    {
+      "id": "aes-gcm-128/01",
+      "set": "aes-gcm-128",
+      "label": "known answer",
+      "op": "open-aes-gcm",
+      "input": {
+        "keyBase64url": "AAECAwQFBgcICQoLDA0ODw",
+        "nonceBase64url": "EBESExQVFhcYGRob",
+        "ciphertextBase64url": "gG1Cj2wg2Il4rzCUqUSOHlHSG_BY1ArR9rxMY0dzIECpWV73G7UFdvsyVf3jE34",
+        "aadBase64url": "ZGNhLWJpbmQtdjF8Y3xBQUVDQXdRRkJnY0lDUW9MREEwT0R3fGJvZHl0ZXh0"
+      },
+      "expected": {
+        "plaintextBase64url": "RENBIGNvbmZvcm1hbmNlIGtub3duIGFuc3dlciB2MQ"
+      },
+      "rationale": "a 16-octet key selects AES-128-GCM, and the tag follows the ciphertext in one buffer; a bridge that reads the tag off the front of the buffer, or that hands the whole buffer to a runtime taking the tag separately, refuses a carrier that opens."
+    },
+    {
+      "id": "aes-gcm-128/02",
+      "set": "aes-gcm-128",
+      "label": "carrier under other additional data",
+      "op": "open-aes-gcm",
+      "input": {
+        "keyBase64url": "AAECAwQFBgcICQoLDA0ODw",
+        "nonceBase64url": "EBESExQVFhcYGRob",
+        "ciphertextBase64url": "gG1Cj2wg2Il4rzCUqUSOHlHSG_BY1ArR9rxMY0dzIECpWV73G7UFdvsyVf3jE34",
+        "aadBase64url": "ZGNhLWJpbmQtdjF8cHxBQUVDQXdRRkJnY0lDUW9MREEwT0R3fHByZW1pdW18MjUxMDIzVDE0"
+      },
+      "expected": {
+        "refused": "authentication_failed"
+      },
+      "rationale": "the carrier of the first case under other additional data; a bridge that drops the aad member, or that reports a tag failure as a nonzero exit, answers wrongly here."
+    },
+    {
+      "id": "hkdf/01",
+      "set": "hkdf",
+      "label": "a Root for the premium fifteen-minute family",
+      "op": "hkdf-sha256",
+      "input": {
+        "ikmBase64url": "BwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwc",
+        "infoBase64url": "AQATZGNhLXBlcmlvZC1jaGFpbi12MQAHcHJlbWl1bQACAA8Bv-bQAC8",
+        "length": 16
+      },
+      "expected": {
+        "okmBase64url": "DSpVKZ3ASKdochuahOYJlQ"
+      },
+      "rationale": "32-octet ikm and a 41-octet info carrying 0x00 and octets above 0x7f; an implementation that routes info through a text string answers other bytes, and one that returns the whole 32-octet block instead of 16 octets fails here"
+    },
+    {
+      "id": "hkdf/02",
+      "set": "hkdf",
+      "label": "a Root for a longer access-group and five-minute geometry",
+      "op": "hkdf-sha256",
+      "input": {
+        "ikmBase64url": "BwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwc",
+        "infoBase64url": "AQATZGNhLXBlcmlvZC1jaGFpbi12MQALbG9ja2VkLWRhdGEABAAFAb_m0ABH",
+        "length": 16
+      },
+      "expected": {
+        "okmBase64url": "NYSrM2IgPJPh4wVRYqm62g"
+      },
+      "rationale": "a 45-octet info, longer than every other row; an implementation that reads info out of a fixed-width buffer or truncates it to 41 octets answers other bytes"
+    },
+    {
+      "id": "hkdf/03",
+      "set": "hkdf",
+      "label": "a Root at a different window and one-chain geometry",
+      "op": "hkdf-sha256",
+      "input": {
+        "ikmBase64url": "BwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwc",
+        "infoBase64url": "AQATZGNhLXBlcmlvZC1jaGFpbi12MQAHcHJlbWl1bQABAAUBv-QAAR8",
+        "length": 16
+      },
+      "expected": {
+        "okmBase64url": "j0Ds1HxVf5Y7v0gzDg1_sA"
+      },
+      "rationale": "the same octet widths as the first row over other octets; it adds no byte-level distinction and stays as a recorded known answer of the construction"
+    },
+    {
+      "id": "hkdf/04",
+      "set": "hkdf",
+      "label": "a Root under a distinct secret",
+      "op": "hkdf-sha256",
+      "input": {
+        "ikmBase64url": "CAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAg",
+        "infoBase64url": "AQATZGNhLXBlcmlvZC1jaGFpbi12MQAHcHJlbWl1bQACAA8Bv-bQAC8",
+        "length": 16
+      },
+      "expected": {
+        "okmBase64url": "waN292hPmglay75Xeiwm7Q"
+      },
+      "rationale": "the first row's info octets with different key material; an implementation that passes ikm as the salt, or derives from info alone, answers the two rows alike"
+    },
+    {
+      "id": "hkdf/05",
+      "set": "hkdf",
+      "label": "one Step into position zero",
+      "op": "hkdf-sha256",
+      "input": {
+        "ikmBase64url": "srHyhGfN6KKAOgBnF4XEng",
+        "infoBase64url": "AgATZGNhLXBlcmlvZC1jaGFpbi12MQAHcHJlbWl1bQACAA8Bv-bQAAA",
+        "length": 16
+      },
+      "expected": {
+        "okmBase64url": "wGwweDXdPQ-HqlCPVAa05A"
+      },
+      "rationale": "16-octet ikm, half the width the four rows above supply; an implementation that accepts one fixed key width, or pads a short ikm to 32 octets, answers other bytes"
+    },
+    {
+      "id": "hkdf/06",
+      "set": "hkdf",
+      "label": "one Step whose supplied state is position ten",
+      "op": "hkdf-sha256",
+      "input": {
+        "ikmBase64url": "IWCmrt9__ksZ-bbz8iDFHA",
+        "infoBase64url": "AgATZGNhLXBlcmlvZC1jaGFpbi12MQAHcHJlbWl1bQACAA8Bv-bQAAk",
+        "length": 16
+      },
+      "expected": {
+        "okmBase64url": "u2Pe_AoXrnArak89uEc07Q"
+      },
+      "rationale": "a second row at the 16-octet ikm width; it adds no byte-level distinction and stays as a recorded known answer of the construction"
+    },
+    {
+      "id": "hkdf/07",
+      "set": "hkdf",
+      "label": "one Step from the terminal state",
+      "op": "hkdf-sha256",
+      "input": {
+        "ikmBase64url": "DSpVKZ3ASKdochuahOYJlQ",
+        "infoBase64url": "AgATZGNhLXBlcmlvZC1jaGFpbi12MQAHcHJlbWl1bQACAA8Bv-bQAC4",
+        "length": 16
+      },
+      "expected": {
+        "okmBase64url": "gJJhKCX2mAGNVS8dCQu1Pw"
+      },
+      "rationale": "a third row at the 16-octet ikm width, its ikm the first row's output; it adds no byte-level distinction and stays as a recorded known answer of the construction"
+    },
+    {
+      "id": "hkdf/08",
+      "set": "hkdf",
+      "label": "a Leaf at position zero",
+      "op": "hkdf-sha256",
+      "input": {
+        "ikmBase64url": "wGwweDXdPQ-HqlCPVAa05A",
+        "infoBase64url": "AwATZGNhLXBlcmlvZC1jaGFpbi12MQAHcHJlbWl1bQACAA8Bv-bQAAA",
+        "length": 16
+      },
+      "expected": {
+        "okmBase64url": "GgOhN82qi6WwfAHOKFSSOw"
+      },
+      "rationale": "the info of the fifth row under one other leading octet, at the same widths; it adds no byte-level distinction and stays as a recorded known answer of the construction"
+    },
+    {
+      "id": "hkdf/09",
+      "set": "hkdf",
+      "label": "a Leaf at an interior fifteen-minute position",
+      "op": "hkdf-sha256",
+      "input": {
+        "ikmBase64url": "u2Pe_AoXrnArak89uEc07Q",
+        "infoBase64url": "AwATZGNhLXBlcmlvZC1jaGFpbi12MQAHcHJlbWl1bQACAA8Bv-bQAAk",
+        "length": 16
+      },
+      "expected": {
+        "okmBase64url": "qf4sGKrZcgZ9Et9Ca2Lz9g"
+      },
+      "rationale": "a 41-octet info and a 16-octet ikm once more; it adds no byte-level distinction and stays as a recorded known answer of the construction"
+    },
+    {
+      "id": "hkdf/10",
+      "set": "hkdf",
+      "label": "a Leaf at a five-minute terminal position",
+      "op": "hkdf-sha256",
+      "input": {
+        "ikmBase64url": "NYSrM2IgPJPh4wVRYqm62g",
+        "infoBase64url": "AwATZGNhLXBlcmlvZC1jaGFpbi12MQALbG9ja2VkLWRhdGEABAAFAb_m0ABH",
+        "length": 16
+      },
+      "expected": {
+        "okmBase64url": "C6YjvhyoGnAuHOKhL2Zh0Q"
+      },
+      "rationale": "a second 45-octet info, the width the second row already covers; it adds no byte-level distinction and stays as a recorded known answer of the construction"
+    },
+    {
+      "id": "hkdf/11",
+      "set": "hkdf",
+      "label": "a Leaf at a 288-position terminal",
+      "op": "hkdf-sha256",
+      "input": {
+        "ikmBase64url": "j0Ds1HxVf5Y7v0gzDg1_sA",
+        "infoBase64url": "AwATZGNhLXBlcmlvZC1jaGFpbi12MQAHcHJlbWl1bQABAAUBv-QAAR8",
+        "length": 16
+      },
+      "expected": {
+        "okmBase64url": "k2HX6xpm9raGfYrA72zF1g"
+      },
+      "rationale": "the one-chain geometry's 41-octet info at the widths above; it adds no byte-level distinction and stays as a recorded known answer of the construction"
+    },
+    {
+      "id": "hkdf/12",
+      "set": "hkdf",
+      "label": "a 32-octet derivation over ASCII info",
+      "op": "hkdf-sha256",
+      "input": {
+        "ikmBase64url": "TqgYT4uRUcM59WqfBo9Rs1Br3_R_xvZBtmdP7mNaSOo",
+        "infoBase64url": "RENBLWNsaWVudC1ib3VuZC10cmFuc3BvcnQ",
+        "length": 32
+      },
+      "expected": {
+        "okmBase64url": "3TmjNypZUjk1W0E-NZdKD2s6-tloQNH4m7QzHB1mpxE"
+      },
+      "rationale": "the only row asking for a full 32-octet block, over a 32-octet ikm and 26 octets of ASCII info; an implementation that truncates the output to one 16-octet half, or that reads info as a text string of another encoding, answers other octets. Its output is the key that opens the wrapped carrier in aes-gcm-256/04."
+    },
+    {
+      "id": "aes-gcm-256/01",
+      "set": "aes-gcm-256",
+      "label": "seal under additional data",
+      "op": "seal-aes-gcm",
+      "input": {
+        "keyBase64url": "TqgYT4uRUcM59WqfBo9Rs1Br3_R_xvZBtmdP7mNaSOo",
+        "nonceBase64url": "AQYLEBUaHyQpLjM4",
+        "plaintextBase64url": "AwoRGB8mLTQ7QklQV15lbA",
+        "aadBase64url": "ZGNhLWJpbmQtdjF8Y3xFU0l6UkZWbWQ0aVpxcnZNM2U3X0FBfHByZW1pdW10ZXh0"
+      },
+      "expected": {
+        "ciphertextBase64url": "Wk2YzBwqKJBx5cqHCl2jGE1q9-o8PiwryzpoTtngYNQ"
+      },
+      "rationale": "a 32-octet key selects AES-256-GCM, and the answer carries the 16-octet tag appended to the ciphertext; a bridge on a runtime whose API returns the tag separately and does not append it answers 16 octets of the expected value."
+    },
+    {
+      "id": "aes-gcm-256/02",
+      "set": "aes-gcm-256",
+      "label": "seal without additional data",
+      "op": "seal-aes-gcm",
+      "input": {
+        "keyBase64url": "3TmjNypZUjk1W0E-NZdKD2s6-tloQNH4m7QzHB1mpxE",
+        "nonceBase64url": "Aw0VFyEjKTM5Q0tT",
+        "plaintextBase64url": "HSo3RFFea3iFkp-sucbT4A",
+        "aadBase64url": ""
+      },
+      "expected": {
+        "ciphertextBase64url": "4vSrobWJd1jdM_vAIcWAdsJoReqFv6bQjMMURODcQJI"
+      },
+      "rationale": "the same seal over additional data of zero octets; a runtime whose API tells an absent aad apart from an empty one answers a different tag when a bridge passes the wrong form."
+    },
+    {
+      "id": "aes-gcm-256/03",
+      "set": "aes-gcm-256",
+      "label": "open under additional data",
+      "op": "open-aes-gcm",
+      "input": {
+        "keyBase64url": "TqgYT4uRUcM59WqfBo9Rs1Br3_R_xvZBtmdP7mNaSOo",
+        "nonceBase64url": "AQYLEBUaHyQpLjM4",
+        "ciphertextBase64url": "Wk2YzBwqKJBx5cqHCl2jGE1q9-o8PiwryzpoTtngYNQ",
+        "aadBase64url": "ZGNhLWJpbmQtdjF8Y3xFU0l6UkZWbWQ0aVpxcnZNM2U3X0FBfHByZW1pdW10ZXh0"
+      },
+      "expected": {
+        "plaintextBase64url": "AwoRGB8mLTQ7QklQV15lbA"
+      },
+      "rationale": "the carrier of the first case read back; a bridge that selects the cipher by a fixed width rather than by the key it was handed opens nothing at 32 octets."
+    },
+    {
+      "id": "aes-gcm-256/04",
+      "set": "aes-gcm-256",
+      "label": "open without additional data",
+      "op": "open-aes-gcm",
+      "input": {
+        "keyBase64url": "3TmjNypZUjk1W0E-NZdKD2s6-tloQNH4m7QzHB1mpxE",
+        "nonceBase64url": "Aw0VFyEjKTM5Q0tT",
+        "ciphertextBase64url": "4vSrobWJd1jdM_vAIcWAdsJoReqFv6bQjMMURODcQJI",
+        "aadBase64url": ""
+      },
+      "expected": {
+        "plaintextBase64url": "HSo3RFFea3iFkp-sucbT4A"
+      },
+      "rationale": "the second seal read back; a bridge that refuses to pass additional data of zero octets, or that substitutes some other octets for an empty aad member, refuses a carrier that opens."
+    },
+    {
+      "id": "aes-gcm-256/05",
+      "set": "aes-gcm-256",
+      "label": "carrier sealed under additional data, opened without it",
+      "op": "open-aes-gcm",
+      "input": {
+        "keyBase64url": "TqgYT4uRUcM59WqfBo9Rs1Br3_R_xvZBtmdP7mNaSOo",
+        "nonceBase64url": "AQYLEBUaHyQpLjM4",
+        "ciphertextBase64url": "Wk2YzBwqKJBx5cqHCl2jGE1q9-o8PiwryzpoTtngYNQ",
+        "aadBase64url": ""
+      },
+      "expected": {
+        "refused": "authentication_failed"
+      },
+      "rationale": "the third case with its additional data taken away; a bridge that ignores the aad member answers the plaintext here, and one that treats an empty member as a request it cannot serve exits instead of answering."
+    },
+    {
+      "id": "ecdh/01",
+      "set": "ecdh",
+      "label": "agreement from one side",
+      "op": "ecdh-p256",
+      "input": {
+        "privateKeyJwk": {
+          "kty": "EC",
+          "crv": "P-256",
+          "x": "KnsL031lVTbNxwtMq3OQmFq-fyPVh3k1__Adl4ieLXw",
+          "y": "-aNkTV8wd6O2rTWc2jkpJgez4Cuvas4J8_Styi-cdsE",
+          "d": "iWEhz6AHq-n4l_YzhTZcyQH7O9B1A1AKl4maOJh3z5g"
+        },
+        "peerPointBase64url": "BP_rrpHAnCFcf8NeehDgUG3w9ktUCbb_1LNPIX5pT8u7s5xZErWJNnNAJfmyMYNXO4LYDDMaasFJMMGHk63Fqho"
+      },
+      "expected": {
+        "sharedSecretBase64url": "TqgYT4uRUcM59WqfBo9Rs1Br3_R_xvZBtmdP7mNaSOo"
+      },
+      "rationale": "the agreed x-coordinate at the full field width and no KDF over it; a bridge that hashes the secret, or that answers the whole 65-octet point, answers other octets. The secret opens the recorded carrier in aes-gcm-256/03."
+    },
+    {
+      "id": "ecdh/02",
+      "set": "ecdh",
+      "label": "agreement from the other side",
+      "op": "ecdh-p256",
+      "input": {
+        "privateKeyJwk": {
+          "kty": "EC",
+          "crv": "P-256",
+          "x": "_-uukcCcIVx_w156EOBQbfD2S1QJtv_Us08hfmlPy7s",
+          "y": "s5xZErWJNnNAJfmyMYNXO4LYDDMaasFJMMGHk63Fqho",
+          "d": "8bOnBLg9jBNNA0DcpVKLwa74Lp_0Ld1NwYxeFMPslSY"
+        },
+        "peerPointBase64url": "BCp7C9N9ZVU2zccLTKtzkJhavn8j1Yd5Nf_wHZeIni18-aNkTV8wd6O2rTWc2jkpJgez4Cuvas4J8_Styi-cdsE"
+      },
+      "expected": {
+        "sharedSecretBase64url": "TqgYT4uRUcM59WqfBo9Rs1Br3_R_xvZBtmdP7mNaSOo"
+      },
+      "rationale": "the same agreement with the two halves swapped; a bridge that reads the private scalar out of the peer point, or that swaps the two inputs, holds the first case and fails this one."
+    },
+    {
+      "id": "ecdh/03",
+      "set": "ecdh",
+      "label": "point from a recorded key",
+      "op": "p256-point",
+      "input": {
+        "publicKeyJwk": {
+          "kty": "EC",
+          "crv": "P-256",
+          "x": "_-uukcCcIVx_w156EOBQbfD2S1QJtv_Us08hfmlPy7s",
+          "y": "s5xZErWJNnNAJfmyMYNXO4LYDDMaasFJMMGHk63Fqho"
+        }
+      },
+      "expected": {
+        "pointBase64url": "BP_rrpHAnCFcf8NeehDgUG3w9ktUCbb_1LNPIX5pT8u7s5xZErWJNnNAJfmyMYNXO4LYDDMaasFJMMGHk63Fqho"
+      },
+      "rationale": "the uncompressed SEC 1 encoding: the octet 0x04 and two 32-octet coordinates; a bridge that answers a compressed point, or that leaves the leading octet off, answers a different length. These are the 65 octets that lead the recorded sealed carrier."
+    },
+    {
+      "id": "rsa-oaep/01",
+      "set": "rsa-oaep",
+      "label": "recorded ciphertext over a 64-octet plaintext",
+      "op": "open-rsa-oaep",
+      "input": {
+        "ciphertextBase64url": "iJHtQ2T7MdNs0uqlbuIl4-YfnEENKjkootNLVI37A-MO7i1Hbdc7CntvxG4AyYILYECaShNOuh6nsuH4sQOfrRTeAx6YD41GiGe8gIJGNSm3FrgQZMyqVdrg_Y6VkOTO4Cs1CueApS3oP32M1f6gY-TogcttFXP7Np8-vTgLbbQYPwxKVp2TqV1vHEBhPSWE6ucJflOYOOxcVJu8SkMYV_gpeqG8WhhoEfN7lHT7N817tO7uXfug02fCQZKdHiigq3tRdqMeSUKEh5sbvjf-A8Rn1nU7DhaNOXfaO-BrQ0cbdJc8yp_HYIucQ6mEWt-n0F4SJthKg-1TXCaJpai8Xg",
+        "privateKeyJwk": {
+          "kty": "RSA",
+          "n": "tZqcXwvLYArS9n-wfbtSO9zNbSWBaPIV8rTOb8luS-g9UaRF1j3Av-R-5Yg1F_qQAH-pkOkV_MVYkuS2CCpa6gBsZFu76BVtvceOnFncJZdK6TBES9YCmX_Wu_kWN_dk-AeqPMf3ThxoEmI37OB1pRDjZeoR1ujzK2ogmb2314uv3Xh_u3XWca211AiAMqndd_JbgjCBSpTLicQmHu0WIuLBe2Px6RIHRZqWDcQQMOM56GeERwms728WU5kKg6pGEbssqTwaT_8vLbk_W28Gm6Cct4UGVTZr4P5_irno3155ALu3ngTKeowa7cuo7Z2AOppO140gRa0TK-iKQMi2VQ",
+          "e": "AQAB",
+          "d": "Abe1fWk-fyLMrBpFxTapmGY_xvKMUHDW6zP-SAyv0p94cjNIM5z9AioE1wjS0CGyTXlOCJ0WJ5ntOvxw47X7Pj9xRwGE6JtiE_t7pys3zt8Cs7hqMozSx8Vi0Ew5KdMMI5PQLofjC3XVnsDkXJ6JD-qpBlYW3TSLiKOJE3_5tmi4O3IbIzxXCX_7LiwL2nck74jQmQyjotgg3R2DZKIugRz383Z2FjzZ7KozPHyFaBuAtRnOv3amgDKkLx1iXtWLLBCXGPvU5EPDfO_U3YR5OTyYyxn9biGFzdplpD0YvVDredMlIU5MjIGDMdFq4Ky0VX5goTyjAiXm_96rDg_ziQ",
+          "p": "_SJfXspdbD9ZdN1QDDfhl-2yHSs9Ftp6rIQ81OkBrATWHal24CfppmJEH9yfVrR9Z_SncoIEgJxyNfw3HSURdHcnvGADTo1d7K3fJmJhG0TBJGyAJKMG2Q9Da997LOD3I-OBBX5trWFfYZ7Tad--ff8d49-HxvGTMe5-WJqt-bk",
+          "q": "t6juTp-T6fvjQ6WdyH7xvJjUamv_qtT42bjnxUlXVlYwDJC6egSAtv4XFf0KQQBJURf8LruqmH2NEC9quvRzBsD66VPNpwZxXvSEa04zF-CkcHehWvyGdHPv8YT8NWQKNB4ROm9JsbxzaL1W_bMfAADAkwYzYU5F-AyXLjALf30",
+          "dp": "jyOXsF9YUrTD3hyjfjU_QQ0tMedYZQroYZNpXq_fvSkC9sT0Lq8DJY3dnfLAu2PWoikrYsn4x80vnC1h8P4cD7Ktao0UcZ_o48QyMl9hL-1CFlmwYIc7gRRreJ1n5qnTtpyYQcYLOQady_Lm87CM5GyVt1yYR7wlExAcq_fTtyk",
+          "dq": "nUAN8tGdQt0BxFzcUNuoPPOaBBi-SlWZUEmKYJggKHMZJtkQYQLT9lpuB8ylZ-xH2iAwMw9JzNDK5A3FU5eTmTfIXdj8H0Nb9JJlgr7s7kfQY996Dz5iHPlbey6DB2_FcMRBugepUH3rTsW24vfn1gfO2tOXUHxFWlHla42Fer0",
+          "qi": "ND9CMV48VNCEayq4x0rAWYa1ZwPOofP2lefawlLja4A2IYo31s3AAtBUCMIwR3ZFDhKyUJN_hrrSdxdNfoO9RlxYTPddY6F36yFUA7spZKxZ1PuukqRdwS9TQnHU8BqZWIW59ofJxG6lXmXMG4k7rghLMNru9Y4zaD2X4BZVGo0",
+          "alg": "RSA-OAEP-256"
+        }
+      },
+      "expected": {
+        "plaintextBase64url": "ZGNhLWJpbmQtdjF8Y3xFU0l6UkZWbWQ0aVpxcnZNM2U3X0FBfHByZW1pdW10ZXh0AwoRGB8mLTQ7QklQV15lbA"
+      },
+      "rationale": "OAEP over SHA-256 with MGF1 on the same hash and no label; a bridge on a runtime defaulting MGF1 to SHA-1, or one passing a label, refuses a ciphertext that opens. The published bound-carrier vectors record this same ciphertext, so it is carried once."
+    },
+    {
+      "id": "rsa-oaep/02",
+      "set": "rsa-oaep",
+      "label": "recorded ciphertext over a 16-octet plaintext",
+      "op": "open-rsa-oaep",
+      "input": {
+        "ciphertextBase64url": "mTPQOSo0jxubTdj0Gw0faWmIb4ZkI7zIgg2k-H_Du95kJxDZZDb0HCOqZxoVxmAjpMyKIQZoA8cS6cxryVD1ILw3tG4n49xTegoCVRYQrRxu7FMV0iEo1pqb_h6Dm3gBktl8JWq0OTVCkxt5SCgM5Rja6gqWp2STiDr9AaS-TU7mDviBzdg-ol3AI5Am_3aTfcn9-bx5aa2KWmk-3lXa8zmscbNfeB6w-qksOn-UXtm1aqj2XIIwio3bpCKWhJ9-9eDgRpbfjpoQMN67AaFlDsPhHRGE0xmUhWwRkvYZ_xQkyfaRe45oWUzXYLy3R_VD3rAS7X8jjXHy8ix1X7-LrQ",
+        "privateKeyJwk": {
+          "kty": "RSA",
+          "n": "tZqcXwvLYArS9n-wfbtSO9zNbSWBaPIV8rTOb8luS-g9UaRF1j3Av-R-5Yg1F_qQAH-pkOkV_MVYkuS2CCpa6gBsZFu76BVtvceOnFncJZdK6TBES9YCmX_Wu_kWN_dk-AeqPMf3ThxoEmI37OB1pRDjZeoR1ujzK2ogmb2314uv3Xh_u3XWca211AiAMqndd_JbgjCBSpTLicQmHu0WIuLBe2Px6RIHRZqWDcQQMOM56GeERwms728WU5kKg6pGEbssqTwaT_8vLbk_W28Gm6Cct4UGVTZr4P5_irno3155ALu3ngTKeowa7cuo7Z2AOppO140gRa0TK-iKQMi2VQ",
+          "e": "AQAB",
+          "d": "Abe1fWk-fyLMrBpFxTapmGY_xvKMUHDW6zP-SAyv0p94cjNIM5z9AioE1wjS0CGyTXlOCJ0WJ5ntOvxw47X7Pj9xRwGE6JtiE_t7pys3zt8Cs7hqMozSx8Vi0Ew5KdMMI5PQLofjC3XVnsDkXJ6JD-qpBlYW3TSLiKOJE3_5tmi4O3IbIzxXCX_7LiwL2nck74jQmQyjotgg3R2DZKIugRz383Z2FjzZ7KozPHyFaBuAtRnOv3amgDKkLx1iXtWLLBCXGPvU5EPDfO_U3YR5OTyYyxn9biGFzdplpD0YvVDredMlIU5MjIGDMdFq4Ky0VX5goTyjAiXm_96rDg_ziQ",
+          "p": "_SJfXspdbD9ZdN1QDDfhl-2yHSs9Ftp6rIQ81OkBrATWHal24CfppmJEH9yfVrR9Z_SncoIEgJxyNfw3HSURdHcnvGADTo1d7K3fJmJhG0TBJGyAJKMG2Q9Da997LOD3I-OBBX5trWFfYZ7Tad--ff8d49-HxvGTMe5-WJqt-bk",
+          "q": "t6juTp-T6fvjQ6WdyH7xvJjUamv_qtT42bjnxUlXVlYwDJC6egSAtv4XFf0KQQBJURf8LruqmH2NEC9quvRzBsD66VPNpwZxXvSEa04zF-CkcHehWvyGdHPv8YT8NWQKNB4ROm9JsbxzaL1W_bMfAADAkwYzYU5F-AyXLjALf30",
+          "dp": "jyOXsF9YUrTD3hyjfjU_QQ0tMedYZQroYZNpXq_fvSkC9sT0Lq8DJY3dnfLAu2PWoikrYsn4x80vnC1h8P4cD7Ktao0UcZ_o48QyMl9hL-1CFlmwYIc7gRRreJ1n5qnTtpyYQcYLOQady_Lm87CM5GyVt1yYR7wlExAcq_fTtyk",
+          "dq": "nUAN8tGdQt0BxFzcUNuoPPOaBBi-SlWZUEmKYJggKHMZJtkQYQLT9lpuB8ylZ-xH2iAwMw9JzNDK5A3FU5eTmTfIXdj8H0Nb9JJlgr7s7kfQY996Dz5iHPlbey6DB2_FcMRBugepUH3rTsW24vfn1gfO2tOXUHxFWlHla42Fer0",
+          "qi": "ND9CMV48VNCEayq4x0rAWYa1ZwPOofP2lefawlLja4A2IYo31s3AAtBUCMIwR3ZFDhKyUJN_hrrSdxdNfoO9RlxYTPddY6F36yFUA7spZKxZ1PuukqRdwS9TQnHU8BqZWIW59ofJxG6lXmXMG4k7rghLMNru9Y4zaD2X4BZVGo0",
+          "alg": "RSA-OAEP-256"
+        }
+      },
+      "expected": {
+        "plaintextBase64url": "HSo3RFFea3iFkp-sucbT4A"
+      },
+      "rationale": "a recorded known answer of the class the first case already covers, at the same 2048-bit modulus width over a shorter plaintext."
+    }
+  ]
+}

@@ -1,0 +1,124 @@
+#!/bin/sh
+# Runs every conformance lane's own check, asks each for its machine-readable
+# record, then lets `_shared/aggregate-results` make the cross-lane statement.
+#
+#     ./check
+#
+# Exit codes: 0 every answered row held (a corpus set a lane explicitly does
+# not support remains visible in the aggregate), 1 a lane checked and failed, 2
+# a lane ran partially or nothing was verified.
+#
+# The child list is discovered rather than written down: an immediate child
+# directory holding an executable `check` counts as a lane, and the lanes run in sorted
+# order. Adding or removing a runtime directory's check therefore adds or
+# removes that lane, and no list here has to be kept in step with the tree.
+#
+# _shared/driver owns the shared cases, expected values, validation, and driver
+# the lane checks are written against. It carries no check, so it is support
+# rather than a lane, and this walk does not discover it.
+#
+# Each lane owns its own commands, paths, binary probes, toolchain installs, and
+# skip rules. Nothing here reaches past a lane's check into its individual
+# probes, and nothing here knows what a lane needs installed. A lane that cannot
+# install or find its toolchain answers 2 for itself, and that is the answer this
+# aggregate folds in.
+#
+# This aggregate stands alone. The public js/check is the Node-only gate and
+# does not call it: a lane may install or reuse a pinned toolchain, which is the
+# one thing that gate promises never to do.
+
+set -u
+
+cd "$(dirname "$0")" || exit 2
+
+failed=0
+partial=0
+ran=0
+tally=""
+records=$(mktemp -d) || exit 2
+trap 'rm -rf "$records"' EXIT INT TERM
+aggregator="_shared/aggregate-results"
+
+row() {
+    tally="$tally  $(printf '%-4s  %-34s %s' "$1" "$2" "$3")
+"
+}
+
+# The whole discovery walk: an immediate child directory with an
+# executable check, in sorted order.
+lanes=$(
+    for entry in */; do
+        lane=${entry%/}
+        [ -x "$lane/check" ] || continue
+        printf '%s\n' "$lane"
+    done | sort
+)
+
+for lane in $lanes; do
+    echo "=============================================================================="
+    echo "$lane: ./$lane/check"
+    echo "=============================================================================="
+    echo ""
+    "./$lane/check" --record "$records/$lane.record"
+    status=$?
+    ran=$((ran + 1))
+    echo ""
+    case $status in
+        0) row PASS "$lane" "lane check exit 0" ;;
+        1) row FAIL "$lane" "lane check exit 1"
+           failed=$((failed + 1)) ;;
+        2) row PART "$lane" "lane check exit 2"
+           partial=1 ;;
+        *) echo "$lane/check exited $status, which is outside the 0/1/2 contract, so"
+           echo "nothing it printed can be read as a verdict."
+           row PART "$lane" "lane check exit $status"
+           partial=1 ;;
+    esac
+done
+
+echo "=============================================================================="
+echo "TALLY"
+printf '%s' "$tally"
+echo ""
+
+# A run in which no lane ran verified nothing, whatever the loop did or did not
+# count, so it never exits 0.
+if [ $ran -eq 0 ]; then
+    echo "RESULT: no child directory holds an executable check, so no conformance"
+    echo "lane ran and nothing was verified."
+    exit 2
+fi
+
+# Human stdout cannot say whether every corpus set held: a set a lane does not
+# support leaves that lane's exit at zero. The records carry that status,
+# so only the shared refold may make the final claim. A missing record means the
+# lane's exit code has no accountable evidence and is incomplete.
+for lane in $lanes; do
+    if [ ! -f "$records/$lane.record" ]; then
+        echo "RESULT: partial run. $lane/check left no record for the cross-lane refold."
+        exit 2
+    fi
+    matching_identity=$(grep -Fxc "lane=$lane" "$records/$lane.record" || true)
+    all_identities=$(grep -c '^lane=' "$records/$lane.record" || true)
+    if [ "$matching_identity" -ne 1 ] || [ "$all_identities" -ne 1 ]; then
+        echo "RESULT: partial run. $lane/check wrote a record without exactly one lane=$lane identity."
+        exit 2
+    fi
+done
+
+echo "=============================================================================="
+echo "CROSS-LANE RECORDS"
+"$aggregator" "$records"/*.record
+aggregate_status=$?
+case $aggregate_status in
+    0|1|2) ;;
+    *)
+        echo "RESULT: the record aggregate exited $aggregate_status outside 0/1/2, so no cross-lane claim was made."
+        exit 2 ;;
+esac
+
+# The record refold is authoritative for its rows. The top-level exit still reports the worst
+# result if a lane exited outside the rows it managed to write.
+if [ "$partial" -eq 1 ]; then exit 2; fi
+if [ "$failed" -gt 0 ] && [ "$aggregate_status" -eq 0 ]; then exit 1; fi
+exit "$aggregate_status"

@@ -1,0 +1,296 @@
+#!/usr/bin/env bash
+# Install a pinned static php-cli binary into a cache dir. Nothing system-wide.
+#
+# Separated from the replay so the download can be done once, ahead of time, on a
+# machine that has egress, and the replay can then happen with no network at all.
+# `check` calls this installer for the lane's pinned PHP. Calling it
+# ahead of time remains useful on a machine with egress so the later manual lane
+# run is offline. A caller that must not download asks --print-base or
+# --print-bin, neither of which touches the network.
+#
+#   ./install-toolchain                    # install if absent, then print BASE
+#   ./install-toolchain --base <dir>       # use this install as is, download nothing
+#   ./install-toolchain --cache-root <dir> # put or find the install under this root
+#   ./install-toolchain --print-base       # print where BASE is or would be, install nothing
+#   ./install-toolchain --print-bin        # print the php binary a caller drives, install nothing
+#   ./install-toolchain --print-cache      # print this lane's cache dir, install nothing
+#   ./install-toolchain --force            # re-download over an existing install
+#   ./install-toolchain --help             # this text
+#
+# Run it directly: the shebang names bash.
+#
+# BASE is the directory holding the php binary, and BASE/php is the binary
+# itself. A caller is given one of them, or the root the lanes live under;
+# nothing here searches PATH and nothing here is put on PATH.
+#
+# --cache-root and --print-cache are one level apart, which is why the flag
+# carries the word root: the root holds every lane and this lane's directory is
+# `php` under it, so --print-cache answers <root>/php and feeding that back in
+# as a root would install into php/php.
+#
+# Where it lands, first match wins:
+#   --base <dir>        a directory holding an installed php, used as is, nothing downloaded.
+#                       --force is refused with it given: this script deletes only what it created.
+#   --cache-root <dir>  root to install into, as <root>/php
+#   $DCA_CACHE/php
+#   $XDG_CACHE_HOME/dca/php
+#   $HOME/.cache/dca/php
+set -euo pipefail
+
+# ---- the pin, and what it is worth -------------------------------------------
+#
+# A self-contained static php-cli built by crazywhalecc/static-php-cli and served
+# from dl.static-php.dev. The `bulk` distribution is the one with the openssl
+# extension, which is what every check in this lane runs on.
+#
+# This project computed the hashes below itself. static-php.dev serves no
+# .sha256 beside a tarball, publishes no manifest covering one, and the
+# project's GitHub releases carry only the `spc` builder binaries with digests,
+# never these php builds. So each hash below is sha256sum over the file as
+# downloaded on the date recorded in README.md, by this project, and it pins the
+# bytes this lane tested. It attests nothing static-php.dev signed. An
+# implementer weighing this pin should read it as "these are the bytes that
+# produced the recorded numbers" and not as a vendor attestation. README.md says
+# the same in full.
+#
+# To bump the pin, change the version and both hashes together, and
+# re-download both files to compute them, because there is no manifest to read
+# them off:
+#   https://dl.static-php.dev/static-php-cli/bulk/?format=json
+PHP_VERSION=8.4.23
+SHA256_x86_64=5fa2b5f1cc9d7f79b19718926b4f4f0bb6949db52073b2fabf8ae52de3993af5
+SHA256_aarch64=1faabbea9c500daab9ba202cb75ea9876191a2a8f902244e9d0464addb9b55b1
+
+# The `bulk` builds published for Linux are fully static: the binary carries its
+# own libc and needs nothing from the host's. So this lane has no counterpart to the
+# Python lane's glibc floor, and inventing one would refuse hosts that run the
+# file perfectly well. What can still stop the binary is proved rather than
+# predicted, below: a fresh install runs `php -v` and asks for the openssl
+# extension before the download is promoted into place.
+
+# Which pinned build this host would take, resolved only where the answer is
+# needed.
+#
+# An OS or an architecture the pin does not cover justifies refusing a
+# download, but not refusing --base, which is the flag both
+# refusals below tell the operator to pass, and not refusing
+# --print-cache, which names a directory and does not depend on the build. So the
+# check sits in a function, called where the pinned install is named, rather than at
+# the top of the file: run before the argument line is read, it answered every
+# invocation on macOS with the advice to pass a flag it had already made
+# unreachable.
+pinned_platform() {
+  case "$(uname -s)" in
+    Linux) ;;
+    *) echo "unsupported OS $(uname -s); the pinned build is a Linux static php-cli." >&2
+       echo "static-php.dev publishes macOS builds too, and they are not static and are not pinned" >&2
+       echo "here. Install PHP ${PHP_VERSION} with the openssl extension by hand and pass --base" >&2
+       echo "naming the directory holding it." >&2
+       exit 2 ;;
+  esac
+
+  case "$(uname -m)" in
+    x86_64|amd64)  PARCH=x86_64 ;;
+    aarch64|arm64) PARCH=aarch64 ;;
+    *) echo "unsupported arch $(uname -m); only x86_64 and aarch64 builds are published and pinned." >&2
+       echo "Install PHP ${PHP_VERSION} with the openssl extension by hand and pass --base." >&2
+       exit 2 ;;
+  esac
+  sha_var="SHA256_${PARCH}"; WANT_SHA="${!sha_var}"
+
+  TARBALL="php-${PHP_VERSION}-cli-linux-${PARCH}.tar.gz"
+  URL="https://dl.static-php.dev/static-php-cli/bulk/${TARBALL}"
+}
+
+HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
+# The cache dir rule is kept in one shared file: DCA_CACHE, or the OS
+# cache dir, or a refusal naming DCA_CACHE.
+# shellcheck source=../_shared/cache.sh
+. "$HERE/../_shared/cache.sh"
+
+# The whole argument line is read before anything is resolved, because
+# --cache-root moves where BASE would be and the print actions have to answer
+# for the flags this invocation was given rather than for the defaults. Both
+# path values are made absolute here, at the one place they are read; cache.sh
+# explains why.
+base=""
+cache_root=""
+print=""
+force=0
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --base)
+      [ $# -ge 2 ] || { echo "--base needs the directory holding the php binary" >&2; exit 2; }
+      resolve_absolute_path "$2"; base="$DCA_ABSOLUTE_PATH"; shift 2 ;;
+    --cache-root)
+      [ $# -ge 2 ] || { echo "--cache-root needs a directory to hold the lanes" >&2; exit 2; }
+      resolve_absolute_path "$2"; cache_root="$DCA_ABSOLUTE_PATH"; shift 2 ;;
+    --print-base)  print=base; shift ;;
+    --print-bin)   print=bin; shift ;;
+    --print-cache) print=cache; shift ;;
+    --force)       force=1; shift ;;
+    --help|-h)     awk 'NR>1 && /^#/ { sub(/^# ?/, ""); print; next } NR>1 { exit }' "${BASH_SOURCE[0]}"; exit 0 ;;
+    *) echo "unknown argument: $1" >&2; exit 2 ;;
+  esac
+done
+
+if [ -n "$cache_root" ]; then
+  CACHE="$cache_root/php"
+else
+  resolve_cache_dir php
+  CACHE="$DCA_CACHE_DIR"
+fi
+
+# --print-cache answers from the root and the lane name alone, so it answers
+# first, ahead of everything that depends on the pin.
+if [ "$print" = cache ]; then printf '%s\n' "$CACHE"; exit 0; fi
+
+# The tarball holds one file, `php`, with no leading directory, so the install is
+# a directory this script names with the binary at its root. The .NET
+# lane uses the same shape, and it keeps two versions from sharing one path. The name spells
+# out the architecture, so the script cannot name the pinned install without knowing which
+# build this host would take. That is why the platform is resolved here and
+# not further down: a host the pin does not cover has no such directory to name.
+# A --base directory is the operator's own and carries none of this.
+if [ -n "$base" ]; then
+  BASE="$base"
+else
+  pinned_platform
+  BASE="$CACHE/php-${PHP_VERSION}-cli-linux-${PARCH}"
+fi
+PHP_BIN="$BASE/php"
+
+# The other two queries answer and stop, before the install branch and before
+# any directory is created. A caller that must not download asks one of these,
+# and a cold cache root is still cold afterwards.
+case "$print" in
+  base)  printf '%s\n' "$BASE"; exit 0 ;;
+  bin)   printf '%s\n' "$PHP_BIN"; exit 0 ;;
+esac
+
+# --force and --base name opposite things, and taken together this script
+# deletes a directory it did not create. --base is documented above as a
+# directory holding an installed php, used as is, so /usr/bin and /usr/local/bin
+# are values an operator reaches for; --force then enters the install branch and
+# `rm -rf "$BASE"` deletes it. The script refuses the pair by name rather than making the
+# rm conditional: an installer may delete what it created and nothing else.
+if [ -n "$base" ] && [ "$force" = 1 ]; then
+  echo "--force re-downloads the pinned build over the install directory, and it starts by" >&2
+  echo "deleting that directory. --base $base is a directory you pointed this" >&2
+  echo "script at rather than one it created, so this run would delete yours. Refusing." >&2
+  echo "Drop --base to re-download into the cache dir, or remove $base" >&2
+  echo "yourself first if replacing it is what you meant." >&2
+  exit 2
+fi
+
+# Passing --base claims the directory holds an installed php, and this block checks that claim.
+if [ -n "$base" ]; then
+  if [ ! -x "$PHP_BIN" ]; then
+    echo "--base $base has no php at its root; point it at the directory holding one" >&2
+    exit 2
+  fi
+  if ! "$PHP_BIN" -v >/dev/null 2>&1; then
+    echo "--base $base has a php that will not run on this host" >&2
+    exit 2
+  fi
+  # The script checks this on an operator-supplied binary because every check in this lane is an
+  # openssl call. A PHP without the extension fails the first request with a
+  # call to an undefined function, which reads as a broken bridge and is not one.
+  if ! "$PHP_BIN" -r 'exit(extension_loaded("openssl") ? 0 : 1);'; then
+    echo "$PHP_BIN has no openssl extension, and every check this lane runs is an openssl call." >&2
+    echo "Point --base at a PHP built with openssl, or drop it and let this script install" >&2
+    echo "the pinned build." >&2
+    exit 2
+  fi
+fi
+
+installed=0
+if [ "$force" = 1 ] || [ ! -x "$PHP_BIN" ]; then
+  mkdir -p "$CACHE"
+  # The cache dir is shared: $HOME is a bind mount that several concurrent runs
+  # see at once. One exclusive lock covers the whole install, so a second caller
+  # waits here instead of writing over the first caller's download or reading a
+  # directory that is still being unpacked.
+  exec 9>"$CACHE/.install.lock"
+  flock 9
+  # Re-tested under the lock, because the caller that held it first may have
+  # finished the install while this one waited. A --force run always installs.
+  if [ "$force" = 1 ] || [ ! -x "$PHP_BIN" ]; then
+    command -v curl >/dev/null 2>&1 || {
+      echo "no curl on PATH, and fetching $TARBALL is the one step here that needs it." >&2
+      echo "Download $URL on a machine that has egress, unpack it, and pass --base naming the" >&2
+      echo "directory holding the php binary." >&2
+      exit 2
+    }
+    # Armed before either temp exists, so a failing `mktemp -d` cannot leave the
+    # tarball temp file behind. `rm` on an empty name is a silent no-op, which is
+    # what the trap sees when it fires before the second mktemp has answered.
+    php_tar=""
+    php_tmp=""
+    trap 'rm -f "$php_tar"; rm -rf "$php_tmp"' EXIT
+    php_tar="$(mktemp "$CACHE/.${TARBALL}.XXXXXX")"
+    php_tmp="$(mktemp -d "${BASE}.XXXXXX")"
+    echo "fetching $TARBALL (~30 MB, needs network) ..." >&2
+    # The listing URL answers 302 to a /down?path= form, so -L is required.
+    if ! curl -fSL --max-time 900 -o "$php_tar" "$URL"; then
+      echo "could not fetch $URL" >&2
+      echo "This is the only step in this lane that needs egress. On a machine with none, download" >&2
+      echo "that file elsewhere, unpack it, and pass --base naming the directory holding the php" >&2
+      echo "binary; nothing after this point touches the network." >&2
+      exit 2
+    fi
+    got_sha="$(sha256sum "$php_tar" | cut -d' ' -f1)"
+    if [ "$got_sha" != "$WANT_SHA" ]; then
+      echo "checksum mismatch on $TARBALL" >&2
+      echo "  expected $WANT_SHA" >&2
+      echo "  got      $got_sha" >&2
+      echo "Read this one carefully, because the pin is self-computed rather than vendor-published:" >&2
+      echo "static-php.dev serves no .sha256 beside the tarball and no manifest covering it, so the" >&2
+      echo "expected hash records the bytes this lane tested and attests nothing static-php.dev" >&2
+      echo "signed. A mismatch therefore means one of two things and the file cannot tell them" >&2
+      echo "apart: the download was damaged, or static-php.dev rebuilt and replaced $TARBALL in" >&2
+      echo "place. Re-run once. If it still differs, find out which of the two happened before" >&2
+      echo "changing the pin, and record who checked it in README.md." >&2
+      exit 2
+    fi
+    # The tarball unpacks as a bare `php` file, with no leading directory to strip.
+    tar -xzf "$php_tar" -C "$php_tmp"
+    rm -f "$php_tar"
+    # Both proofs run on the unpacked file before it is promoted, so a build that
+    # fails them here is never promoted for the next caller to reuse.
+    if ! "$php_tmp/php" -v >/dev/null 2>&1; then
+      echo "$TARBALL unpacked and the binary will not run on this host." >&2
+      echo "The build is fully static, so there is no libc floor it could have missed. What does" >&2
+      echo "stop it is a kernel or sandbox that refuses the UPX self-extraction static-php.dev packs" >&2
+      echo "it with, which needs an executable anonymous mapping." >&2
+      echo "Install PHP ${PHP_VERSION} with the openssl extension by hand and pass --base." >&2
+      exit 2
+    fi
+    if ! "$php_tmp/php" -r 'exit(extension_loaded("openssl") ? 0 : 1);'; then
+      echo "$TARBALL unpacked and its PHP has no openssl extension." >&2
+      echo "Every check this lane runs is an openssl call, so this build cannot carry the claim." >&2
+      echo "The bulk distribution is the one that ships openssl; minimal does not. Check which" >&2
+      echo "directory the URL above names before changing the pin." >&2
+      exit 2
+    fi
+    # The rename is the last step, so $BASE is either absent or a
+    # complete install. Nobody outside the lock sees a half-unpacked tree.
+    rm -rf "$BASE"
+    mv "$php_tmp" "$BASE"
+    trap - EXIT
+    installed=1
+    echo "installed to $BASE (~31 MB extracted)" >&2
+    # Only on a fresh install. On the reuse path the script prints the path and nothing else.
+    # Both lines, because the pin exists solely for the OpenSSL the binary
+    # carries: it is a different build from whatever the host's php links.
+    "$PHP_BIN" -v >&2
+    "$PHP_BIN" -r 'echo OPENSSL_VERSION_TEXT, "\n";' >&2
+  fi
+  exec 9>&-
+fi
+# The script says this on the reuse path too. If a php is off PATH and nobody can name it,
+# the next caller downloads it again or concludes it is not there.
+[ "$installed" = 1 ] || echo "already present at $BASE" >&2
+
+printf '%s\n' "$BASE"

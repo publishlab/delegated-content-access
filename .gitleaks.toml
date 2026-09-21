@@ -1,0 +1,10 @@
+[extend]
+useDefault = true
+
+[allowlist]
+description = "Generated test keys and the PEM armor that wraps them"
+paths = [
+  '''^verification/fixtures/''',
+  '''^verification/vectors/''',
+  '''^verification/conformance-primitives/php/v1/crypto\.php$''',
+]

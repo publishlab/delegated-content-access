@@ -1,0 +1,14 @@
+{
+  "version": 1,
+  "root": "js/v1",
+  "role": "client",
+  "directories": [
+    "core-shared",
+    "core-shared--client-issuer",
+    "core-shared--client-publisher",
+    "core-client",
+    "adapter-client",
+    "integration-client"
+  ],
+  "files": "every .js file directly in each directory"
+}
