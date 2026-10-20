@@ -1,0 +1,48 @@
+{
+  "issuer-endpoint": {
+    "directory": "issuer-endpoint",
+    "test": "issuer-endpoint.contract.test.js",
+    "runner": "test:contract:issuer-endpoint",
+    "requiredAccess": "black-box endpoint",
+    "versions": ["1"],
+    "deliveryModes": ["direct"],
+    "contractProfiles": ["dca-profile-period-keys"],
+    "observations": [],
+    "fixtureSets": [
+      "fixtures/v1/baseline/issuer-admission",
+      "fixtures/v1/profiles/dca-profile-period-keys/issuer-admission"
+    ],
+    "fixtureConsumer": "base-contract",
+    "fixtureFormats": ["1", "2"]
+  },
+  "issuer-core": {
+    "directory": "issuer-core",
+    "test": "issuer-core.contract.test.js",
+    "runner": "test:contract:issuer-core",
+    "requiredAccess": "public issuer-core component",
+    "versions": ["1"],
+    "deliveryModes": ["direct"],
+    "contractProfiles": ["dca-profile-period-keys"],
+    "observations": [],
+    "fixtureSets": [
+      "fixtures/v1/baseline/issuer-admission",
+      "fixtures/v1/profiles/dca-profile-period-keys/issuer-admission"
+    ],
+    "fixtureConsumer": "base-contract",
+    "fixtureFormats": ["1", "2"]
+  },
+  "issuer-browser-origin": {
+    "directory": "issuer-browser-origin",
+    "test": "issuer-browser-origin.contract.test.js",
+    "runner": "test:contract:issuer-browser-origin",
+    "requiredAccess": "selected browser issuer composition with host callback instrumentation",
+    "versions": ["1"],
+    "deliveryModes": ["direct"],
+    "contractProfiles": ["dca-profile-browser-origin"],
+    "observations": ["registration-policy-opening-order"],
+    "fixtureSets": ["fixtures/v1/profiles/dca-profile-period-keys/issuer-admission"],
+    "fixtureConsumer": "base-contract",
+    "fixtureFormats": ["1"],
+    "selection": "selected-profile"
+  }
+}

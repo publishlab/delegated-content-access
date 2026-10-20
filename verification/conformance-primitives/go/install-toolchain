@@ -7,6 +7,7 @@
 # calling it by hand is optional.
 #
 #   ./install-toolchain                    # install if absent, then print BASE
+#   ./install-toolchain --version <token>  # the pin `versions` lists for <token>; default when absent
 #   ./install-toolchain --base <dir>       # use this toolchain as is, download nothing
 #   ./install-toolchain --cache-root <dir> # put or find the toolchain under this root
 #   ./install-toolchain --print-base       # print where BASE is or would be, install nothing
@@ -16,6 +17,11 @@
 #   ./install-toolchain --help             # this text
 #
 # Run it directly: the shebang names bash.
+#
+# The version comes from --version, else DCA_VERSION, else `default`, the first
+# default line of `versions` beside this script. A token that file does not
+# list is refused with exit 2. Each version installs into a directory of its
+# own, so two versions sit side by side in one cache.
 #
 # BASE is the unpacked toolchain: the directory GOROOT names, with bin/go under
 # it. A caller is given it, or is given the root the lanes live under; nothing
@@ -35,13 +41,21 @@
 #   $HOME/.cache/dca/go
 set -euo pipefail
 
-# Pinned by exact version. Bumping the pin means changing the version and both
-# checksums together, read off the release table, which publishes SHA-256 per
-# archive:
+# Pinned by exact version: each token's release is the second field of its
+# line in `versions`, and its two checksums are below, keyed by token. Bumping a
+# pin means changing the release there and both checksums here together, read
+# off the release table, which publishes SHA-256 per archive:
 #   https://go.dev/dl/
-GO_VERSION=1.27.0            # keep in step with go/v1/go.mod
-SHA256_amd64=675c26c449cbb18fc24b74650de1eabbae6e16f64326fd85a283fb3b58280685
-SHA256_arm64=51798d2c42d0e1c6ed7fd9f48728b4193abac9e8aad6dbac2fe96a81f5909bda
+# The 1.27 release stays in step with the `go` line of go/stdlib/v1/go.mod.
+pin_checksums() {
+  case "$1" in
+    1.27) SHA256_amd64=675c26c449cbb18fc24b74650de1eabbae6e16f64326fd85a283fb3b58280685
+          SHA256_arm64=51798d2c42d0e1c6ed7fd9f48728b4193abac9e8aad6dbac2fe96a81f5909bda ;;
+    *) echo "versions lists $1, and this installer carries no checksum for it." >&2
+       echo "Add both checksums for its release to pin_checksums before the token can install." >&2
+       exit 2 ;;
+  esac
+}
 
 # Which pinned archive this host would download, resolved on the leg that
 # downloads one and nowhere else.
@@ -92,6 +106,7 @@ base=""
 cache_root=""
 print=""
 force=0
+version="${DCA_VERSION:-default}"
 while [ $# -gt 0 ]; do
   case "$1" in
     --base)
@@ -100,6 +115,9 @@ while [ $# -gt 0 ]; do
     --cache-root)
       [ $# -ge 2 ] || { echo "--cache-root needs a directory to hold the lanes" >&2; exit 2; }
       resolve_absolute_path "$2"; cache_root="$DCA_ABSOLUTE_PATH"; shift 2 ;;
+    --version)
+      [ $# -ge 2 ] || { echo "--version needs a token from $HERE/versions, or default" >&2; exit 2; }
+      version="$2"; shift 2 ;;
     --print-base)  print=base; shift ;;
     --print-bin)   print=bin; shift ;;
     --print-cache) print=cache; shift ;;
@@ -108,6 +126,12 @@ while [ $# -gt 0 ]; do
     *) echo "unknown argument: $1" >&2; exit 2 ;;
   esac
 done
+
+# The version first: an unlisted token refuses every action, print queries
+# included, so no caller is handed a path for a version nobody pinned.
+resolve_version_pin "$HERE/versions" "$version" || exit 2
+GO_VERSION="$DCA_VERSION_RELEASE"
+pin_checksums "$DCA_VERSION_TOKEN"
 
 if [ -n "$cache_root" ]; then
   CACHE="$cache_root/go"

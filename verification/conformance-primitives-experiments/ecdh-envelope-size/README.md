@@ -21,8 +21,10 @@ All three agree a 32-byte fixed-width P-256 ECDH x-coordinate and encrypt one 16
 AES-256-GCM with the complete BIND string as additional data. The BIND string is one canonical content
 coordinate, `dca-bind-v1|c|<renderId>|bodytext`.
 
-`control-109` reproduces what the specification fixes today: the agreed x-coordinate is the AES-256-GCM key
-and the fixture supplies the nonce.
+`control-109` records the former BIND spelling while reproducing the unchanged
+ECDH/AES-GCM carrier: the agreed x-coordinate is the AES-256-GCM key and the
+fixture supplies the nonce. Current envelopes use `dca-bind-key-envelope`;
+these experimental bytes remain frozen.
 
 The two HKDF profiles replace both with derived material:
 
@@ -143,7 +145,7 @@ its probe wraps the point in a `SubjectPublicKeyInfo` and openssl decompresses i
 readers take that same shell and refuse the compressed point inside it. So the 65-byte profile costs a
 decompression step written by the implementer on half the runtimes tested here, which is a cost the two
 uncompressed profiles do not carry. The three decoders in this experiment pay it: each follows the sketch
-in the compact ECDH spec proposal line for line over the language's big-integer type, rejects at the
+in [Decoding sketch](#decoding-sketch) line for line over the language's big-integer type, rejects at the
 `y^2 == rhs` check when x has no point, and ends in the library import. Flipping one byte of a decoder's
 output made `check` exit 1 on that lane's compressed profile in each of the three.
 
@@ -178,6 +180,43 @@ profiles the nonce is fixed by the ephemeral key and the coordinate, so
 reusing an ephemeral keypair at one coordinate reuses the AES-GCM key and nonce pair. The control's
 independently sampled nonce does not have that property. The probe records the relationship and does not
 make ephemeral reuse a supported mode.
+
+## Decoding sketch
+
+This sketch is preserved verbatim from the compact-ECDH proposal's Opening
+section. The "requirements above" in its introduction refer to that proposal's
+opening requirements. The proposal remains unadopted; this experiment records
+adapter evidence and selects no DCA envelope form.
+
+The following is a non-normative decoding sketch. SEC 1 and the rejection
+requirements above define behavior; this sketch does not replace either one.
+
+```text
+decodeCompressedP256(encoded):
+    require length(encoded) == 33
+    require encoded[0] is 0x02 or 0x03
+
+    x = OS2IP(encoded[1..32])
+    require x < p
+
+    rhs = (x^3 - 3*x + b) mod p
+    y = rhs^((p + 1) / 4) mod p
+    require y^2 mod p == rhs
+
+    if parity(y) != (encoded[0] & 1):
+        y = p - y
+
+    require y < p
+    require parity(y) == (encoded[0] & 1)
+
+    point = 0x04 || I2OSP(x, 32) || I2OSP(y, 32)
+    return libraryImportAndValidate(point)
+```
+
+Here `p` and `b` are the P-256 field prime and curve coefficient, `OS2IP` and
+`I2OSP` use unsigned big-endian integers, and `parity(y)` is the least
+significant bit of `y`. The final library import remains part of the required
+validation boundary.
 
 ## Runtimes not built here
 

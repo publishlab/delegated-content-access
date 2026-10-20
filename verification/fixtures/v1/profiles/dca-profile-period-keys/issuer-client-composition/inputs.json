@@ -1,0 +1,91 @@
+{
+  "format": "period-key-composition/v1",
+  "description": "Issuer and client setup for the replay. The publisher-side secrets that sealed the renders (signing private key, ephemeral pairs, seed) stay in the recorder.",
+  "clock": {
+    "start": "2025-10-23T14:20:00Z",
+    "steps": [
+      {
+        "label": "A",
+        "advanceMs": 0
+      },
+      {
+        "label": "B",
+        "advanceMs": 0
+      },
+      {
+        "label": "C",
+        "advanceMs": 3600000
+      }
+    ]
+  },
+  "publisherOrigin": "https://www.news-site.example",
+  "issuer": {
+    "issuerName": "paywall_subscription_service",
+    "keyId": "2025-10",
+    "algorithm": "ecdh-p256",
+    "unlockUrl": "https://api.example.com/unlock",
+    "publicKeyJwk": {
+      "kty": "EC",
+      "crv": "P-256",
+      "x": "9Clr-EnNZCpIn_ngytYUaKgaJp_6NGznARGs6KX7yQI",
+      "y": "H_Ykk33ssm73D020l_Ew658hzGiHIM7P6oUFExYaQUE"
+    },
+    "privateKeyJwk": {
+      "kty": "EC",
+      "crv": "P-256",
+      "x": "9Clr-EnNZCpIn_ngytYUaKgaJp_6NGznARGs6KX7yQI",
+      "y": "H_Ykk33ssm73D020l_Ew658hzGiHIM7P6oUFExYaQUE",
+      "d": "hqR19bDK4x7z0oRRJSQ1egEvA0urFopNGwfgN0FoFQU"
+    }
+  },
+  "publisherRegistration": {
+    "domain": "www.news-site.example",
+    "kid": "sign-2025-10",
+    "publicKeyJwk": {
+      "kty": "EC",
+      "crv": "P-256",
+      "x": "b_RMDUMPBZxKwUMfNnVWJ1hg-cjphGmIpsTTSG1px3c",
+      "y": "qilmllZcaYnhArNxzXuCWQwAq6NMyeWXX1PLB5PGK9I"
+    }
+  },
+  "period": {
+    "length": 60,
+    "slots": 2
+  },
+  "periodKeys": {
+    "premium": {
+      "251023T1400": "Etewfq8XLudt0AXLRs7gqA",
+      "251023T1500": "c_eiNwPkMfiPCSM1JRGpvA",
+      "251023T1600": "RcJD_g2ru_g2LHk1bREIUQ"
+    }
+  },
+  "supplyPlan": {
+    "contentKeyNames": [],
+    "suppliedAccessGroups": [
+      "premium"
+    ]
+  },
+  "issuerDecisions": [
+    {
+      "contentNames": [],
+      "periodGrants": [
+        {
+          "accessGroup": "premium",
+          "periods": [
+            "251023T1400"
+          ]
+        }
+      ]
+    },
+    {
+      "contentNames": [],
+      "periodGrants": []
+    }
+  ],
+  "client": {
+    "relayPeriodKeys": true,
+    "contentNames": [
+      "bodytext"
+    ]
+  }
+}

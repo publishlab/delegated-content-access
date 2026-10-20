@@ -1,0 +1,599 @@
+{
+  "profile": "100-groups",
+  "setup": {
+    "groupsUsedByItem": 100,
+    "items": 1,
+    "authorizedGroups": 100,
+    "returnedGroups": 100,
+    "sourceWindows": 2,
+    "renderPeriod": "261014T1200",
+    "cutoff": "261014T1800",
+    "transport": "direct"
+  },
+  "metadata": {
+    "version": "1",
+    "resource": {
+      "renderId": "d5dSnf8hgvdOp-WgayAQRQ",
+      "origin": "https://news.example",
+      "issuedAt": "2026-10-14T12:20:00.000Z",
+      "resourceId": "story1",
+      "data": {}
+    },
+    "resourceJWT": "eyJhbGciOiJFUzI1NiIsInR5cCI6IkpXVCIsImtpZCI6InAxIn0.eyJyZW5kZXJJZCI6ImQ1ZFNuZjhoZ3ZkT3AtV2dheUFRUlEiLCJvcmlnaW4iOiJodHRwczovL25ld3MuZXhhbXBsZSIsImlzc3VlZEF0IjoiMjAyNi0xMC0xNFQxMjoyMDowMC4wMDBaIiwicmVzb3VyY2VJZCI6InN0b3J5MSIsImRhdGEiOnt9fQ.TuCCeMEzTxKqglLxCIzcDlzV3n4tgzxja2YcO6UoJzbpc_9Rx8pygzrnuuYdMJ3Jz64rvX4q1OTqS0iUySJEPw",
+    "periodGeometry": {
+      "chainsPerDay": 2,
+      "periodMinutes": 60
+    },
+    "renderPeriod": "261014T1200",
+    "contentData": {
+      "bodytext": {
+        "contentType": "text/plain",
+        "nonce": "D9cDcdn88vq7M3Hg",
+        "connectors": {
+          "group0000": "nlwexMFettVlulb3JMnAtg",
+          "group0001": "Z6GI7b-cppH66ksTgAVKsA",
+          "group0002": "KFCR3z2H5kQ8T4VItgLuvg",
+          "group0003": "SJxqVLfGP6mvj6xrl5fkUg",
+          "group0004": "78lLKoJVV-Oo52vq4_JPFA",
+          "group0005": "bREcaXlxkLAeRn2mzH3aSQ",
+          "group0006": "iqqg0-M8NalBrGQW8w3rvg",
+          "group0007": "n8IOR8mS4rgy1m0UZ7taLQ",
+          "group0008": "YPb-QzyVxJkrgrlZ0vXhtw",
+          "group0009": "-rEpa2-gpiay0N2FklBu5Q",
+          "group0010": "jBrXTN2z-kqitEOb-hHBHQ",
+          "group0011": "Hv88DiRucaHNqZaLF5Hxbg",
+          "group0012": "eyfIsYpjmdrmewaE5L2F_A",
+          "group0013": "z59tpChrrl5zE3IkvOnLPw",
+          "group0014": "yQNXslp_agpi7pJJ8VFU4A",
+          "group0015": "LOtOOU5nWzAmwKMVIcWYnQ",
+          "group0016": "3BF9su1Uow9edNbzDPXqCw",
+          "group0017": "_ZiKKDL3aR4BK7cc1BYz_g",
+          "group0018": "dtK4bE7l3IZFfp-SfyAfZA",
+          "group0019": "atYLs6j7g-QdpexfsbdHAQ",
+          "group0020": "TU_2jziwps1YuZnWoKwzaA",
+          "group0021": "Tj3oFjcHPugPBGbBWdJanQ",
+          "group0022": "WRVLqPDD4v1_X1xKFLSeRA",
+          "group0023": "BiEUzyM6qESqXTE1_3O5Kg",
+          "group0024": "HrjBVUI_oPOZ8ecTKnN5gQ",
+          "group0025": "pNVRHV_V82BTM-qP9MrBOw",
+          "group0026": "-XcBfYRIXfkWVHqzpQgVYQ",
+          "group0027": "jFv-1ep-SnZfY5Ne451lMg",
+          "group0028": "5H003GCC3RWmt4yP2_qYLw",
+          "group0029": "1obN7boSqFWc40orSHiccQ",
+          "group0030": "h9XTQs9QCHk1znfqBaIszA",
+          "group0031": "TQJ8sRCUw6LlftlAPDvMqQ",
+          "group0032": "DLEREC3f2NtuZLEubmHsHA",
+          "group0033": "ZyTydFXcNirbwPwHV6vBww",
+          "group0034": "p2odYNIhSoaQQ4RJA2D1aw",
+          "group0035": "2DztCmsxFwRnh86sKnt2rw",
+          "group0036": "HcH4TDn1nBlYPG0lwoSPLg",
+          "group0037": "4HtrsFd8SwlN7189elpaSA",
+          "group0038": "YGTJWl_teG1CyI3TfJ8BPw",
+          "group0039": "pZ5QaRwdAOYLmv_FTcJz9w",
+          "group0040": "8pU_QHeJvOerD64zhUJ1AA",
+          "group0041": "DHLYV6Oz1t1J0hvHrk9F0Q",
+          "group0042": "y1aFeFdTt1UkrDlmqIuv7A",
+          "group0043": "IUGnqynnHY-NbaP2LrHDTw",
+          "group0044": "pnhK8IHHcIzb-0mGk3a-4A",
+          "group0045": "ZEmo0DEage0nqrwkJprpNw",
+          "group0046": "FWSIyf9gJjYP4SGB7_EIqg",
+          "group0047": "dle0k9R32yRfzLVCvmYoEA",
+          "group0048": "uQpzHMbV7WZiwgzsG5t5wQ",
+          "group0049": "rim2gw0qua2vhHDWBjpeVQ",
+          "group0050": "-ErsrOzPNgoGfVHuXOCXWg",
+          "group0051": "hFf-gnQIzcXeEAKa65Hhew",
+          "group0052": "TZHHgqf8w8NY3cLt1zL10g",
+          "group0053": "SgcSagh0N2swAutUdKzINQ",
+          "group0054": "jD2tLe4je-Y0AWPwJkCQBA",
+          "group0055": "ZX70VuDvZB_7Y2JNAfjEHQ",
+          "group0056": "TEYoKzBxqa2eJ1pn9LV2sQ",
+          "group0057": "Gc00inWHsgGFIlav7S-29A",
+          "group0058": "CAuYdIdaL_ETQkAMADfBAQ",
+          "group0059": "icj7ue9xGRkfdQHc7NzaVA",
+          "group0060": "_u8H6QEcloon5drtt_qucw",
+          "group0061": "t4JGa4a4dkXktpIsRKatGw",
+          "group0062": "_L695cPkM6ziVBL5Vg52Ow",
+          "group0063": "JnVIcqknLSzw2B3mMfcSMQ",
+          "group0064": "EHtiPuxPip9JfrZ8w01lMQ",
+          "group0065": "DP5RtrhyZB3cD9D_khS04Q",
+          "group0066": "dWUlAQiAlRMsIUq_taVEiw",
+          "group0067": "9kZjTK3hzmAKkJx5IQy9KA",
+          "group0068": "wlKFy6VGamXDrpGBwfBrzg",
+          "group0069": "5tk3DmvfweFNSYDekihW2Q",
+          "group0070": "F19Ecd03eucBF_ulLmvUdw",
+          "group0071": "nRfwg-BXZu4Npjd2O4hlKA",
+          "group0072": "0UtoCUQD_IHRo96TMw6G_Q",
+          "group0073": "Z1HCeMD0IDkfYJFvD01UGQ",
+          "group0074": "PUAehlKlACKL2ed6q8ltgA",
+          "group0075": "mptNpnUpWoKh1s3q0IJq4A",
+          "group0076": "kXHg8VqPwA-ahyhYtkFD5Q",
+          "group0077": "ptZeX-elEFpBFpYX78ofEg",
+          "group0078": "ye0c7wwEGEW4vEpgMLGdVQ",
+          "group0079": "k3aChVa4ZHfUuo5nZQMOJg",
+          "group0080": "X8LB5XKs9galrQ2r5yFCsg",
+          "group0081": "6kIbcNvONvFRTVq0dHPXZw",
+          "group0082": "s8oyox3XXeO1u2KIFPIN-g",
+          "group0083": "ryHb6uXtxS4z8g60nepNbw",
+          "group0084": "NMthcUTzYOwxsnXvjP-QPw",
+          "group0085": "-HfoXHHzkOmRM6hmaIIVHw",
+          "group0086": "mUjH9YQbgNbutra5jZRjnw",
+          "group0087": "Ad61-R5N9Ka4yilhyyb9vw",
+          "group0088": "kZRo747hz5UmxO9IMG1jpA",
+          "group0089": "EaXe_oBjnwRgQbuuIoMxGQ",
+          "group0090": "D5Fv61wFKq-9DDV-yFJvvQ",
+          "group0091": "J9-zc1xD4EU8weW2iX4j6w",
+          "group0092": "q1ciX2jW6iv8WKpcQStidA",
+          "group0093": "Dh91kkMmKM1tD6cH6gIqyQ",
+          "group0094": "IuwtMsLsqpXqj8Gfwy9vew",
+          "group0095": "vxtQ1haCaZ95ZVvtu8Qoag",
+          "group0096": "rdUCtKO6dP-mV5NIWbXf7w",
+          "group0097": "8SpBhNzy35UyDYAfBcUB3g",
+          "group0098": "nEpkKpyMHNfENtGulGQbPw",
+          "group0099": "HymFgCjfRupFu113BSmiJA"
+        }
+      }
+    },
+    "issuerData": {
+      "issuer": {
+        "sealed": {
+          "contentWindowSeeds": {
+            "bodytext": {
+              "261014T1200": "BM84U6zeD2SxWyMTuHsOAnG3cxF8J7McIthHf0LOTxYp-dXGLl76_wQTa4gZhDkasRU8zUPeQgK5w3FptwDWLlzeigyI-HqRzMR4HYUwEgU84NWoOK56jQqAua8Dvm953l_npqfrA6wcuYrj_5tua4tEc8GiXk0KcZQFBno",
+              "261015T0000": "BONPSph38W5HuV11l32XbmKB06UmIX0WVYicpwIJnESupsKRjPWQuYSb8ULPnhMBgPKbMBTC0xTTnsGrWfCUoS1gsfrywMUvkXTeHsuyg95Om6rnpMVq1_rgxUN7D6j1R3Nz7MBXbyKjxPxmUmvpExUqhATj-R2_f7r7aQo"
+            }
+          }
+        },
+        "keyId": "issuer-k1"
+      }
+    }
+  },
+  "request": {
+    "version": "1",
+    "issuerName": "issuer",
+    "resourceJWT": "eyJhbGciOiJFUzI1NiIsInR5cCI6IkpXVCIsImtpZCI6InAxIn0.eyJyZW5kZXJJZCI6ImQ1ZFNuZjhoZ3ZkT3AtV2dheUFRUlEiLCJvcmlnaW4iOiJodHRwczovL25ld3MuZXhhbXBsZSIsImlzc3VlZEF0IjoiMjAyNi0xMC0xNFQxMjoyMDowMC4wMDBaIiwicmVzb3VyY2VJZCI6InN0b3J5MSIsImRhdGEiOnt9fQ.TuCCeMEzTxKqglLxCIzcDlzV3n4tgzxja2YcO6UoJzbpc_9Rx8pygzrnuuYdMJ3Jz64rvX4q1OTqS0iUySJEPw",
+    "keyId": "issuer-k1",
+    "sealed": {
+      "contentKeys": {},
+      "contentWindowSeeds": {
+        "bodytext": {
+          "261014T1200": "BM84U6zeD2SxWyMTuHsOAnG3cxF8J7McIthHf0LOTxYp-dXGLl76_wQTa4gZhDkasRU8zUPeQgK5w3FptwDWLlzeigyI-HqRzMR4HYUwEgU84NWoOK56jQqAua8Dvm953l_npqfrA6wcuYrj_5tua4tEc8GiXk0KcZQFBno",
+          "261015T0000": "BONPSph38W5HuV11l32XbmKB06UmIX0WVYicpwIJnESupsKRjPWQuYSb8ULPnhMBgPKbMBTC0xTTnsGrWfCUoS1gsfrywMUvkXTeHsuyg95Om6rnpMVq1_rgxUN7D6j1R3Nz7MBXbyKjxPxmUmvpExUqhATj-R2_f7r7aQo"
+        }
+      }
+    },
+    "renderPeriod": "261014T1200",
+    "periodGeometry": {
+      "chainsPerDay": 2,
+      "periodMinutes": 60
+    },
+    "requestedContentGroups": {
+      "bodytext": [
+        "group0000",
+        "group0001",
+        "group0002",
+        "group0003",
+        "group0004",
+        "group0005",
+        "group0006",
+        "group0007",
+        "group0008",
+        "group0009",
+        "group0010",
+        "group0011",
+        "group0012",
+        "group0013",
+        "group0014",
+        "group0015",
+        "group0016",
+        "group0017",
+        "group0018",
+        "group0019",
+        "group0020",
+        "group0021",
+        "group0022",
+        "group0023",
+        "group0024",
+        "group0025",
+        "group0026",
+        "group0027",
+        "group0028",
+        "group0029",
+        "group0030",
+        "group0031",
+        "group0032",
+        "group0033",
+        "group0034",
+        "group0035",
+        "group0036",
+        "group0037",
+        "group0038",
+        "group0039",
+        "group0040",
+        "group0041",
+        "group0042",
+        "group0043",
+        "group0044",
+        "group0045",
+        "group0046",
+        "group0047",
+        "group0048",
+        "group0049",
+        "group0050",
+        "group0051",
+        "group0052",
+        "group0053",
+        "group0054",
+        "group0055",
+        "group0056",
+        "group0057",
+        "group0058",
+        "group0059",
+        "group0060",
+        "group0061",
+        "group0062",
+        "group0063",
+        "group0064",
+        "group0065",
+        "group0066",
+        "group0067",
+        "group0068",
+        "group0069",
+        "group0070",
+        "group0071",
+        "group0072",
+        "group0073",
+        "group0074",
+        "group0075",
+        "group0076",
+        "group0077",
+        "group0078",
+        "group0079",
+        "group0080",
+        "group0081",
+        "group0082",
+        "group0083",
+        "group0084",
+        "group0085",
+        "group0086",
+        "group0087",
+        "group0088",
+        "group0089",
+        "group0090",
+        "group0091",
+        "group0092",
+        "group0093",
+        "group0094",
+        "group0095",
+        "group0096",
+        "group0097",
+        "group0098",
+        "group0099"
+      ]
+    }
+  },
+  "response": {
+    "keys": {
+      "contentKeys": {}
+    },
+    "contentGroups": {
+      "chainKeys": {
+        "bodytext": {
+          "group0000": {
+            "261014T1800": "yLx65AgtQcQGGY_2i9qXLA"
+          },
+          "group0001": {
+            "261014T1800": "Eo7CWee_eucqS3aNP0cLdw"
+          },
+          "group0002": {
+            "261014T1800": "y8O4zmPAw2qUfH0KNU3yjQ"
+          },
+          "group0003": {
+            "261014T1800": "my-4LYB8WwKM1sZHU-snGA"
+          },
+          "group0004": {
+            "261014T1800": "yQw5owDDs7kFgaQ7PNKSHQ"
+          },
+          "group0005": {
+            "261014T1800": "v8EiIChv0Vj0VfzmphSuzA"
+          },
+          "group0006": {
+            "261014T1800": "2WOVqYqI28aPNevfHrIQiQ"
+          },
+          "group0007": {
+            "261014T1800": "ehkl3VgpT58U-bmvJzzH3A"
+          },
+          "group0008": {
+            "261014T1800": "NdqSttkpJ5XHFdEuUUa93g"
+          },
+          "group0009": {
+            "261014T1800": "_29O0bHD8v2JVwFZrAGVeQ"
+          },
+          "group0010": {
+            "261014T1800": "zXxy9zGRXHgeawcsNxl9MA"
+          },
+          "group0011": {
+            "261014T1800": "xAKp_UipmO6Iy4Iwo6YXzQ"
+          },
+          "group0012": {
+            "261014T1800": "1NiglfkhJcxpLSSE6XZHhw"
+          },
+          "group0013": {
+            "261014T1800": "Dz6WfHYGK5hkXjkdUnaiUw"
+          },
+          "group0014": {
+            "261014T1800": "0tSXhXcm9eERC0HAdyn-EQ"
+          },
+          "group0015": {
+            "261014T1800": "t6Maxo4IdZFzU3EELVuBZw"
+          },
+          "group0016": {
+            "261014T1800": "L9LRamYsnFGiiJZ3L9Hqmg"
+          },
+          "group0017": {
+            "261014T1800": "v2-Q8s0tOu0z5Lx7UKInWQ"
+          },
+          "group0018": {
+            "261014T1800": "eUBypLnePduX6RgVFKLa9A"
+          },
+          "group0019": {
+            "261014T1800": "hm1L_dSOgKkRNIU2ZhnQNQ"
+          },
+          "group0020": {
+            "261014T1800": "rto8RfIwp5mlLkSJ_GCRDw"
+          },
+          "group0021": {
+            "261014T1800": "SRSXD9utwkeMETFhp4DJ8A"
+          },
+          "group0022": {
+            "261014T1800": "BIslRxXNNjrZo81Nfko15Q"
+          },
+          "group0023": {
+            "261014T1800": "SF7qqGJ2n3YMdJQ1kedndg"
+          },
+          "group0024": {
+            "261014T1800": "evQxRSvad8Ov7wAxQPiE7A"
+          },
+          "group0025": {
+            "261014T1800": "x4jKUh0zLpcneUj84xM8Ag"
+          },
+          "group0026": {
+            "261014T1800": "5WZCdqs14kMjzAUU3eCeYg"
+          },
+          "group0027": {
+            "261014T1800": "TqBKarQ6Ji5m4HsIMagj1A"
+          },
+          "group0028": {
+            "261014T1800": "GzcLYl7uYAN2xmbWYsZmYw"
+          },
+          "group0029": {
+            "261014T1800": "xgKSoTNSlGgHE2Cf1J52Mg"
+          },
+          "group0030": {
+            "261014T1800": "oR0wrnSQa0Y_UXMedJIb3A"
+          },
+          "group0031": {
+            "261014T1800": "rQk6eMG3-nPRmIeChi6gyg"
+          },
+          "group0032": {
+            "261014T1800": "HTdiW4KBP05W8itrj_k7vg"
+          },
+          "group0033": {
+            "261014T1800": "klelL9SzFAoYHnvgCVmzlw"
+          },
+          "group0034": {
+            "261014T1800": "qoxea1lzwiL-QTW9dgL53w"
+          },
+          "group0035": {
+            "261014T1800": "Ey8bh8vdhZrjRuSEUsVPVQ"
+          },
+          "group0036": {
+            "261014T1800": "3O0pk-80ty-f2yQUSM_54g"
+          },
+          "group0037": {
+            "261014T1800": "CEKCp8l4wd5HGRuOEw2qnA"
+          },
+          "group0038": {
+            "261014T1800": "e3_4yxjgJgMTTiF2GuTkpg"
+          },
+          "group0039": {
+            "261014T1800": "TEtIbLAoydGRpImcv85zzQ"
+          },
+          "group0040": {
+            "261014T1800": "Qdd402HKSm7nv-_G9wUOjg"
+          },
+          "group0041": {
+            "261014T1800": "w9LJHvDH_0wE1XJIxLekUg"
+          },
+          "group0042": {
+            "261014T1800": "heNqPHmCLmPCPdUThDd7Fg"
+          },
+          "group0043": {
+            "261014T1800": "w8RCKRNCcPDpgjTtpaaUVw"
+          },
+          "group0044": {
+            "261014T1800": "rMPqwUiMl3QNBUhY4Jnk0Q"
+          },
+          "group0045": {
+            "261014T1800": "9Cv_cHpMFkqpe2zO8LWjDQ"
+          },
+          "group0046": {
+            "261014T1800": "p4w4am7gvZTu7Za3uiz3hA"
+          },
+          "group0047": {
+            "261014T1800": "QbYTJmX53RrvgtYgFnBrig"
+          },
+          "group0048": {
+            "261014T1800": "w7CjjNQZ6_WQ05GZtz41Hw"
+          },
+          "group0049": {
+            "261014T1800": "xiPPdKQnSO_hiyJxLMetnA"
+          },
+          "group0050": {
+            "261014T1800": "3xP2sTEFMM66loeweBS9nA"
+          },
+          "group0051": {
+            "261014T1800": "k5SBWWZ6llf4SYB2vUimRg"
+          },
+          "group0052": {
+            "261014T1800": "JWq7y8WCFNDXl98XGiuH9Q"
+          },
+          "group0053": {
+            "261014T1800": "8j3aN7BW2Q2_Q8WaLh0QIA"
+          },
+          "group0054": {
+            "261014T1800": "m2npclC1PGy0VNQhMJ4_WA"
+          },
+          "group0055": {
+            "261014T1800": "CUwCRVT9hv3sJfVk9A34xw"
+          },
+          "group0056": {
+            "261014T1800": "mCZPBWG9KRjmtfSA3C37Mg"
+          },
+          "group0057": {
+            "261014T1800": "qx3IQbNbA6530F97blf_zQ"
+          },
+          "group0058": {
+            "261014T1800": "pYXUw0oVBNOZEAISwhLClA"
+          },
+          "group0059": {
+            "261014T1800": "zHTy1b01pn-Uv-AUMf5JQQ"
+          },
+          "group0060": {
+            "261014T1800": "7WOk9cgLGrqM9hfDtcyq2A"
+          },
+          "group0061": {
+            "261014T1800": "BPsAuNRUGt0Cl6l1HK1o7w"
+          },
+          "group0062": {
+            "261014T1800": "gzhIE_4y9pdkCL27lrzG5g"
+          },
+          "group0063": {
+            "261014T1800": "xr3l3EqrKfxlW3U9vDUG3w"
+          },
+          "group0064": {
+            "261014T1800": "M7GA4F_gf7YLFFkwoPDkyQ"
+          },
+          "group0065": {
+            "261014T1800": "LKAvsRJ84Xz39O2R1Amqfw"
+          },
+          "group0066": {
+            "261014T1800": "OVLvnVMymxIA8tjZXXcC8A"
+          },
+          "group0067": {
+            "261014T1800": "OVwJ9PXwdkYbcvZnCu4pLQ"
+          },
+          "group0068": {
+            "261014T1800": "PX5K-0gAYaBOm2MNjHUOmQ"
+          },
+          "group0069": {
+            "261014T1800": "a8M1b1svdO-NNv5nWOjoPg"
+          },
+          "group0070": {
+            "261014T1800": "XZ5begcrHwPIlsYmSz5XmQ"
+          },
+          "group0071": {
+            "261014T1800": "wxcPZmMX46aP2Caxam4SqQ"
+          },
+          "group0072": {
+            "261014T1800": "W4ivE66Rn_ZOi_fP5YQ5rw"
+          },
+          "group0073": {
+            "261014T1800": "cEqpeY4HbNjBmK7v6_aJEQ"
+          },
+          "group0074": {
+            "261014T1800": "PRMlyYNx-CRwSkT3lVasTg"
+          },
+          "group0075": {
+            "261014T1800": "fBWPQJHCuhdVFE0gI1OQ5g"
+          },
+          "group0076": {
+            "261014T1800": "RzM_3FRmabdvgUdhue1HLg"
+          },
+          "group0077": {
+            "261014T1800": "VCAxzRrgOD8SHZY9ZO-hcg"
+          },
+          "group0078": {
+            "261014T1800": "grBWhy-gBnUnIpi6QGXmaw"
+          },
+          "group0079": {
+            "261014T1800": "x4mW5r1siDXUnY2KWFXlBA"
+          },
+          "group0080": {
+            "261014T1800": "45qHMz86Cx1Z6LHW-GnZKQ"
+          },
+          "group0081": {
+            "261014T1800": "Mi5fJJb0jBq_AbYO_TJ1Jw"
+          },
+          "group0082": {
+            "261014T1800": "1HOhR-aRK1NgS_gi-5YYjA"
+          },
+          "group0083": {
+            "261014T1800": "n7mTY7TCmymjtpO_QGSXMg"
+          },
+          "group0084": {
+            "261014T1800": "HBqCU7_FVdyuKmhwpmVoGA"
+          },
+          "group0085": {
+            "261014T1800": "DV3VPqZ8obOKV55--toptA"
+          },
+          "group0086": {
+            "261014T1800": "2MrWb3ylrbz2ah5DC-UZHg"
+          },
+          "group0087": {
+            "261014T1800": "L4jGrxvXgFV1c_v0tKA-dw"
+          },
+          "group0088": {
+            "261014T1800": "JFXUULzJ7W7p65AUhK3H6w"
+          },
+          "group0089": {
+            "261014T1800": "GzuFQRJPqS6I0vPZJ6Kmkw"
+          },
+          "group0090": {
+            "261014T1800": "oPl4NDAu6CttjROzzYS74g"
+          },
+          "group0091": {
+            "261014T1800": "UwtplWVk_FK-wWcrmuVMnA"
+          },
+          "group0092": {
+            "261014T1800": "0tzZptxUF5anQkniDM-h5g"
+          },
+          "group0093": {
+            "261014T1800": "3IIWm0211-tc9G_U2P2DNQ"
+          },
+          "group0094": {
+            "261014T1800": "Gw14Lfl8cgI_U_u1cdVhYQ"
+          },
+          "group0095": {
+            "261014T1800": "xQQzv0pMHtOwCXSmOj-ICA"
+          },
+          "group0096": {
+            "261014T1800": "PtkEcjGPLqgpgYygvrucig"
+          },
+          "group0097": {
+            "261014T1800": "ZY9QS8i0fWvvB0ikgPOKqA"
+          },
+          "group0098": {
+            "261014T1800": "gcxIgZ1Y6nIKsxQJyBaVDQ"
+          },
+          "group0099": {
+            "261014T1800": "YBlsMWpGW_GCQJeK3kkLMg"
+          }
+        }
+      }
+    }
+  },
+  "bytes": {
+    "metadata": {
+      "json": 4851,
+      "gzip": 2899
+    },
+    "request": {
+      "json": 2155,
+      "gzip": 965
+    },
+    "response": {
+      "json": 5372,
+      "gzip": 2185
+    }
+  }
+}

@@ -1,0 +1,98 @@
+{
+  "name": "client-bound-ecdh-p256",
+  "vectorFormat": "profile",
+  "profile": "dca-profile-client-bound-ecdh-p256",
+  "description": "A client-bound ECDH-P256 delivery profile vector. The issuer uses the injected P-256 ephemeral pair and the nonces below to wrap one 16-byte delivered key per result section for the client public JWK: a contentKeys entry, a periodKeys entry and a chainKeys entry. The wire contract is expected.transport (the client-bound method and semantic ephemeral public JWK) plus each expected.deliveredKeys[].wrappedKey ({key, nonce}); the client combines that public key with its private fixture key, runs HKDF-SHA256 with empty salt and UTF-8 info dca-derivation-client-bound-transport, and opens each AES-256-GCM value with its kind context as additional data: UTF-8 dca-bind-client-bound-key-kind, one zero octet, then UTF-8 of the kind its section fixes (kindContextBase64url). Both seal and open are deterministic here because the ephemeral keypair and nonces are inputs rather than fresh draws. A content or period key opens to an AES-GCM handle in WebCrypto and a chain key to its 16 raw octets; openedKeyBase64url states the raw value another runtime must recover.",
+  "input": {
+    "client": {
+      "publicKeyJwk": {
+        "kty": "EC",
+        "crv": "P-256",
+        "x": "KnsL031lVTbNxwtMq3OQmFq-fyPVh3k1__Adl4ieLXw",
+        "y": "-aNkTV8wd6O2rTWc2jkpJgez4Cuvas4J8_Styi-cdsE"
+      },
+      "privateKeyJwk": {
+        "kty": "EC",
+        "crv": "P-256",
+        "x": "KnsL031lVTbNxwtMq3OQmFq-fyPVh3k1__Adl4ieLXw",
+        "y": "-aNkTV8wd6O2rTWc2jkpJgez4Cuvas4J8_Styi-cdsE",
+        "d": "iWEhz6AHq-n4l_YzhTZcyQH7O9B1A1AKl4maOJh3z5g"
+      }
+    },
+    "issuerEphemeralKeyPair": {
+      "publicKeyJwk": {
+        "kty": "EC",
+        "crv": "P-256",
+        "x": "_-uukcCcIVx_w156EOBQbfD2S1QJtv_Us08hfmlPy7s",
+        "y": "s5xZErWJNnNAJfmyMYNXO4LYDDMaasFJMMGHk63Fqho"
+      },
+      "privateKeyJwk": {
+        "kty": "EC",
+        "crv": "P-256",
+        "x": "_-uukcCcIVx_w156EOBQbfD2S1QJtv_Us08hfmlPy7s",
+        "y": "s5xZErWJNnNAJfmyMYNXO4LYDDMaasFJMMGHk63Fqho",
+        "d": "8bOnBLg9jBNNA0DcpVKLwa74Lp_0Ld1NwYxeFMPslSY"
+      }
+    },
+    "deliveredKeys": [
+      {
+        "section": "contentKeys",
+        "keyKind": "contentKey",
+        "deliveryKeyBase64url": "HSo3RFFea3iFkp-sucbT4A",
+        "nonceBase64url": "Aw0VFyEjKTM5Q0tT"
+      },
+      {
+        "section": "periodKeys",
+        "keyKind": "periodKey",
+        "deliveryKeyBase64url": "UVRXWl1gY2ZpbG9ydXh7fg",
+        "nonceBase64url": "ISMlJykrLS8xMzU3"
+      },
+      {
+        "section": "chainKeys",
+        "keyKind": "chainKey",
+        "deliveryKeyBase64url": "oqessba7wMXKz9TZ3uPo7Q",
+        "nonceBase64url": "cXR3en2Ag4aJjI-S"
+      }
+    ]
+  },
+  "expected": {
+    "transport": {
+      "publicKey": {
+        "kty": "EC",
+        "crv": "P-256",
+        "x": "_-uukcCcIVx_w156EOBQbfD2S1QJtv_Us08hfmlPy7s",
+        "y": "s5xZErWJNnNAJfmyMYNXO4LYDDMaasFJMMGHk63Fqho"
+      },
+      "method": "ECDH-P256"
+    },
+    "deliveredKeys": [
+      {
+        "keyKind": "contentKey",
+        "kindContextBase64url": "ZGNhLWJpbmQtY2xpZW50LWJvdW5kLWtleS1raW5kAGNvbnRlbnRLZXk",
+        "wrappedKey": {
+          "key": "kJAgdIIM4By3TpreJGro14wX_tTxIdje372AMvSI4sc",
+          "nonce": "Aw0VFyEjKTM5Q0tT"
+        },
+        "openedKeyBase64url": "HSo3RFFea3iFkp-sucbT4A"
+      },
+      {
+        "keyKind": "periodKey",
+        "kindContextBase64url": "ZGNhLWJpbmQtY2xpZW50LWJvdW5kLWtleS1raW5kAHBlcmlvZEtleQ",
+        "wrappedKey": {
+          "key": "HtiFT5ewE-LpHlFkKb9VpWhGz4lfvgafn-IynW0q2MM",
+          "nonce": "ISMlJykrLS8xMzU3"
+        },
+        "openedKeyBase64url": "UVRXWl1gY2ZpbG9ydXh7fg"
+      },
+      {
+        "keyKind": "chainKey",
+        "kindContextBase64url": "ZGNhLWJpbmQtY2xpZW50LWJvdW5kLWtleS1raW5kAGNoYWluS2V5",
+        "wrappedKey": {
+          "key": "ejg_rM_q_UQLJ3Q7de4hk8qScY5AP426S0dJ87DAOVY",
+          "nonce": "cXR3en2Ag4aJjI-S"
+        },
+        "openedKeyBase64url": "oqessba7wMXKz9TZ3uPo7Q"
+      }
+    ]
+  }
+}

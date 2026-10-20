@@ -1,0 +1,14 @@
+{
+  "issuerPrivateJwk": {
+    "kty": "EC",
+    "crv": "P-256",
+    "d": "AQIDBAUGBwgJCgsMDQ4PEBESExQVFhcYGRobHB0eHyA",
+    "x": "UVw9brnjlrkE0_7Kf1T9zQzB6Ze_N13KUVrQpsO0A18",
+    "y": "RTa-OlDzGPv5pUdZAqIhUCvvDVfgjFOyzApW8X2fk1Q"
+  },
+  "ephemeralPublicHex": "041f140146bfb1b251f84f4ddbe0d4cdcfd77afd984a9520e35794021f8312bb9eec995a08b1fa7704df3dcc0b50a9665263fb7711f95f9f8a449c5096e47c892b",
+  "nonceHex": "c0c1c2c3c4c5c6c7c8c9cacb",
+  "aadUtf8": "[\"dca-bind-content-name-seed\",\"2d0a016473ff75fd2afa3cc1dac401896235215a4a61e06d11129ff3442837a7\",\"AAECAwQFBgcICQoLDA0ODw\",\"issuer\",\"bodytext\",\"261014T1200\",2,60]",
+  "seedHex": "d9b1274900e75c2ddcf90b8015ffc87d4bd60eb8b84298d5ec9d57e26223a8f3",
+  "envelope": "BB8UAUa_sbJR-E9N2-DUzc_Xev2YSpUg41eUAh-DErue7JlaCLH6dwTfPcwLUKlmUmP7dxH5X5-KRJxQluR8iSvAwcLDxMXGx8jJystQtKnPFOulkZTIkCYTLerpIuVxKwBkjHDe3HxK1sRtRLf8kMO6tUUdyqnSxsfeyeI"
+}

@@ -1,0 +1,74 @@
+{
+  "schema": "dca-fixture-package-manifest/v1",
+  "package": "fixtures/v1/profiles/dca-profile-period-keys/issuer-client-composition",
+  "profile": "dca-profile-period-keys",
+  "format": "period-key-composition/v1",
+  "stability": "draft",
+  "scope": {
+    "roles": [
+      "issuer",
+      "client"
+    ],
+    "publisherSupply": "period-key envelopes and item wraps; no sealed content key; no chain key",
+    "transport": "direct",
+    "algorithms": [
+      "ecdh-p256",
+      "ES256",
+      "AES-128-GCM"
+    ],
+    "issuers": 1,
+    "steps": [
+      "render A: partial grant of the current period; the client opens A and keeps that period key",
+      "render B: the kept period key opens B with no issuer call",
+      "render C, an hour later: the next period is not granted; 401, nothing cached or opened"
+    ]
+  },
+  "provenance": {
+    "recorder": "js/tools/record-period-key-composition.js",
+    "sourceCommit": "c69e610a70245c4ede2845b54fa4995d029c22a7",
+    "sourceScenario": "js/test-profiles/dca-profile-period-keys.test.js"
+  },
+  "discovery": "a leaf root found by discoverFixturePackageRoots (js/test-tools/claim-index.js); verification/fixtures/v1/ and v1/profiles/ are path segments, not packages",
+  "members": [
+    {
+      "path": "exchange.json",
+      "sha256": "57d1253978086a00ad1c183e9306864d9e84c4b68dd20257f9ca405d5d146d4a"
+    },
+    {
+      "path": "expected.json",
+      "sha256": "fc25aed16655352211524c3b2361e02dc878304796b025468e7158e17e704788"
+    },
+    {
+      "path": "inputs.json",
+      "sha256": "12031db6d8c959f22c23e27737c4906eb345de74a64826b49d70a7397237038a"
+    },
+    {
+      "path": "renders.json",
+      "sha256": "0377d39815dc7f7419acb2dbd208c3ee60b69ab58dcc3bacfe58f36f883a469b"
+    }
+  ],
+  "consumers": [
+    {
+      "path": "js/test-vectors/period-key-composition.test.js",
+      "role": "replay",
+      "description": "replays the recorded markup through the real Browser and IssuerServer and holds the assertions"
+    },
+    {
+      "path": "js/test-tools/record-period-key-composition.test.js",
+      "role": "recorder self-test",
+      "description": "tests the package check: membership, checksums, regeneration and refusals"
+    },
+    {
+      "command": "node js/tools/record-period-key-composition.js --check",
+      "role": "package check",
+      "description": "membership both ways, per-member sha256 and a fresh recording; writes nothing"
+    }
+  ],
+  "limitations": [
+    "All claim decisions are incomplete; this package decides no claim.",
+    "It proves the period-key-only supply path through the real JavaScript issuer and client only.",
+    "No chain keys, no client-bound transport and no independent conformance.",
+    "The publisher is not replayed: renders are recorded markup, and ES256 signatures are retained values, not reproducible bytes.",
+    "One issuer, direct transport and ECDH-P256 envelopes only."
+  ]
+}

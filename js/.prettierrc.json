@@ -1,0 +1,11 @@
+{
+  "printWidth": 100,
+  "overrides": [
+    {
+      "files": "copy-manifest--*.json",
+      "options": {
+        "parser": "json-stringify"
+      }
+    }
+  ]
+}

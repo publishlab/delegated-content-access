@@ -2,6 +2,15 @@
 # Manual operation-bridge entry point. The framework proves its own verdict and
 # exit-code machinery before it starts the selected language.
 #
+#     ./run <lane> [--version <token>] [--set <set> | --op <op> | --case <id> ...]
+#
+# One run is one runtime version. --version, else DCA_VERSION, else default,
+# resolves through `<runtime>/versions` to one token (default is the list's
+# first default line), which is exported as DCA_VERSION, so the lane's prepare
+# step installs that version and its answering process runs it. A token the
+# list does not name, or `all`, is refused with exit 2 before anything starts;
+# a lane check runs several versions.
+#
 # DCA_JS names the JavaScript runtime that runs the harness itself, `node` by
 # default and `deno` for the other one. It selects a runtime and never a
 # behaviour: both spellings run the same test files and the same runner, and
@@ -10,6 +19,49 @@
 set -u
 
 here=$(CDPATH= cd -- "$(dirname "$0")" && pwd) || exit 2
+
+# shellcheck source=_shared/cache.sh
+. "$here/_shared/cache.sh"
+
+# --version is taken out of the argument list wherever it stands; everything
+# else goes to the driver as given.
+version=${DCA_VERSION:-default}
+version_given=0
+argc=$#
+i=0
+while [ $i -lt $argc ]; do
+    arg=$1
+    shift
+    i=$((i + 1))
+    if [ "$arg" = --version ]; then
+        if [ $i -ge $argc ]; then
+            echo "conformance-primitives/run: --version needs a token of <runtime>/versions, or default." >&2
+            exit 2
+        fi
+        version=$1
+        version_given=1
+        shift
+        i=$((i + 1))
+        continue
+    fi
+    set -- "$@" "$arg"
+done
+
+lane=${1:-}
+
+# The runtime is the lane's first path element. A lane name with no version list
+# beside it is left for the driver to refuse by name, unless a version was asked
+# for, which nothing could then resolve.
+runtime=${lane%%/*}
+if [ -n "$runtime" ] && [ -f "$here/$runtime/versions" ]; then
+    resolve_version_pin "$here/$runtime/versions" "$version" || exit 2
+    run_version=$DCA_VERSION_TOKEN
+    run_release=$DCA_VERSION_RELEASE
+elif [ "$version_given" -eq 1 ]; then
+    echo "conformance-primitives/run: --version $version names a runtime version, and there is no" >&2
+    echo "$runtime/versions to resolve it in." >&2
+    exit 2
+fi
 
 : "${DCA_JS:=node}"
 case "$DCA_JS" in
@@ -49,4 +101,12 @@ fi
 
 echo ""
 echo "== operation bridge =="
+# Exported only now, after the self-checks, whose own fixtures run the suite
+# with no version input of their own.
+if [ -n "${run_version:-}" ]; then
+    export DCA_VERSION="$run_version"
+    echo "== $lane at runtime version $run_version ($run_release) =="
+else
+    unset DCA_VERSION
+fi
 exec $js_run "$here/_shared/driver/run.mjs" "$@"

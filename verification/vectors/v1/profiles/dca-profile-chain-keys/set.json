@@ -1,0 +1,8 @@
+{
+  "set": "dca-profile-chain-keys",
+  "phase": "devel",
+  "profile": "dca-profile-chain-keys",
+  "operations": [
+    "hkdf-sha256"
+  ]
+}

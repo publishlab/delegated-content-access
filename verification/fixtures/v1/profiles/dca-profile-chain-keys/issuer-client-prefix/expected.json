@@ -1,0 +1,832 @@
+{
+  "format": "chain-keys-prefix/v1",
+  "description": "Facts the replay asserts, then what the client and issuer observed after each read. The witness, cutoff key and prefix period keys come from the frozen construction vectors, not from the code under test.",
+  "witness": {
+    "source": "js/extensions/chain-keys/test/fixtures/dca-profile-chain-keys.vectors.json",
+    "case": "c1",
+    "accessGroup": "premium",
+    "chainsPerDay": 2,
+    "periodMinutes": 15,
+    "windowStart": 29353680,
+    "cutoff": "251023T1415",
+    "position": 9,
+    "cutoffChainKey": "vXxg30CDnydA4eLhmNIkmQ",
+    "leafInfoHex": "03001b6463612d636f6e737472756374696f6e2d636861696e2d6b65797300077072656d69756d0002000f01bfe6d00009"
+  },
+  "response": {
+    "status": 200,
+    "contentKeys": {},
+    "periodKeys": "absent",
+    "chainKeys": {
+      "premium": {
+        "251023T1415": "vXxg30CDnydA4eLhmNIkmQ"
+      }
+    },
+    "geometry": {
+      "premium": {
+        "chainsPerDay": 2,
+        "periodMinutes": 15
+      }
+    }
+  },
+  "policyHorizon": {
+    "futurePeriodCount": 0,
+    "coordinates": [],
+    "note": "zero future periods selects no optional horizon; the cutoff article target is authorized independently, and its returned chain key inherently reaches the trusted-policy-authorized prefix below"
+  },
+  "prefix": [
+    {
+      "t": "251023T1200",
+      "position": 0,
+      "periodKey": "9TMIihEly6CTzKcfqoaQMA",
+      "plaintext": "<p>Harbour bulletin for period 251023T1200.</p>"
+    },
+    {
+      "t": "251023T1215",
+      "position": 1,
+      "periodKey": "_Yiz1YRj9Taoew_5fESmag",
+      "plaintext": "<p>Harbour bulletin for period 251023T1215.</p>"
+    },
+    {
+      "t": "251023T1230",
+      "position": 2,
+      "periodKey": "LoaHlIKpNS19b4jlc60rew",
+      "plaintext": "<p>Harbour bulletin for period 251023T1230.</p>"
+    },
+    {
+      "t": "251023T1245",
+      "position": 3,
+      "periodKey": "X-rmc60O8K9TYdWCtA4FQw",
+      "plaintext": "<p>Harbour bulletin for period 251023T1245.</p>"
+    },
+    {
+      "t": "251023T1300",
+      "position": 4,
+      "periodKey": "62Il4eVuFMLv9OemWztZuA",
+      "plaintext": "<p>Harbour bulletin for period 251023T1300.</p>"
+    },
+    {
+      "t": "251023T1315",
+      "position": 5,
+      "periodKey": "c0tNaDFq9dcqCDSxiW3WVA",
+      "plaintext": "<p>Harbour bulletin for period 251023T1315.</p>"
+    },
+    {
+      "t": "251023T1330",
+      "position": 6,
+      "periodKey": "pJlsTxU-NYGPcnMi53atgg",
+      "plaintext": "<p>Harbour bulletin for period 251023T1330.</p>"
+    },
+    {
+      "t": "251023T1345",
+      "position": 7,
+      "periodKey": "S7aN1-n5ejhOoCCXN_9Gkg",
+      "plaintext": "<p>Harbour bulletin for period 251023T1345.</p>"
+    },
+    {
+      "t": "251023T1400",
+      "position": 8,
+      "periodKey": "_BYvvnJLlulxiMk-eQIuig",
+      "plaintext": "<p>Harbour bulletin for period 251023T1400.</p>"
+    },
+    {
+      "t": "251023T1415",
+      "position": 9,
+      "periodKey": "OImo-foIFr7u0tKSTYgkRg",
+      "plaintext": "<p>Harbour bulletin for period 251023T1415.</p>"
+    }
+  ],
+  "outOfReach": [
+    {
+      "t": "251023T1430",
+      "relation": "later position in the cutoff's window",
+      "kind": "absence of reach: the retained cutoff key cannot derive this period key",
+      "missing": [
+        "bodytext"
+      ],
+      "plaintext": null,
+      "error": "no_key",
+      "retainedUnchanged": true,
+      "withheldPeriodKey": "HNAVmaf8TVvqDr_jemUU9A",
+      "withheldPeriodKeySource": "js/extensions/chain-keys/test/fixtures/dca-profile-chain-keys.vectors.json case c1, expansion position 10",
+      "sealedPlaintext": "<p>Harbour bulletin for period 251023T1430.</p>"
+    },
+    {
+      "t": "251023T1145",
+      "relation": "preceding window",
+      "kind": "absence of reach: the retained cutoff key cannot derive this period key",
+      "missing": [
+        "bodytext"
+      ],
+      "plaintext": null,
+      "error": "no_key",
+      "retainedUnchanged": true,
+      "withheldPeriodKey": "bfmufvx297Nq8reNRmZJpg",
+      "withheldPeriodKeySource": "the recorder's publisher generation; a control that the render is openable",
+      "sealedPlaintext": "<p>Harbour bulletin for period 251023T1145.</p>"
+    },
+    {
+      "t": "251024T0000",
+      "relation": "next window",
+      "kind": "absence of reach: the retained cutoff key cannot derive this period key",
+      "missing": [
+        "bodytext"
+      ],
+      "plaintext": null,
+      "error": "no_key",
+      "retainedUnchanged": true,
+      "withheldPeriodKey": "tmrFPHtw_1zyUyeOV-lBjA",
+      "withheldPeriodKeySource": "the recorder's publisher generation; a control that the render is openable",
+      "sealedPlaintext": "<p>Harbour bulletin for period 251024T0000.</p>"
+    }
+  ],
+  "retainedReuse": {
+    "issuerExchanges": 1,
+    "unlockedReads": [
+      "251023T1415"
+    ]
+  },
+  "steps": [
+    {
+      "step": 1,
+      "t": "251023T1415",
+      "missing": [
+        "bodytext"
+      ],
+      "texts": {
+        "bodytext": "<p>Harbour bulletin for period 251023T1415.</p>"
+      },
+      "errors": {
+        "bodytext": null
+      },
+      "unlock": {
+        "ok": true,
+        "issuerName": "paywall_subscription_service",
+        "status": 200,
+        "transportMode": "direct",
+        "attempts": [
+          {
+            "issuerName": "paywall_subscription_service",
+            "url": "https://api.example.com/unlock",
+            "outcome": "answered",
+            "status": 200
+          }
+        ]
+      },
+      "presented": [
+        {
+          "contentNames": [],
+          "accessGroups": [
+            "premium"
+          ],
+          "periodCoordinates": {}
+        }
+      ],
+      "retained": {
+        "chain": [
+          {
+            "t": "251023T1415",
+            "kind": "chain-key"
+          }
+        ],
+        "periodKeys": []
+      },
+      "browserUnlocks": 1,
+      "issuer": {
+        "requests": 1,
+        "grants": 1,
+        "denials": 0
+      }
+    },
+    {
+      "step": 2,
+      "t": "251023T1200",
+      "missing": [],
+      "texts": {
+        "bodytext": "<p>Harbour bulletin for period 251023T1200.</p>"
+      },
+      "errors": {
+        "bodytext": null
+      },
+      "unlock": null,
+      "presented": [],
+      "retained": {
+        "chain": [
+          {
+            "t": "251023T1415",
+            "kind": "chain-key"
+          },
+          {
+            "t": "251023T1200",
+            "kind": "period-key"
+          }
+        ],
+        "periodKeys": []
+      },
+      "browserUnlocks": 1,
+      "issuer": {
+        "requests": 1,
+        "grants": 1,
+        "denials": 0
+      }
+    },
+    {
+      "step": 3,
+      "t": "251023T1215",
+      "missing": [],
+      "texts": {
+        "bodytext": "<p>Harbour bulletin for period 251023T1215.</p>"
+      },
+      "errors": {
+        "bodytext": null
+      },
+      "unlock": null,
+      "presented": [],
+      "retained": {
+        "chain": [
+          {
+            "t": "251023T1415",
+            "kind": "chain-key"
+          },
+          {
+            "t": "251023T1200",
+            "kind": "period-key"
+          },
+          {
+            "t": "251023T1215",
+            "kind": "period-key"
+          }
+        ],
+        "periodKeys": []
+      },
+      "browserUnlocks": 1,
+      "issuer": {
+        "requests": 1,
+        "grants": 1,
+        "denials": 0
+      }
+    },
+    {
+      "step": 4,
+      "t": "251023T1230",
+      "missing": [],
+      "texts": {
+        "bodytext": "<p>Harbour bulletin for period 251023T1230.</p>"
+      },
+      "errors": {
+        "bodytext": null
+      },
+      "unlock": null,
+      "presented": [],
+      "retained": {
+        "chain": [
+          {
+            "t": "251023T1415",
+            "kind": "chain-key"
+          },
+          {
+            "t": "251023T1200",
+            "kind": "period-key"
+          },
+          {
+            "t": "251023T1215",
+            "kind": "period-key"
+          },
+          {
+            "t": "251023T1230",
+            "kind": "period-key"
+          }
+        ],
+        "periodKeys": []
+      },
+      "browserUnlocks": 1,
+      "issuer": {
+        "requests": 1,
+        "grants": 1,
+        "denials": 0
+      }
+    },
+    {
+      "step": 5,
+      "t": "251023T1245",
+      "missing": [],
+      "texts": {
+        "bodytext": "<p>Harbour bulletin for period 251023T1245.</p>"
+      },
+      "errors": {
+        "bodytext": null
+      },
+      "unlock": null,
+      "presented": [],
+      "retained": {
+        "chain": [
+          {
+            "t": "251023T1415",
+            "kind": "chain-key"
+          },
+          {
+            "t": "251023T1200",
+            "kind": "period-key"
+          },
+          {
+            "t": "251023T1215",
+            "kind": "period-key"
+          },
+          {
+            "t": "251023T1230",
+            "kind": "period-key"
+          },
+          {
+            "t": "251023T1245",
+            "kind": "period-key"
+          }
+        ],
+        "periodKeys": []
+      },
+      "browserUnlocks": 1,
+      "issuer": {
+        "requests": 1,
+        "grants": 1,
+        "denials": 0
+      }
+    },
+    {
+      "step": 6,
+      "t": "251023T1300",
+      "missing": [],
+      "texts": {
+        "bodytext": "<p>Harbour bulletin for period 251023T1300.</p>"
+      },
+      "errors": {
+        "bodytext": null
+      },
+      "unlock": null,
+      "presented": [],
+      "retained": {
+        "chain": [
+          {
+            "t": "251023T1415",
+            "kind": "chain-key"
+          },
+          {
+            "t": "251023T1200",
+            "kind": "period-key"
+          },
+          {
+            "t": "251023T1215",
+            "kind": "period-key"
+          },
+          {
+            "t": "251023T1230",
+            "kind": "period-key"
+          },
+          {
+            "t": "251023T1245",
+            "kind": "period-key"
+          },
+          {
+            "t": "251023T1300",
+            "kind": "period-key"
+          }
+        ],
+        "periodKeys": []
+      },
+      "browserUnlocks": 1,
+      "issuer": {
+        "requests": 1,
+        "grants": 1,
+        "denials": 0
+      }
+    },
+    {
+      "step": 7,
+      "t": "251023T1315",
+      "missing": [],
+      "texts": {
+        "bodytext": "<p>Harbour bulletin for period 251023T1315.</p>"
+      },
+      "errors": {
+        "bodytext": null
+      },
+      "unlock": null,
+      "presented": [],
+      "retained": {
+        "chain": [
+          {
+            "t": "251023T1415",
+            "kind": "chain-key"
+          },
+          {
+            "t": "251023T1200",
+            "kind": "period-key"
+          },
+          {
+            "t": "251023T1215",
+            "kind": "period-key"
+          },
+          {
+            "t": "251023T1230",
+            "kind": "period-key"
+          },
+          {
+            "t": "251023T1245",
+            "kind": "period-key"
+          },
+          {
+            "t": "251023T1300",
+            "kind": "period-key"
+          },
+          {
+            "t": "251023T1315",
+            "kind": "period-key"
+          }
+        ],
+        "periodKeys": []
+      },
+      "browserUnlocks": 1,
+      "issuer": {
+        "requests": 1,
+        "grants": 1,
+        "denials": 0
+      }
+    },
+    {
+      "step": 8,
+      "t": "251023T1330",
+      "missing": [],
+      "texts": {
+        "bodytext": "<p>Harbour bulletin for period 251023T1330.</p>"
+      },
+      "errors": {
+        "bodytext": null
+      },
+      "unlock": null,
+      "presented": [],
+      "retained": {
+        "chain": [
+          {
+            "t": "251023T1415",
+            "kind": "chain-key"
+          },
+          {
+            "t": "251023T1200",
+            "kind": "period-key"
+          },
+          {
+            "t": "251023T1215",
+            "kind": "period-key"
+          },
+          {
+            "t": "251023T1230",
+            "kind": "period-key"
+          },
+          {
+            "t": "251023T1245",
+            "kind": "period-key"
+          },
+          {
+            "t": "251023T1300",
+            "kind": "period-key"
+          },
+          {
+            "t": "251023T1315",
+            "kind": "period-key"
+          },
+          {
+            "t": "251023T1330",
+            "kind": "period-key"
+          }
+        ],
+        "periodKeys": []
+      },
+      "browserUnlocks": 1,
+      "issuer": {
+        "requests": 1,
+        "grants": 1,
+        "denials": 0
+      }
+    },
+    {
+      "step": 9,
+      "t": "251023T1345",
+      "missing": [],
+      "texts": {
+        "bodytext": "<p>Harbour bulletin for period 251023T1345.</p>"
+      },
+      "errors": {
+        "bodytext": null
+      },
+      "unlock": null,
+      "presented": [],
+      "retained": {
+        "chain": [
+          {
+            "t": "251023T1415",
+            "kind": "chain-key"
+          },
+          {
+            "t": "251023T1200",
+            "kind": "period-key"
+          },
+          {
+            "t": "251023T1215",
+            "kind": "period-key"
+          },
+          {
+            "t": "251023T1230",
+            "kind": "period-key"
+          },
+          {
+            "t": "251023T1245",
+            "kind": "period-key"
+          },
+          {
+            "t": "251023T1300",
+            "kind": "period-key"
+          },
+          {
+            "t": "251023T1315",
+            "kind": "period-key"
+          },
+          {
+            "t": "251023T1330",
+            "kind": "period-key"
+          },
+          {
+            "t": "251023T1345",
+            "kind": "period-key"
+          }
+        ],
+        "periodKeys": []
+      },
+      "browserUnlocks": 1,
+      "issuer": {
+        "requests": 1,
+        "grants": 1,
+        "denials": 0
+      }
+    },
+    {
+      "step": 10,
+      "t": "251023T1400",
+      "missing": [],
+      "texts": {
+        "bodytext": "<p>Harbour bulletin for period 251023T1400.</p>"
+      },
+      "errors": {
+        "bodytext": null
+      },
+      "unlock": null,
+      "presented": [],
+      "retained": {
+        "chain": [
+          {
+            "t": "251023T1415",
+            "kind": "chain-key"
+          },
+          {
+            "t": "251023T1200",
+            "kind": "period-key"
+          },
+          {
+            "t": "251023T1215",
+            "kind": "period-key"
+          },
+          {
+            "t": "251023T1230",
+            "kind": "period-key"
+          },
+          {
+            "t": "251023T1245",
+            "kind": "period-key"
+          },
+          {
+            "t": "251023T1300",
+            "kind": "period-key"
+          },
+          {
+            "t": "251023T1315",
+            "kind": "period-key"
+          },
+          {
+            "t": "251023T1330",
+            "kind": "period-key"
+          },
+          {
+            "t": "251023T1345",
+            "kind": "period-key"
+          },
+          {
+            "t": "251023T1400",
+            "kind": "period-key"
+          }
+        ],
+        "periodKeys": []
+      },
+      "browserUnlocks": 1,
+      "issuer": {
+        "requests": 1,
+        "grants": 1,
+        "denials": 0
+      }
+    },
+    {
+      "step": 11,
+      "t": "251023T1430",
+      "missing": [
+        "bodytext"
+      ],
+      "texts": {
+        "bodytext": null
+      },
+      "errors": {
+        "bodytext": "no_key"
+      },
+      "unlock": null,
+      "presented": [],
+      "retained": {
+        "chain": [
+          {
+            "t": "251023T1415",
+            "kind": "chain-key"
+          },
+          {
+            "t": "251023T1200",
+            "kind": "period-key"
+          },
+          {
+            "t": "251023T1215",
+            "kind": "period-key"
+          },
+          {
+            "t": "251023T1230",
+            "kind": "period-key"
+          },
+          {
+            "t": "251023T1245",
+            "kind": "period-key"
+          },
+          {
+            "t": "251023T1300",
+            "kind": "period-key"
+          },
+          {
+            "t": "251023T1315",
+            "kind": "period-key"
+          },
+          {
+            "t": "251023T1330",
+            "kind": "period-key"
+          },
+          {
+            "t": "251023T1345",
+            "kind": "period-key"
+          },
+          {
+            "t": "251023T1400",
+            "kind": "period-key"
+          }
+        ],
+        "periodKeys": []
+      },
+      "browserUnlocks": 1,
+      "issuer": {
+        "requests": 1,
+        "grants": 1,
+        "denials": 0
+      }
+    },
+    {
+      "step": 12,
+      "t": "251023T1145",
+      "missing": [
+        "bodytext"
+      ],
+      "texts": {
+        "bodytext": null
+      },
+      "errors": {
+        "bodytext": "no_key"
+      },
+      "unlock": null,
+      "presented": [],
+      "retained": {
+        "chain": [
+          {
+            "t": "251023T1415",
+            "kind": "chain-key"
+          },
+          {
+            "t": "251023T1200",
+            "kind": "period-key"
+          },
+          {
+            "t": "251023T1215",
+            "kind": "period-key"
+          },
+          {
+            "t": "251023T1230",
+            "kind": "period-key"
+          },
+          {
+            "t": "251023T1245",
+            "kind": "period-key"
+          },
+          {
+            "t": "251023T1300",
+            "kind": "period-key"
+          },
+          {
+            "t": "251023T1315",
+            "kind": "period-key"
+          },
+          {
+            "t": "251023T1330",
+            "kind": "period-key"
+          },
+          {
+            "t": "251023T1345",
+            "kind": "period-key"
+          },
+          {
+            "t": "251023T1400",
+            "kind": "period-key"
+          }
+        ],
+        "periodKeys": []
+      },
+      "browserUnlocks": 1,
+      "issuer": {
+        "requests": 1,
+        "grants": 1,
+        "denials": 0
+      }
+    },
+    {
+      "step": 13,
+      "t": "251024T0000",
+      "missing": [
+        "bodytext"
+      ],
+      "texts": {
+        "bodytext": null
+      },
+      "errors": {
+        "bodytext": "no_key"
+      },
+      "unlock": null,
+      "presented": [],
+      "retained": {
+        "chain": [
+          {
+            "t": "251023T1415",
+            "kind": "chain-key"
+          },
+          {
+            "t": "251023T1200",
+            "kind": "period-key"
+          },
+          {
+            "t": "251023T1215",
+            "kind": "period-key"
+          },
+          {
+            "t": "251023T1230",
+            "kind": "period-key"
+          },
+          {
+            "t": "251023T1245",
+            "kind": "period-key"
+          },
+          {
+            "t": "251023T1300",
+            "kind": "period-key"
+          },
+          {
+            "t": "251023T1315",
+            "kind": "period-key"
+          },
+          {
+            "t": "251023T1330",
+            "kind": "period-key"
+          },
+          {
+            "t": "251023T1345",
+            "kind": "period-key"
+          },
+          {
+            "t": "251023T1400",
+            "kind": "period-key"
+          }
+        ],
+        "periodKeys": []
+      },
+      "browserUnlocks": 1,
+      "issuer": {
+        "requests": 1,
+        "grants": 1,
+        "denials": 0
+      }
+    }
+  ]
+}

@@ -8,9 +8,6 @@ This is the entry point for DCA specification documents. It identifies which
 document owns each normative subject and keeps readable design explanation
 separate from protocol authority.
 
-The authors are still assembling the specification set. A Proposal does not
-override a Public Working Draft merely because it uses requirement words.
-
 ## Document status
 
 Every public specification, proposal, guide and design note carries one of
@@ -23,138 +20,137 @@ three statuses in its header:
 - **Informative Draft**: explanation, guidance or examples. It defines no protocol
   requirement.
 
-Draft snapshot: 2026-09-21. Cite the publication commit for an immutable revision;
+A section that a Public Working Draft labels informative or editorial states no
+requirement. Test vectors and reference implementations are informative
+evidence; the specification text defines conformance.
+
+Cite the publication commit for an immutable revision;
 the documents carry no manually maintained revision dates.
+
+Editors promote a document only after reconciling it with current authority
+documents, pinning its cryptographic transcript where applicable, and providing
+neutral vectors and a bounded implementation.
 
 ## Start here
 
 Implement the baseline first.
-[spec--profiles.md](spec--profiles.md#3-dca-v1-direct-https-baseline) Section 3
-names `dca-v1-direct-https`, the minimum interoperable path, and lists what
-each role owes under it. Read
-[spec--core-protocol.md](spec--core-protocol.md) next for the unlock flow, then
-the documents the profile requirements cite. Everything under Proposals is
-unselected.
+[spec--profiles.md](spec--profiles.md#3-dca-profile-baseline-profile) Section 3
+names `dca-profile-baseline`, the minimum interoperable path, and lists what
+each role owes under it. Read [spec--core-protocol.md](spec--core-protocol.md)
+next, then the documents profiles Section 3.1 lists and the security model.
+Period keys, chain keys, browser-origin admission, recipient grants, HTML
+carriage and browser content handling add reading only when those profiles are
+selected. Everything under Proposals is unselected.
 
-Optional profile names resolve through their dependencies. A deployment may
-bundle selected profile leaves and duties into an opinionated preset, but the
-preset is configuration rather than another protocol profile. The profile
-specification owns the resolved cross-role obligations.
+For a concrete first exchange, follow the
+[one-item baseline example](design--data-format--example.md#minimal-baseline-exchange-one-item)
+from JSON delivery through an issuer response to opened plaintext. It uses
+illustrative cryptographic placeholders and adds no optional profile.
+
+The optional [compact ECDH profile](spec-profile--compact-ecdh.md) combines
+HPKE with compressed-point envelope transport. Its per-issuer selector chooses
+the compact procedure while retaining the same issuer keypair and keyId.
+
+## Terms across the specifications
+
+The binding names refer to related parts of the issuer endpoint contract, not
+four independently selected security mechanisms:
+
+- **Request binding** names the selected endpoint rules for admitting an
+  unlock request, including checks that use verified claims before policy or
+  key opening. The core defines the [processing
+  order](spec--core-protocol.md#6-issuer-processing); the endpoint mechanism
+  supplies its checks.
+- **Delivery binding** is the core's contextual name for the rules that admit
+  a signed delivery `origin`. The selected endpoint mechanism defines those
+  rules; the HTTPS mechanism defines the [canonical signed
+  origin](spec--http-binding.md#32-canonical-signed-origin).
+- **Endpoint binding** names the request and response channel mechanism and
+  its applicable caller checks. The [endpoint
+  specification](spec--http-binding.md#2-endpoint-binding-mechanisms)
+  owns its concrete mechanisms.
+- **HTTPS endpoint binding** means the [DCA HTTPS JSON
+  mechanism](spec--http-binding.md#3-dca-https-json), the baseline
+  endpoint binding. Its browser-origin checks apply when that optional profile
+  is selected.
+
+**Key kind** is the capability a response key entry carries (`contentKey`,
+`periodKey` or `chainKey`), as
+[response binding Section 6](spec--response-binding.md#6-client-bound-common-representation)
+fixes it. A **profile** is a named composition of role duties and mechanisms
+whose [dependencies](spec--profiles.md#1-introduction) are resolved before a
+conformance claim.
+
+An **unresolved item** has no locally admitted key that opens it. An
+**admissible result set** is defined in
+[core Section 6.1](spec--core-protocol.md#61-presented-coordinates). A **key
+entry** is defined in
+[response binding Section 5](spec--response-binding.md#5-direct-representation).
 
 ## Document map
 
 | Document | Intended ownership | Current status |
 | --- | --- | --- |
-| This overview | Specification boundaries, conformance model, and reading order | Public Working Draft |
+| This overview | Specification boundaries and reading order | Public Working Draft |
 | [spec--core-protocol.md](spec--core-protocol.md) | Roles, signed-resource authentication, unlock flow, delegation completeness, response authority, and core failures | Public Working Draft |
 | [spec--data-format.md](spec--data-format.md) | Publisher-to-client JSON and markup carriers, structural processing, identifiers, and extension handling | Public Working Draft |
-| [spec--content-protection.md](spec--content-protection.md) | Per-item keys, content AEAD, exact-period content-key wrapping, item opening, deferred-ciphertext invariants, and transform boundary | Public Working Draft |
-| [spec--response-binding.md](spec--response-binding.md) | Issuer-response channel requirements, direct key representation, optional client-bound methods, response admission, and downgrade behavior | Public Working Draft |
-| [spec--browser-http-binding.md](spec--browser-http-binding.md) | Baseline HTTPS JSON endpoint binding and optional browser Origin/CORS mechanism | Public Working Draft |
+| [spec--content-protection.md](spec--content-protection.md) | Per-item keys, content AEAD, period-key content-key wrapping, item opening, deferred-ciphertext invariants, and transform boundary | Public Working Draft |
+| [spec--response-binding.md](spec--response-binding.md) | Issuer-response channel requirements, direct representation of keys, optional client-bound methods, response admission, and downgrade behavior | Public Working Draft |
+| [spec--http-binding.md](spec--http-binding.md) | Shared HTTPS JSON endpoint, canonical signed origin, request/response exchange and cache boundary | Public Working Draft |
+| [spec-profile--browser-origin.md](spec-profile--browser-origin.md) | Optional browser observed-Origin admission, proxy handling, CORS and preflight duties | Public Working Draft |
+| [spec-profile--html-carrier.md](spec-profile--html-carrier.md) | Optional HTML carrier selection and publisher/client extraction duties | Public Working Draft |
+| [spec-profile--recipient-grant-unlock.md](spec-profile--recipient-grant-unlock.md) | Optional recipient-grant presentation and admission, common signed JWT, optional issuer-local opaque reference, and item content-key limit | Public Working Draft |
 | [spec--profiles.md](spec--profiles.md) | Minimum interoperable baseline, optional-profile composition, mechanism selection states, and conformance claims | Public Working Draft |
-| [spec--period-keys.md](spec--period-keys.md) | Base exact-period capabilities, exact supply, results, caching and role duties | Public Working Draft |
-| [spec--period-key-chains.md](spec--period-key-chains.md) | Period-chain canonical construction, window geometry, chain supply, carrier, delegation, bounds and role duties | Public Working Draft |
+| [spec-profile--period-keys.md](spec-profile--period-keys.md) | Optional period-key capabilities, supply, results, caching and role duties | Public Working Draft |
+| [spec-profile--chain-keys.md](spec-profile--chain-keys.md) | Optional chain-key construction, window geometry, supply, carrier, delegation, bounds and role duties | Public Working Draft |
 | [spec--sealed-key-envelopes.md](spec--sealed-key-envelopes.md) | Publisher-to-issuer envelope algorithms and BIND | Public Working Draft |
+| [spec-profile--compact-ecdh.md](spec-profile--compact-ecdh.md) | Optional HPKE envelopes, compressed-point transport, per-issuer selection and client relay | Public Working Draft |
 | [spec--security-model.md](spec--security-model.md) | The security boundary governing the specification set | Public Working Draft |
 
-The working core DCA specification owns actor roles, common message flow,
-authentication requirements, conformance terminology, and the interfaces
-between focused specifications. Focused documents own their complete
-mechanism, and the core owns the ordering and composition required for
-their guarantees.
-The profile specification selects complete combinations and adds requirements
-that arise only from composition; it does not take ownership of the selected
-mechanisms.
-
-The working `spec--data-format.md` owns the surrounding wire fields; a
-disagreement about carrier, placement, or structural admission is a
-reconciliation defect rather than competing protocol authority. The focused
-sealed-key envelope specification likewise owns envelope algorithms and BIND.
+Each document owns the subjects its row names. Core owns the processing order
+that composes the focused mechanisms. The profile catalogue owns shared
+selection and composition rules; each specialized profile document keeps its
+feature's mechanism and role duties together. Where two documents disagree on
+a subject, the owner of that subject controls and the other document has a
+defect to reconcile. A guide or design note never controls a normative subject.
 
 ### Proposals
 
-Files named `spec-proposal--<change>.md` state a candidate change in the
-form its target section uses. They carry no authority. The editors adopt a
-proposal only after the reference implementation and a conformance primitive
-prove it; they move its text into the target and remove a declined proposal.
-Status
-"considered" means a stated intent; "proposed, pending proof" means the spec
-text is written and waits for the proofs.
+Profile documents use `spec-profile--<name>.md` and keep their status in the
+header. The [profile catalogue](spec--profiles.md#11-separate-profile-documents)
+explains this organization. The content groups profile is a Proposal and
+is not an adopted profile.
 
-| Proposal | Target | Status |
-| --- | --- | --- |
-| [spec-proposal--compact-ecdh-envelope.md](spec-proposal--compact-ecdh-envelope.md) | Sealed-key envelopes, Section 4; profiles | Proposed; the envelope construction is not selected and its transcript is not final |
-| [spec-proposal--derived-content-aad.md](spec-proposal--derived-content-aad.md) | Content protection, Section 3.2; data format | Proposed, pending proof |
-| [spec-proposal--content-transforms.md](spec-proposal--content-transforms.md) | Content protection, Section 8; data format | Proposed, pending proof |
-| [spec-proposal--detached-key-supply.md](spec-proposal--detached-key-supply.md) | Core, response binding, browser HTTP binding | Proposed, pending proof |
-| [spec-proposal--detached-content.md](spec-proposal--detached-content.md) | Content protection, Section 7; data format | Proposed, pending proof |
-| [spec-proposal--client-bound--host-custody-profile.md](spec-proposal--client-bound--host-custody-profile.md) | Profiles, Section 7; response binding | Proposed, pending proof |
-| [spec-proposal--period-chain-integer-label-mapping.md](spec-proposal--period-chain-integer-label-mapping.md) | Period-key chains, Section 7.3 | Proposed; restates the existing mapping as integer arithmetic, no wire change |
-| [spec-proposal--remove-wire-unlock-url.md](spec-proposal--remove-wire-unlock-url.md) | Data format, core delegation completeness, HTTPS endpoint selection | Proposed; adoption is decided before v1 |
+Files named `spec-proposal--<change>.md` state a candidate change in the form
+its target section uses and carry Proposal status. A Proposal does not override a
+Public Working Draft by using requirement words. Partial adoption gives remaining
+candidate text no authority and establishes no complete reference conformance
+claim.
 
-## Capability and dependency index
-
-This index exposes requirements that cross topic boundaries. It is not a
-second normative owner; each row links to the specifications that define the
-behavior. Reviewers check each applicable capability stage from implemented
-and enabled through emitted, offered, selected and accepted.
-
-| Capability | Selection point and affected roles | Conditional prerequisites and fallback | Normative owners |
-| --- | --- | --- | --- |
-| Direct content-key route | Publisher authors route; issuer authorizes result; client accepts it | Requires the HTTPS endpoint binding plus direct response representation; an authored exact-period route may remain an alternative | [Profiles](spec--profiles.md), [Core](spec--core-protocol.md), [Response binding](spec--response-binding.md), [HTTPS/browser binding](spec--browser-http-binding.md), [Content protection](spec--content-protection.md) |
-| Browser Origin/CORS | Browser caller and issuer endpoint select the calling-page-origin boundary | Requires canonical signed and observed origins, exact equality, trusted proxy handling and conditional CORS; non-browser HTTPS does not claim this property | [Profiles](spec--profiles.md), [HTTPS/browser binding](spec--browser-http-binding.md), [Core](spec--core-protocol.md) |
-| Exact-period cached route | Publisher emits wraps; client has or obtains exact capability | Wrap and exact capability must describe the same coordinate; candidate miss continues; a conforming issuer-mediated route remains required | [Profiles](spec--profiles.md), [Content protection](spec--content-protection.md), [Period keys](spec--period-keys.md), [Core](spec--core-protocol.md) |
-| Content representation transforms | Publisher selects an ordered transform list; client reverses it only after authenticated decryption | Every named transform and its finite processing limits must be supported by the selected profile; unsupported or malformed transforms fail the item | [Content protection](spec--content-protection.md), [Data format](spec--data-format.md), [Profiles](spec--profiles.md) |
-| Chain-derived candidate | Selected period-chain profile supplies exact leaves | Every affected role must support the profile duties assigned to it; an exact leaf retains the base content-wrap meaning | [Period-key chains](spec--period-key-chains.md), [Period keys](spec--period-keys.md), [Content protection](spec--content-protection.md) |
-| Client-bound key result | Client offers and issuer selects the response representation | Requires compatible client and issuer behavior plus the HTTPS endpoint binding; absence of agreement uses a mutually selected fallback or fails without releasing a key | [Profiles](spec--profiles.md), [Response binding](spec--response-binding.md), [HTTPS/browser binding](spec--browser-http-binding.md), [Core](spec--core-protocol.md) |
-| Not-delivered access-group family | Deployment selects the not-delivered-result profile before it interprets a response; the issuer emits the report and the client accepts it | The member delivers no key, and a named family has no delivered period capability under Core Section 7.2; an independently authorized direct content-name result may coexist, while a client that has not selected the profile reads no non-delivery outcome from the member | [Profiles](spec--profiles.md#8-dca-v1-not-delivered-result-profile), [Core](spec--core-protocol.md#72-not-delivered-access-group-families), [Response binding](spec--response-binding.md#3-inputs-and-common-response-form) |
-| Candidate deferred-ciphertext delivery | If adopted, publisher omits inline ciphertext under an explicitly selected delivery profile | Delivery profile must obtain the original ciphertext tuple; local opening remains identical to inline opening | No DCA transport owner selected; base invariants only in [Content protection](spec--content-protection.md) and [Data format](spec--data-format.md) |
-| Candidate alternative wrap or content transform | If adopted, a named profile is selected by every actor whose behavior changes | Exact transcript, marker, limits and unsupported behavior are profile requirements; unknown optimized forms never fall back to base interpretation | No alternative-wrap profile is selected; the reserved `bind` marker and its no-fallback rule are live in [Content protection](spec--content-protection.md) Section 4 and named in [Data format](spec--data-format.md) Section 3 |
-
-The index remains a compact navigation aid. Stable combination requirements
-belong to the profile specification; this table does not restate their full
-role obligations.
+| Proposal | Target |
+| --- | --- |
+| [spec-profile--content-groups.md](spec-profile--content-groups.md) | Optional content groups profile: window seeds, connectors and cross-role delivery |
+| [spec-proposal--browser-integration.md](spec-proposal--browser-integration.md) | Candidate client-side handoff, output lifetime, registry and context interfaces; profiles |
+| [spec-proposal--html-content-map.md](spec-proposal--html-content-map.md) | Profiles, Section 10; protected-HTML reconstruction |
+| [spec-proposal--content-description-and-placement.md](spec-proposal--content-description-and-placement.md) | Data format, content protection, browser integration and HTML content-map proposal |
 
 ## Readable companions
 
 Readable design documents explain why the protocol has its shape, how the
-pieces interact, and how developers configure and debug it. They should link to
-the normative specification instead of duplicating exact grammar or
-cryptographic transcripts.
+pieces interact, and how developers configure and debug it.
 
 | Document | Intended audience and purpose |
 | --- | --- |
-| [guide--period-keys.md](guide--period-keys.md) | Human-readable exact period-key model and examples, with the optional chain model in its separate companion |
-| [guide--integration--exact-period.md](guide--integration--exact-period.md) | Practical exact-period integration path through the reference source, wire members, and runnable reuse tests |
+| [guide--period-keys.md](guide--period-keys.md) | Human-readable period-key model and examples, with the optional chain model in its separate companion |
+| [guide--integration--period-keys.md](guide--integration--period-keys.md) | Practical period-key integration path through the reference source, wire members, and runnable reuse tests |
 | [guide--integration--metering.md](guide--integration--metering.md) | Issuer integration for metered grants, including policy input, commit timing, and observable limits |
-| [guide--browser-content-presentation.md](guide--browser-content-presentation.md) | Early WIP sketch of a possible publisher callback for opened browser content; no interface is proposed or selected |
+| [guide--reference-implementation-status.md](guide--reference-implementation-status.md) | Revision-scoped reference observations and evidence limits, separate from protocol requirements |
+| [guide--browser-content-presentation.md](guide--browser-content-presentation.md) | Owner-selected browser rendering, template-authored maps and independent article reconstruction |
 | [guide---overview.md](guide---overview.md) | Deeper explanation of how DCA's parts fit together |
-| [guide--period-key-chains.md](guide--period-key-chains.md) | Readable period-chain model: geometry, supply, delegation and client relay |
+| [guide--chain-keys.md](guide--chain-keys.md) | Readable chain-key model: geometry, supply, delegation and client relay |
+| [guide--chain-keys--label-mapping.md](guide--chain-keys--label-mapping.md) | Compact UTC labels, calendar validation and optional integer conversion recipe |
+| [guide--key-flow--diagrams.md](guide--key-flow--diagrams.md) | Illustrated key flow: publisher sealing, issuer envelope opening and grants, client content opening |
 | [guide--deployment-patterns.md](guide--deployment-patterns.md) | Browser, server, edge and hybrid ways to place the DCA client role |
 | [guide--unlock-fallback.md](guide--unlock-fallback.md) | Deployment-owned client route walk, fallback issuers, health and emergency operation; each independent exchange remains governed by core and its selected transport profile |
-
-If a readable design guide and a normative specification disagree, the
-normative specification controls and the guide has a documentation defect.
-When one document has mixed status,
-precedence follows the explicit topic or section scope declared by that
-document.
-
-## Review and promotion discipline
-
-Each normative statement in this set identifies:
-
-- the actor to which it applies;
-- whether it is required or optional;
-- the observable interoperability or safety reason for the requirement;
-- how optional capability combinations form a complete path;
-- what is authenticated or trusted;
-- how unsupported, malformed, and conflicting input fails; and
-- which conformance evidence can test the statement.
-
-Open design questions should remain visibly marked as open. Authors must not
-hide an unresolved choice behind requirement words or require an internal
-source-code arrangement that is unnecessary for interoperable behavior.
-
-Editors promote a document only after reconciling it with current authority
-documents, pinning its cryptographic transcript where applicable, and providing
-neutral vectors and a bounded implementation.
+| [guide--browser-integration.md](guide--browser-integration.md) | Evaluating the browser-integration proposal: examples, rationale and limitations |
+| [design--data-format--example.md](design--data-format--example.md) | One-item baseline exchange with values |

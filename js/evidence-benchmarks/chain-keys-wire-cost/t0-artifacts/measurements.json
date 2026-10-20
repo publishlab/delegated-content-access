@@ -1,0 +1,158 @@
+{
+  "method": "Genuine compact JSON, excluding sealedContent; gzip level 9; current plus six hourly periods; independent two-window supply; random carriers are not normalized.",
+  "rows": [
+    {
+      "name": "one-group",
+      "universe": ["premium"],
+      "active": ["premium"],
+      "measured": [
+        {
+          "slots": 1,
+          "metadata": {
+            "raw": 1235,
+            "gzip": 906
+          },
+          "request": {
+            "raw": 933,
+            "gzip": 718
+          },
+          "response": {
+            "raw": 131,
+            "gzip": 129
+          }
+        },
+        {
+          "slots": 2,
+          "metadata": {
+            "raw": 1334,
+            "gzip": 964
+          },
+          "request": {
+            "raw": 947,
+            "gzip": 722
+          },
+          "response": {
+            "raw": 131,
+            "gzip": 129
+          }
+        }
+      ],
+      "saved": {
+        "metadata": {
+          "raw": 99,
+          "rawPercent": 7.42,
+          "gzip": 58,
+          "gzipPercent": 6.02
+        },
+        "response": {
+          "raw": 0,
+          "rawPercent": 0,
+          "gzip": 0,
+          "gzipPercent": 0
+        }
+      }
+    },
+    {
+      "name": "two-groups",
+      "universe": ["premium", "second"],
+      "active": ["premium", "second"],
+      "measured": [
+        {
+          "slots": 1,
+          "metadata": {
+            "raw": 1682,
+            "gzip": 1202
+          },
+          "request": {
+            "raw": 1295,
+            "gzip": 958
+          },
+          "response": {
+            "raw": 220,
+            "gzip": 183
+          }
+        },
+        {
+          "slots": 2,
+          "metadata": {
+            "raw": 1880,
+            "gzip": 1312
+          },
+          "request": {
+            "raw": 1323,
+            "gzip": 964
+          },
+          "response": {
+            "raw": 220,
+            "gzip": 183
+          }
+        }
+      ],
+      "saved": {
+        "metadata": {
+          "raw": 198,
+          "rawPercent": 10.53,
+          "gzip": 110,
+          "gzipPercent": 8.38
+        },
+        "response": {
+          "raw": 0,
+          "rawPercent": 0,
+          "gzip": 0,
+          "gzipPercent": 0
+        }
+      }
+    },
+    {
+      "name": "sparse-group",
+      "universe": ["premium", "second", "third", "fourth"],
+      "active": ["premium"],
+      "measured": [
+        {
+          "slots": 1,
+          "metadata": {
+            "raw": 1235,
+            "gzip": 907
+          },
+          "request": {
+            "raw": 933,
+            "gzip": 719
+          },
+          "response": {
+            "raw": 131,
+            "gzip": 129
+          }
+        },
+        {
+          "slots": 2,
+          "metadata": {
+            "raw": 1334,
+            "gzip": 962
+          },
+          "request": {
+            "raw": 947,
+            "gzip": 725
+          },
+          "response": {
+            "raw": 131,
+            "gzip": 129
+          }
+        }
+      ],
+      "saved": {
+        "metadata": {
+          "raw": 99,
+          "rawPercent": 7.42,
+          "gzip": 55,
+          "gzipPercent": 5.72
+        },
+        "response": {
+          "raw": 0,
+          "rawPercent": 0,
+          "gzip": 0,
+          "gzipPercent": 0
+        }
+      }
+    }
+  ]
+}

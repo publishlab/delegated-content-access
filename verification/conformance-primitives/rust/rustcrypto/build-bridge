@@ -1,0 +1,103 @@
+#!/bin/sh
+# Vendor the pinned crates and compile the operation bridge, before the batch
+# clock starts.
+#
+#   ./build-bridge
+#
+# The runner names this as the RustCrypto lane's preparation step and runs it
+# outside the request budget, so the budget then measures one already-built
+# program answering one batch. It writes `v1/target/release/bridge` and prints
+# nothing on stdout; cargo's progress lines go to stderr.
+#
+# Two steps, and the second never reaches the network:
+#
+#   1. `cargo vendor --locked` copies every crate Cargo.lock names into this
+#      runtime's cache, at `<cache>/vendor/<digest>`, where the digest is the
+#      first 16 hex digits of Cargo.lock's SHA-256. `--locked` refuses a lock
+#      that would have to change, and cargo checks each downloaded crate
+#      against the checksum Cargo.lock records for it. A directory already
+#      there for this digest is reused, so vendoring needs the network once
+#      per lock and never again.
+#   2. `cargo build --frozen --release` reads the crates only from that
+#      directory, through the `v1/.cargo/config.toml` this script writes, and
+#      refuses both the network and a lock that would have to change.
+#
+# The toolchain is asked for and never installed here. `--print-base` and
+# `--print-cache` answer and install nothing, so a cold cache stays cold and a
+# run with no toolchain says so instead of pulling 380 MB inside a conformance
+# run. Installing is a separate command an operator runs once, and this lane's
+# check runs it.
+#
+# Nothing goes on PATH. CARGO_HOME points into the runtime's cache, so cargo's
+# registry index and crate downloads land there rather than in ~/.cargo, and a
+# ~/.cargo/config.toml on this host takes no part. RUSTC names the pinned
+# compiler, because cargo run by absolute path still looks for `rustc` on PATH.
+# The build output stays in this checkout, under `v1/target/`: the vendored
+# source is content-addressed and safe to share, and a compiled binary is not,
+# since two checkouts sharing a target directory would each run whichever build
+# landed last.
+set -eu
+
+here=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
+installer="$here/../install-toolchain"
+package="$here/v1"
+
+# DCA_VERSION is the token of ../versions the lane check selected for this run.
+version=${DCA_VERSION:-default}
+base=$("$installer" --version "$version" --print-base)
+cache=$("$installer" --version "$version" --print-cache)
+cargo="$base/bin/cargo"
+
+if [ ! -x "$cargo" ] || [ ! -x "$base/bin/rustc" ]; then
+  echo "no Rust toolchain at $base, so the bridge was not built." >&2
+  echo "Install it once with: $installer" >&2
+  exit 2
+fi
+
+export CARGO_HOME="$cache/cargo-home"
+export RUSTC="$base/bin/rustc"
+export CARGO_TARGET_DIR="$package/target"
+# A value left in the caller's environment would change what is compiled
+# without appearing in any file here.
+unset RUSTFLAGS CARGO_BUILD_RUSTFLAGS CARGO_ENCODED_RUSTFLAGS RUSTC_WRAPPER CARGO_BUILD_TARGET
+
+digest=$(sha256sum "$package/Cargo.lock" | cut -c1-16)
+vendor="$cache/vendor/$digest"
+
+if [ ! -d "$vendor" ]; then
+  mkdir -p "$cache/vendor"
+  # Several checkouts share this cache. The lock keeps a second caller from
+  # vendoring into the same place at once, and the rename below keeps a
+  # half-written directory from ever carrying the final name.
+  exec 9>"$cache/vendor/.vendor.lock"
+  flock 9
+  if [ ! -d "$vendor" ]; then
+    echo "vendoring the crates Cargo.lock names into $vendor (needs network once) ..." >&2
+    staging=$(mktemp -d "$vendor.XXXXXX")
+    trap 'rm -rf "$staging"' EXIT
+    # cargo vendor prints the source-replacement stanza on stdout; this script
+    # writes its own below, and stdout stays empty.
+    "$cargo" vendor --locked --manifest-path "$package/Cargo.toml" "$staging" >/dev/null
+    mv "$staging" "$vendor"
+    trap - EXIT
+  fi
+  exec 9>&-
+fi
+
+# The source replacement the offline build reads. Written on every run, because
+# the vendor path moves with the lock digest and with the cache root. It is
+# generated rather than committed, and ignored by git.
+mkdir -p "$package/.cargo"
+cat > "$package/.cargo/config.toml.tmp" <<EOF
+# Written by build-bridge. Every crate comes from the vendored copy of
+# Cargo.lock's set, and nothing is fetched.
+[source.crates-io]
+replace-with = "vendored-sources"
+
+[source.vendored-sources]
+directory = "$vendor"
+EOF
+mv "$package/.cargo/config.toml.tmp" "$package/.cargo/config.toml"
+
+cd "$package"
+exec "$cargo" build --frozen --release --quiet --bin bridge >&2

@@ -9,6 +9,7 @@
 # --print-bin, neither of which touches the network.
 #
 #   ./install-toolchain                    # install if absent, then print BASE
+#   ./install-toolchain --version <token>  # the pin `versions` lists for <token>; default when absent
 #   ./install-toolchain --base <dir>       # use this install as is, download nothing
 #   ./install-toolchain --cache-root <dir> # put or find the install under this root
 #   ./install-toolchain --print-base       # print where BASE is or would be, install nothing
@@ -18,6 +19,11 @@
 #   ./install-toolchain --help             # this text
 #
 # Run it directly: the shebang names bash.
+#
+# The version comes from --version, else DCA_VERSION, else `default`, the first
+# default line of `versions` beside this script. A token that file does not
+# list is refused with exit 2. Each version installs into a directory of its
+# own, so two versions sit side by side in one cache.
 #
 # BASE is the directory holding the php binary, and BASE/php is the binary
 # itself. A caller is given one of them, or the root the lanes live under;
@@ -53,13 +59,26 @@ set -euo pipefail
 # produced the recorded numbers" and not as a vendor attestation. README.md says
 # the same in full.
 #
-# To bump the pin, change the version and both hashes together, and
+# The release each token installs is the second field of its line in
+# `versions`; the two hashes for that release are below, keyed by token. To bump
+# a pin, change the release there and both hashes here together, and
 # re-download both files to compute them, because there is no manifest to read
 # them off:
 #   https://dl.static-php.dev/static-php-cli/bulk/?format=json
-PHP_VERSION=8.4.23
-SHA256_x86_64=5fa2b5f1cc9d7f79b19718926b4f4f0bb6949db52073b2fabf8ae52de3993af5
-SHA256_aarch64=1faabbea9c500daab9ba202cb75ea9876191a2a8f902244e9d0464addb9b55b1
+# 8.3.32 is the newest 8.3 build that listing carries on 2026-09-30; php.net
+# has released 8.3.35, whose sha256 covers the source tarball and not this
+# build.
+pin_checksums() {
+  case "$1" in
+    8.4) SHA256_x86_64=5fa2b5f1cc9d7f79b19718926b4f4f0bb6949db52073b2fabf8ae52de3993af5
+         SHA256_aarch64=1faabbea9c500daab9ba202cb75ea9876191a2a8f902244e9d0464addb9b55b1 ;;
+    8.3) SHA256_x86_64=7928396c17aabcd5bb074fe82e07b4cb693c6d04360a4415799a143a9f9686c6
+         SHA256_aarch64=4c29858ecfa30d93e854d17494f422b593afa6da8ec80ae979191e69604dc955 ;;
+    *) echo "versions lists $1, and this installer carries no checksum for it." >&2
+       echo "Add both hashes for its release to pin_checksums before the token can install." >&2
+       exit 2 ;;
+  esac
+}
 
 # The `bulk` builds published for Linux are fully static: the binary carries its
 # own libc and needs nothing from the host's. So this lane has no counterpart to the
@@ -118,6 +137,7 @@ base=""
 cache_root=""
 print=""
 force=0
+version="${DCA_VERSION:-default}"
 while [ $# -gt 0 ]; do
   case "$1" in
     --base)
@@ -126,6 +146,9 @@ while [ $# -gt 0 ]; do
     --cache-root)
       [ $# -ge 2 ] || { echo "--cache-root needs a directory to hold the lanes" >&2; exit 2; }
       resolve_absolute_path "$2"; cache_root="$DCA_ABSOLUTE_PATH"; shift 2 ;;
+    --version)
+      [ $# -ge 2 ] || { echo "--version needs a token from $HERE/versions, or default" >&2; exit 2; }
+      version="$2"; shift 2 ;;
     --print-base)  print=base; shift ;;
     --print-bin)   print=bin; shift ;;
     --print-cache) print=cache; shift ;;
@@ -134,6 +157,12 @@ while [ $# -gt 0 ]; do
     *) echo "unknown argument: $1" >&2; exit 2 ;;
   esac
 done
+
+# The version first: an unlisted token refuses every action, print queries
+# included, so no caller is handed a path for a version nobody pinned.
+resolve_version_pin "$HERE/versions" "$version" || exit 2
+PHP_VERSION="$DCA_VERSION_RELEASE"
+pin_checksums "$DCA_VERSION_TOKEN"
 
 if [ -n "$cache_root" ]; then
   CACHE="$cache_root/php"

@@ -5,6 +5,9 @@
 set -u
 
 here=$(CDPATH= cd -- "$(dirname "$0")" && pwd)
+# The fixtures below pass their version input explicitly; one inherited from
+# the caller would select other pairs than the assertions name.
+unset DCA_VERSION
 scratch=$(mktemp -d) || exit 2
 trap 'rm -rf "$scratch"' EXIT INT TERM
 
@@ -16,34 +19,139 @@ fail() {
 mkdir -p "$scratch/_shared" "$scratch/node" "$scratch/php" || exit 2
 cp "$here/check" "$scratch/check" || exit 2
 cp "$here/_shared/aggregate-results" "$scratch/_shared/aggregate-results" || exit 2
+cp "$here/_shared/cache.sh" "$scratch/_shared/cache.sh" || exit 2
 chmod +x "$scratch/check" "$scratch/_shared/aggregate-results" || exit 2
 
+# A runtime's version list: `<token> <release> <default|listed>` per line.
+write_versions() {
+    runtime=$1
+    shift
+    printf '%s\n' "$@" > "$scratch/$runtime/versions" || exit 2
+}
+
+# A fake lane check. It takes exactly `--version <token> --record <file>`, the
+# call the top-level check makes once per (lane, version) pair, and writes a
+# record naming that version, with the two operation rows a lane check writes
+# for the operations its bridge.json declares; the ecdh row's status, the lane=
+# identity and the version= identity it writes can each be set to something
+# else.
 write_lane() {
     lane=$1
     ecdh_status=$2
     record_lane=${3:-$lane}
+    record_version=${4:-}
+    mkdir -p "$scratch/$lane" || exit 2
     {
         printf '%s\n' '#!/bin/sh'
-        printf '%s\n' '[ "$1" = --record ] && [ "$#" -eq 2 ] || exit 2'
-        printf '%s\n' "printf '%s\\n' 'lane=$record_lane' 'set=encoding status=held' 'set=ecdh status=$ecdh_status' 'exit=0' > \"\$2\""
+        printf '%s\n' '[ "$1" = --version ] && [ "$3" = --record ] && [ "$#" -eq 4 ] || exit 2'
+        if [ -n "$record_version" ]; then
+            printf '%s\n' "v=$record_version"
+        else
+            printf '%s\n' 'v=$2'
+        fi
+        printf '%s\n' "printf '%s\\n' 'lane=$record_lane' \"version=\$v\" \"runtime=fake-\$2\" 'operation=decode-base64url member=lane' 'operation=ecdh-p256 member=openssl' 'set=encoding status=held' 'set=ecdh status=$ecdh_status' 'exit=0' > \"\$4\""
     } > "$scratch/$lane/check"
     chmod +x "$scratch/$lane/check" || exit 2
 }
 
 write_lane node held
+write_versions node '24 24.0.0 default' '22 22.0.0 default'
 write_lane php unsupported
+write_versions php '8.4 8.4.0 default' '8.3 8.3.0 listed'
 
 if ! "$scratch/check" > "$scratch/out" 2> "$scratch/err"; then
     cat "$scratch/out" "$scratch/err" >&2
     fail "an explicit unsupported row should retain the settled zero exit"
 fi
-grep -qF 'set ecdh: node held, php unsupported' "$scratch/out" \
-    || fail "the aggregate did not name the unsupported set and lane"
-grep -qF 'Every answered set held; these lanes explicitly do not support one or more corpus sets: php.' "$scratch/out" \
+grep -qF 'set ecdh: node@24 held, node@22 held, php@8.4 unsupported' "$scratch/out" \
+    || fail "the aggregate did not name the unsupported set and every default (lane, version) pair"
+grep -qF 'Every answered set held; these lanes explicitly do not support one or more corpus sets: php@8.4.' "$scratch/out" \
     || fail "the final result did not distinguish unsupported from held"
+grep -qF 'node@24: held (runtime fake-24,' "$scratch/out" \
+    || fail "the aggregate did not print the pair with the runtime its record observed"
+# The attribution a record carries reaches the output, under its own pair.
+grep -A2 '^node@22: held' "$scratch/out" > "$scratch/node22.attribution" || true
+printf '%s\n' 'node@22: held (runtime fake-22, exit 0, sets 2 held / 0 disagreed / 0 incomplete / 0 unsupported)' \
+    '  decode-base64url  lane' '  ecdh-p256         openssl' > "$scratch/node22.expected"
+diff -u "$scratch/node22.expected" "$scratch/node22.attribution" \
+    || fail "the aggregate did not print which member answered each operation under node@22"
+if grep -qF 'php@8.3' "$scratch/out"; then
+    fail "default ran a version its runtime lists but does not mark default"
+fi
 if grep -qF 'every conformance lane held' "$scratch/out"; then
     fail "the old universal-hold claim survived an unsupported record"
 fi
+
+# A runtime with listed versions but no default is incomplete for the default
+# gate. Silently dropping it while another runtime holds would be false green.
+mkdir -p "$scratch/rust/rustcrypto"
+write_lane rust/rustcrypto held
+write_versions rust '1.98 1.98.1 listed'
+if "$scratch/check" > "$scratch/no-default.out" 2> "$scratch/no-default.err"; then
+    fail "default gate exited 0 after omitting a runtime with no default"
+else
+    no_default_status=$?
+    [ "$no_default_status" -eq 2 ] || fail "no-default runtime exited $no_default_status, not 2"
+fi
+grep -q 'PART  rust/rustcrypto .*runtime marks no default version' "$scratch/no-default.out" \
+    || fail "a runtime without a default was not identified as incomplete"
+grep -qF 'node@24: held' "$scratch/no-default.out" \
+    || fail "the default gate did not retain evidence from the runtime it did run"
+rm -rf "$scratch/rust"
+
+# --version all runs every listed token, one record per pair.
+if ! "$scratch/check" --version all > "$scratch/all.out" 2> "$scratch/all.err"; then
+    cat "$scratch/all.out" "$scratch/all.err" >&2
+    fail "--version all should run every listed pair"
+fi
+grep -qF 'set encoding: node@24 held, node@22 held, php@8.4 held, php@8.3 held' "$scratch/all.out" \
+    || fail "--version all did not run and aggregate every listed pair"
+
+# An exact token selects only the lanes whose runtime lists it and names the
+# others as not selected.
+if ! "$scratch/check" --version 8.3 > "$scratch/one.out" 2> "$scratch/one.err"; then
+    cat "$scratch/one.out" "$scratch/one.err" >&2
+    fail "--version 8.3 should run php@8.3 alone and exit 0"
+fi
+grep -qF 'node                               not selected (runtime lists no 8.3)' "$scratch/one.out" \
+    || fail "a lane whose runtime lists no 8.3 was not reported as not selected"
+grep -qF 'set encoding: php@8.3 held' "$scratch/one.out" \
+    || fail "--version 8.3 did not run php@8.3"
+if grep -qF 'node@' "$scratch/one.out"; then
+    fail "--version 8.3 ran a lane whose runtime does not list it"
+fi
+
+# A token no runtime lists selects nothing, and that is an input error.
+if "$scratch/check" --version 99 > "$scratch/none.out" 2> "$scratch/none.err"; then
+    fail "a token no runtime lists should not exit 0"
+else
+    none_status=$?
+    [ "$none_status" -eq 2 ] || fail "a token no runtime lists exited $none_status, not 2"
+fi
+grep -qF "no lane's runtime lists version 99" "$scratch/none.out" \
+    || fail "the unlisted token was not named"
+
+# A nested runtime/binding lane must be discovered, receive a writable record
+# path, and reach the same cross-lane aggregate as the old flat lanes.
+write_lane rust/rustcrypto held
+write_versions rust '1.98 1.98.1 default'
+if ! "$scratch/check" > "$scratch/nested.out" 2> "$scratch/nested.err"; then
+    cat "$scratch/nested.out" "$scratch/nested.err" >&2
+    fail "a nested lane should join the old flat lanes"
+fi
+grep -qF 'rust/rustcrypto@1.98 held' "$scratch/nested.out" \
+    || fail "the nested lane did not reach the aggregate"
+
+# A lane whose runtime has no version list cannot say which version it would
+# run, so it runs nothing and the run is partial.
+mkdir -p "$scratch/go/stdlib"
+write_lane go/stdlib held
+if "$scratch/check" > "$scratch/nolist.out" 2> "$scratch/nolist.err"; then
+    fail "a lane with no version list should not leave the run at exit 0"
+fi
+grep -qF 'no usable version list at go/versions' "$scratch/nolist.out" \
+    || fail "the missing version list was not named"
+rm -rf "$scratch/go"
 
 # The top-level check identifies a lane by the child path it invoked. A record that claims a
 # different lane must not be attributed to whichever runtime name it carries;
@@ -51,13 +159,72 @@ fi
 rm -rf "$scratch/php"
 mkdir -p "$scratch/p.hp"
 write_lane p.hp unsupported pxhp
+write_versions p.hp '8.4 8.4.0 default'
 if "$scratch/check" > "$scratch/mismatched.out" 2> "$scratch/mismatched.err"; then
     fail "a child writing another lane identity should fail closed"
 fi
-grep -qF 'p.hp/check wrote a record without exactly one lane=p.hp identity' "$scratch/mismatched.out" \
+grep -qF 'p.hp/check --version 8.4 wrote a record without exactly one lane=p.hp and one version=8.4 identity' "$scratch/mismatched.out" \
     || fail "the mismatched child record was not attributed and refused"
 if grep -qF 'CROSS-LANE RECORDS' "$scratch/mismatched.out"; then
     fail "a mismatched identity reached cross-lane aggregation"
 fi
+
+# The version identity is checked the same way: a record for another version
+# than the one asked for is not attributed to the pair that was run.
+write_lane p.hp unsupported p.hp 8.3
+if "$scratch/check" > "$scratch/wrongversion.out" 2> "$scratch/wrongversion.err"; then
+    fail "a child writing another version identity should fail closed"
+fi
+grep -qF 'p.hp/check --version 8.4 wrote a record without exactly one lane=p.hp and one version=8.4 identity' "$scratch/wrongversion.out" \
+    || fail "the record naming another version was not refused"
+rm -rf "$scratch/p.hp"
+
+# A refused record, the version a runtime lists and a binding cannot run, is
+# printed with its reason and folds into no exit code.
+mkdir -p "$scratch/php"
+write_versions php '8.4 8.4.0 default' '7.3 7.3.0 default'
+{
+    printf '%s\n' '#!/bin/sh'
+    printf '%s\n' 'if [ "$2" = 7.3 ]; then'
+    printf '%s\n' "  printf '%s\\n' 'lane=php' 'version=7.3' 'status=refused' 'reason=no ECDH in this build' 'exit=0' > \"\$4\""
+    printf '%s\n' 'else'
+    printf '%s\n' "  printf '%s\\n' 'lane=php' \"version=\$2\" 'runtime=8.4.0' 'set=encoding status=held' 'set=ecdh status=held' 'exit=0' > \"\$4\""
+    printf '%s\n' 'fi'
+} > "$scratch/php/check"
+chmod +x "$scratch/php/check"
+if ! "$scratch/check" > "$scratch/refused.out" 2> "$scratch/refused.err"; then
+    cat "$scratch/refused.out" "$scratch/refused.err" >&2
+    fail "a refused version should fold into no exit code"
+fi
+grep -qF 'php@7.3: refused (no ECDH in this build)' "$scratch/refused.out" \
+    || fail "the refused pair was not printed with its reason"
+grep -qF 'These lane versions were refused by their binding: php@7.3.' "$scratch/refused.out" \
+    || fail "the result did not name the refused pair"
+if grep '^set ' "$scratch/refused.out" | grep -qF 'php@7.3'; then
+    fail "a refused pair reached the set matrix"
+fi
+
+# The aggregate's own refusals for the version lines. Each record is run
+# alone or beside a good one, and each must refuse before any statement.
+agg="$scratch/_shared/aggregate-results"
+printf '%s\n' 'lane=php' 'version=8.4' 'runtime=8.4.0' 'set=encoding status=held' 'exit=0' > "$scratch/pair.record"
+expect_refused() {
+    label=$1
+    want=$2
+    shift 2
+    if "$agg" "$@" > "$scratch/$label.out" 2>&1; then
+        fail "the aggregate accepted $label"
+    fi
+    grep -qF "$want" "$scratch/$label.out" || fail "the aggregate refused $label without saying: $want"
+}
+expect_refused duplicate-pair 'a second record claims lane php@8.4' "$scratch/pair.record" "$scratch/pair.record"
+printf '%s\n' 'lane=php' 'version=8.4' 'set=encoding status=held' 'exit=0' > "$scratch/no-runtime.record"
+expect_refused no-runtime 'version=8.4 with no runtime=' "$scratch/no-runtime.record"
+printf '%s\n' 'lane=php' 'version=7.3' 'status=refused' 'reason=why' 'set=encoding status=held' 'exit=0' > "$scratch/refused-rows.record"
+expect_refused refused-with-rows 'a refused version answers no set' "$scratch/refused-rows.record"
+printf '%s\n' 'lane=php' 'version=7.3' 'status=refused' 'exit=0' > "$scratch/refused-no-reason.record"
+expect_refused refused-no-reason 'a refusal says why' "$scratch/refused-no-reason.record"
+printf '%s\n' 'lane=php' 'version=7.3' 'status=unsupported' 'reason=why' 'exit=0' > "$scratch/status-word.record"
+expect_refused status-word 'the one record status is refused' "$scratch/status-word.record"
 
 printf 'conformance top-level record aggregation: PASS\n'

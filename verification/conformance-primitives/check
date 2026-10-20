@@ -1,17 +1,28 @@
 #!/bin/sh
-# Runs every conformance lane's own check, asks each for its machine-readable
-# record, then lets `_shared/aggregate-results` make the cross-lane statement.
+# Runs every conformance lane's own check, once per selected runtime version,
+# asks each run for its machine-readable record, then lets
+# `_shared/aggregate-results` make the cross-lane statement.
 #
-#     ./check
+#     ./check                    # every lane at its runtime's default versions
+#     ./check --version all      # every lane at every version its runtime lists
+#     ./check --version 8.3      # only the lanes whose runtime lists 8.3
+#
+# The version input is --version, else DCA_VERSION, else default. Each runtime
+# lists its versions in `<runtime>/versions` (read by `_shared/cache.sh`), and a
+# run is one (lane, version) pair: this script calls `<lane>/check --version
+# <token> --record <file>` once per pair, and the record and the tally carry
+# the pair as `<lane>@<token>`. An exact token selects only the lanes whose
+# runtime lists it; the others are printed as not selected, and a token no
+# runtime lists is refused with exit 2 before any lane runs.
 #
 # Exit codes: 0 every answered row held (a corpus set a lane explicitly does
 # not support remains visible in the aggregate), 1 a lane checked and failed, 2
 # a lane ran partially or nothing was verified.
 #
-# The child list is discovered rather than written down: an immediate child
-# directory holding an executable `check` counts as a lane, and the lanes run in sorted
-# order. Adding or removing a runtime directory's check therefore adds or
-# removes that lane, and no list here has to be kept in step with the tree.
+# The child list is discovered rather than written down: a runtime/binding
+# directory holding an executable `check` counts as a lane. Lanes run in sorted
+# order. The walk still accepts an immediate child with a `check`, so a lane
+# that has not moved to the two-level layout keeps running.
 #
 # _shared/driver owns the shared cases, expected values, validation, and driver
 # the lane checks are written against. It carries no check, so it is support
@@ -31,6 +42,26 @@ set -u
 
 cd "$(dirname "$0")" || exit 2
 
+# shellcheck source=_shared/cache.sh
+. ./_shared/cache.sh
+
+selection=${DCA_VERSION:-default}
+while [ $# -gt 0 ]; do
+    case "$1" in
+        --version)
+            [ $# -ge 2 ] || { echo "--version needs default, all or a runtime version token" >&2; exit 2; }
+            selection=$2; shift 2 ;;
+        *)
+            echo "conformance-primitives/check takes --version <default|all|token> and nothing else." >&2
+            exit 2 ;;
+    esac
+done
+case "$selection" in
+    ""|*[!0-9A-Za-z._-]*)
+        echo "--version \"$selection\" is not default, all or a version token (letters, digits, . _ -)." >&2
+        exit 2 ;;
+esac
+
 failed=0
 partial=0
 ran=0
@@ -44,37 +75,95 @@ row() {
 "
 }
 
-# The whole discovery walk: an immediate child directory with an
-# executable check, in sorted order.
+# The whole discovery walk: one or two directory levels with an executable
+# check, in sorted order.
 lanes=$(
-    for entry in */; do
+    for entry in */ */*/; do
         lane=${entry%/}
         [ -x "$lane/check" ] || continue
         printf '%s\n' "$lane"
     done | sort
 )
 
+# The plan, before any lane runs: one `<lane> <token>` line per pair, in lane
+# order and then list order. A lane's runtime is the first path element, and
+# its list is `<runtime>/versions`. A runtime with no readable list runs
+# nothing and is partial, since nobody can say which version it would be.
+plan=""
+not_selected=""
+selected_lanes=0
 for lane in $lanes; do
+    runtime=${lane%%/*}
+    list_status=0
+    resolve_version_selection "$runtime/versions" "$selection" 2> "$records/list.err" || list_status=$?
+    case $list_status in
+        0)
+            if [ -z "$DCA_VERSION_TOKENS" ]; then
+                if [ "$selection" = default ]; then
+                    row PART "$lane" "runtime marks no default version"
+                    partial=1
+                else
+                    not_selected="$not_selected $lane"
+                    row "--" "$lane" "not selected (runtime marks no $selection version)"
+                fi
+                continue
+            fi
+            selected_lanes=$((selected_lanes + 1))
+            for token in $DCA_VERSION_TOKENS; do
+                plan="$plan$lane $token
+"
+            done ;;
+        3)
+            not_selected="$not_selected $lane"
+            row "--" "$lane" "not selected (runtime lists no $selection)" ;;
+        *)
+            cat "$records/list.err"
+            row PART "$lane" "no usable version list at $runtime/versions"
+            partial=1 ;;
+    esac
+done
+
+# An exact token nobody lists names no run at all, which is an input error
+# rather than an empty pass.
+case "$selection" in
+    default|all) ;;
+    *)
+        if [ "$selected_lanes" -eq 0 ] && [ "$partial" -eq 0 ]; then
+            echo "RESULT: no lane's runtime lists version $selection, so nothing was selected and nothing ran."
+            exit 2
+        fi ;;
+esac
+
+pairs=""
+while read -r lane token; do
+    [ -n "$lane" ] || continue
+    pair="$lane@$token"
     echo "=============================================================================="
-    echo "$lane: ./$lane/check"
+    echo "$pair: ./$lane/check --version $token"
     echo "=============================================================================="
     echo ""
-    "./$lane/check" --record "$records/$lane.record"
+    record_path="$records/$pair.record"
+    mkdir -p "${record_path%/*}" || exit 2
+    "./$lane/check" --version "$token" --record "$record_path" < /dev/null
     status=$?
     ran=$((ran + 1))
+    pairs="$pairs$lane $token
+"
     echo ""
     case $status in
-        0) row PASS "$lane" "lane check exit 0" ;;
-        1) row FAIL "$lane" "lane check exit 1"
+        0) row PASS "$pair" "lane check exit 0" ;;
+        1) row FAIL "$pair" "lane check exit 1"
            failed=$((failed + 1)) ;;
-        2) row PART "$lane" "lane check exit 2"
+        2) row PART "$pair" "lane check exit 2"
            partial=1 ;;
         *) echo "$lane/check exited $status, which is outside the 0/1/2 contract, so"
            echo "nothing it printed can be read as a verdict."
-           row PART "$lane" "lane check exit $status"
+           row PART "$pair" "lane check exit $status"
            partial=1 ;;
     esac
-done
+done <<EOF
+$plan
+EOF
 
 echo "=============================================================================="
 echo "TALLY"
@@ -84,31 +173,41 @@ echo ""
 # A run in which no lane ran verified nothing, whatever the loop did or did not
 # count, so it never exits 0.
 if [ $ran -eq 0 ]; then
-    echo "RESULT: no child directory holds an executable check, so no conformance"
-    echo "lane ran and nothing was verified."
+    echo "RESULT: no (lane, version) pair ran: no child directory holds an executable check,"
+    echo "or no runtime lists a version for this selection. Nothing was verified."
     exit 2
 fi
 
 # Human stdout cannot say whether every corpus set held: a set a lane does not
 # support leaves that lane's exit at zero. The records carry that status,
 # so only the shared refold may make the final claim. A missing record means the
-# lane's exit code has no accountable evidence and is incomplete.
-for lane in $lanes; do
-    if [ ! -f "$records/$lane.record" ]; then
-        echo "RESULT: partial run. $lane/check left no record for the cross-lane refold."
+# lane's exit code has no accountable evidence and is incomplete. A record is
+# attributed to the pair this script asked for, by its lane= and version= lines.
+set --
+while read -r lane token; do
+    [ -n "$lane" ] || continue
+    record="$records/$lane@$token.record"
+    if [ ! -f "$record" ]; then
+        echo "RESULT: partial run. $lane/check --version $token left no record for the cross-lane refold."
         exit 2
     fi
-    matching_identity=$(grep -Fxc "lane=$lane" "$records/$lane.record" || true)
-    all_identities=$(grep -c '^lane=' "$records/$lane.record" || true)
-    if [ "$matching_identity" -ne 1 ] || [ "$all_identities" -ne 1 ]; then
-        echo "RESULT: partial run. $lane/check wrote a record without exactly one lane=$lane identity."
+    matching_identity=$(grep -Fxc "lane=$lane" "$record" || true)
+    all_identities=$(grep -c '^lane=' "$record" || true)
+    matching_version=$(grep -Fxc "version=$token" "$record" || true)
+    all_versions=$(grep -c '^version=' "$record" || true)
+    if [ "$matching_identity" -ne 1 ] || [ "$all_identities" -ne 1 ] \
+        || [ "$matching_version" -ne 1 ] || [ "$all_versions" -ne 1 ]; then
+        echo "RESULT: partial run. $lane/check --version $token wrote a record without exactly one lane=$lane and one version=$token identity."
         exit 2
     fi
-done
+    set -- "$@" "$record"
+done <<EOF
+$pairs
+EOF
 
 echo "=============================================================================="
 echo "CROSS-LANE RECORDS"
-"$aggregator" "$records"/*.record
+"$aggregator" "$@"
 aggregate_status=$?
 case $aggregate_status in
     0|1|2) ;;

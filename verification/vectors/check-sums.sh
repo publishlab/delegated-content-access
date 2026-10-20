@@ -3,15 +3,15 @@
 # vectors, and writes that file with --write.
 #
 #     sh verification/vectors/check-sums.sh                     # every set
-#     sh verification/vectors/check-sums.sh v1                  # one set
-#     sh verification/vectors/check-sums.sh --write v1          # record the bytes on disk
+#     sh verification/vectors/check-sums.sh v1/baseline/rsa-oaep-envelope-open
+#     sh verification/vectors/check-sums.sh --write v1/baseline/rsa-oaep-envelope-open
 #
 # A hash check runs where a test cannot. Because the vectors define the contract, the
 # check that they still carry the bytes they were recorded with must run where
 # no replayer does: no JSON parser, no Node, no PHP, nothing but a hash tool.
 # The file is plain `sha256sum` format, so
 #
-#     cd verification/vectors/v1 && sha256sum -c SHA256SUMS
+#     cd verification/vectors/v1/baseline/rsa-oaep-envelope-open && sha256sum -c SHA256SUMS
 #
 # answers the same question without this script. Argon2 ships the same pair,
 # a `.shasum` per KAT plus check-sums.sh, and it catches what a generator rule
@@ -64,7 +64,8 @@ fi
 if [ "$#" -gt 0 ]; then
     sets=$*
     # The script treats a bad set name as an input error rather than a checksum failure. Validate every
-    # requested path before walking any one of them, so `v1 v1-typo` cannot
+    # requested path before walking any one of them, so a valid path followed
+    # by a typo cannot
     # report a valid set's bytes and then classify the typo as a mismatch.
     for set_name in $sets; do
         dir=$here/${set_name%/}

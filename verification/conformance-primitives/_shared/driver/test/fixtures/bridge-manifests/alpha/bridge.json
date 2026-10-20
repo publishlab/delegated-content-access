@@ -1,6 +1,7 @@
 {
     "script": "alpha/bridge.mjs",
     "command": "alpha/run.sh",
-    "operations": ["decode-base64url"],
+    "members": { "lane": "code written in this lane" },
+    "operations": { "decode-base64url": "lane" },
     "prepare": { "command": "alpha/prepare.sh", "args": ["--go"] }
 }

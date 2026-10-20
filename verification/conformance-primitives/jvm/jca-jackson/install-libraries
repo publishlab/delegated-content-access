@@ -1,0 +1,138 @@
+#!/usr/bin/env bash
+# Install the pinned Jackson jars this binding reads its batch through into a
+# cache dir. Nothing system-wide, nothing in the checkout.
+#
+# The JDK is the runtime's, installed by ../install-toolchain. The JDK ships no
+# JSON parser, so this binding pins one, and the pins live here beside the
+# bridge that compiles against them rather than beside the JDK. The bridge's
+# --prepare calls ../install-toolchain and then this script, so calling it by
+# hand is optional.
+#
+#   ./install-libraries                    # install if absent, then print the classpath
+#   ./install-libraries --cache-root <dir> # put or find the jars under this root
+#   ./install-libraries --print-classpath  # print the JSON library classpath, install nothing
+#   ./install-libraries --print-cache      # print this binding's cache dir, install nothing
+#   ./install-libraries --force            # re-download over existing jars
+#   ./install-libraries --help             # this text
+#
+# Run it directly: the shebang names bash.
+#
+# --print-classpath answers with the jars joined by ':' whether or not they
+# have been fetched yet, so a caller that must not download can ask where they
+# would be.
+#
+# The cache dir is keyed by runtime and binding, `jvm/jca-jackson` under the
+# cache root, so a second binding on this JDK never shares a classpath with
+# this one. --cache-root takes the root that holds every lane, as the runtime
+# installer's flag does: --print-cache answers <root>/jvm/jca-jackson.
+#
+# Where it lands, first match wins:
+#   --cache-root <dir>  root to install into, as <root>/jvm/jca-jackson/lib
+#   $DCA_CACHE/jvm/jca-jackson/lib
+#   $XDG_CACHE_HOME/dca/jvm/jca-jackson/lib
+#   $HOME/.cache/dca/jvm/jca-jackson/lib
+set -euo pipefail
+
+# The JSON library, pinned to exact versions rather than to a range. Maven
+# Central serves a .sha256 beside every jar and the three digests below were read
+# off it. jackson-databind fixes the other two: jackson-bom 2.22.2 resolves
+# jackson-core to 2.22.2 and jackson-annotations to 2.22. All three are
+# Apache-2.0 and all three target Java 8 bytecode, which the pinned JDK runs.
+# Bumping the pin means changing a version and its digest together, from:
+#   https://repo1.maven.org/maven2/com/fasterxml/jackson/core/jackson-databind/maven-metadata.xml
+MAVEN_CENTRAL=https://repo1.maven.org/maven2
+JACKSON_JARS=(
+  "com/fasterxml/jackson/core/jackson-databind/2.22.2/jackson-databind-2.22.2.jar d0da14c12b16b5d54719aa172d83b542ff4abeb8b0fb7db476fde8ceece760ca"
+  "com/fasterxml/jackson/core/jackson-core/2.22.2/jackson-core-2.22.2.jar ff167a6317be15895706c26668f45b898efe40ab8780970658210fe1393d52a6"
+  "com/fasterxml/jackson/core/jackson-annotations/2.22/jackson-annotations-2.22.jar 21ddb598807d3a51a876704eb979d9296e1c6a6f47ab1826ff88c6d6a127a2d0"
+)
+
+HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
+# The cache dir rule is kept in one file, sourced here: DCA_CACHE, or the OS
+# cache dir, or a refusal naming DCA_CACHE.
+# shellcheck source=../../_shared/cache.sh
+. "$HERE/../../_shared/cache.sh"
+
+# The whole argument line is read before anything is resolved, because
+# --cache-root moves where the jars would be and the print actions have to
+# answer for the flags this invocation was given rather than for the defaults.
+cache_root=""
+print=""
+force=0
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --cache-root)
+      [ $# -ge 2 ] || { echo "--cache-root needs a directory to hold the lanes" >&2; exit 2; }
+      resolve_absolute_path "$2"; cache_root="$DCA_ABSOLUTE_PATH"; shift 2 ;;
+    --print-classpath) print=classpath; shift ;;
+    --print-cache)     print=cache; shift ;;
+    --force)           force=1; shift ;;
+    --help|-h)         awk 'NR>1 && /^#/ { sub(/^# ?/, ""); print; next } NR>1 { exit }' "${BASH_SOURCE[0]}"; exit 0 ;;
+    *) echo "unknown argument: $1" >&2; exit 2 ;;
+  esac
+done
+
+if [ -n "$cache_root" ]; then
+  CACHE="$cache_root/jvm/jca-jackson"
+else
+  resolve_cache_dir jvm/jca-jackson
+  CACHE="$DCA_CACHE_DIR"
+fi
+
+# The file names carry their versions, so a bumped pin writes new files rather
+# than over the old ones, and a classpath built from the pin names only the jars
+# this pin asks for.
+JARS="$CACHE/lib"
+jackson_classpath() {
+  CLASSPATH=""
+  local entry name
+  for entry in "${JACKSON_JARS[@]}"; do
+    name="${entry%% *}"
+    CLASSPATH="${CLASSPATH:+$CLASSPATH:}$JARS/${name##*/}"
+  done
+}
+jackson_classpath
+
+# The queries answer and stop, before any directory is created. A caller that
+# must not download asks one of these, and a cold cache root is still cold
+# afterwards.
+case "$print" in
+  cache)     printf '%s\n' "$CACHE"; exit 0 ;;
+  classpath) printf '%s\n' "$CLASSPATH"; exit 0 ;;
+esac
+
+# The jars, fetched one at a time and only when absent. A jar is checked against
+# its pinned digest while it is still a temp file, so a download that does not
+# match is thrown away and the cache keeps whatever it already had. One cache
+# dir is shared across containers and across concurrent runs, so one exclusive
+# lock covers the fetch.
+mkdir -p "$JARS"
+exec 9>"$CACHE/.install.lock"
+flock 9
+installed=0
+for entry in "${JACKSON_JARS[@]}"; do
+  jar_path="${entry%% *}"
+  want_sha="${entry##* }"
+  jar="$JARS/${jar_path##*/}"
+  if [ "$force" = 1 ] || [ ! -f "$jar" ]; then
+    jar_tmp=""
+    trap 'rm -f "$jar_tmp"' EXIT
+    jar_tmp="$(mktemp "$jar.XXXXXX")"
+    echo "fetching ${jar_path##*/} (needs network) ..." >&2
+    curl -fSL --max-time 300 -o "$jar_tmp" "$MAVEN_CENTRAL/$jar_path"
+    echo "${want_sha}  $jar_tmp" | sha256sum -c - >&2
+    # mktemp makes a file only its owner can read, and one cache dir is read by
+    # every run that names it, so the jar goes back to ordinary read permissions.
+    chmod 644 "$jar_tmp"
+    # The rename is the last step, so a jar on the classpath is a whole jar.
+    mv "$jar_tmp" "$jar"
+    trap - EXIT
+    installed=1
+  fi
+done
+exec 9>&-
+# Said on the reuse path too, so the output names where the jars are.
+[ "$installed" = 1 ] || echo "already present at $JARS" >&2
+
+printf '%s\n' "$CLASSPATH"

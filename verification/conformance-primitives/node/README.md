@@ -1,49 +1,35 @@
-# Conformance (Node)
+# Conformance (Node runtime)
 
-The JavaScript lane. This lane's crypto binding comes from WebCrypto, reached through `globalThis.crypto.subtle` and
-nothing else. `v1/bridge.mjs` answers the contract's seven operations: HKDF-SHA-256 under an empty salt,
-AES-GCM under a 16 or a 32 octet key with the tag appended, an ECDH agreement over P-256, a public key
-exported as its uncompressed SEC 1 point, and an RSA-OAEP decryption under SHA-256. base64url uses `Buffer`
-plus the canonical rules the contract states, applied by decoding and re-encoding and comparing against the
-input. `JSON.parse` reads the batch.
-
-The bridge imports nothing outside this directory. It reaches no module elsewhere in the repository, reads
-no vector and never opens the case corpus.
+The Node runtime, a pinned Node.js release per version token, installed by `install-toolchain` into the
+cache. The one binding today is [`openssl/`](openssl/README.md), WebCrypto over the OpenSSL that Node links.
+Its answer source, `../_source/js/v1/bridge.mjs`, sits outside this directory so that every JavaScript lane
+can run the same file.
 
 ## Boundary
 
-This directory owns the Node binding, its bridge implementation and its
-`bridge.json` operation declaration. The
-[shared contract](../_shared/contract/v1/bridge.md) owns request and observation
-shapes; the [conformance README](../README.md) owns selection, expected values,
-comparison and result folding. Cases, policy and endpoint behavior do not belong
-in this lane.
+This directory owns the Node pins, the `versions` list and `install-toolchain`. A binding owns its bridge
+wrapper, its operation declaration and its check; the JavaScript answer source lives in
+[`../_source/js/v1/`](../_source/README.md). The [shared contract](../_shared/contract/v1/bridge.md) owns
+request and observation shapes; the [conformance README](../README.md) owns selection, expected values,
+comparison and result folding.
 
-## Running it
+## Versions
 
-    ./check                     # every corpus set this lane declares, through v1/bridge.mjs
-    ./check --record <file>     # also write this run's lane record, for _shared/aggregate-results
+`versions` lists `24` (24.21.0) and `22` (22.23.3), both `default`, so a run with no version input answers
+the corpus on both. Each pin is the `node-v<release>-linux-<arch>.tar.gz` archive from
+`https://nodejs.org/dist/v<release>/`, and its SHA-256 is the line for that archive in the release's
+`SHASUMS256.txt`, read on 2026-09-30. Linux x64 and arm64 are pinned; x64 is the one this lane has run.
+The `.tar.gz` build is pinned rather than `.tar.xz`, because `xz` is not present on every host.
 
-There is no `--base` and no `--cache-root`, because there is nothing to install.
+    ./install-toolchain                    # install the first default version if absent, print BASE
+    ./install-toolchain --version 22       # the same for Node 22
+    ./install-toolchain --base <dir>       # use this Node as is, download nothing
+    ./install-toolchain --cache-root <dir> # put or find the install under this root
+    ./install-toolchain --print-base       # print where BASE is or would be, install nothing
+    ./install-toolchain --print-bin        # print the node binary, install nothing
+    ./install-toolchain --print-cache      # print the cache dir, install nothing
+    ./install-toolchain --force            # re-download over an existing install
 
-To narrow a failure, run the driver from `verification/` and name this lane:
-
-    node conformance-primitives/_shared/driver/run.mjs node --case rsa-oaep/01
-
-`../README.md` carries the selectors, the exit codes and what a narrowing run claims.
-
-## No pinned toolchain
-
-This lane runs on whatever `node` is on `PATH`, the runtime the JavaScript reference already promises. The
-runner starts the command as a program, so the bridge runs under the node its own shebang names,
-whichever runtime `DCA_JS` gave the driver.
-
-`bridge.json` names no `prepare`, so the command the runner starts is `v1/bridge.mjs` directly, with no
-wrapper between it and the batch. One JSON document arrives on stdin and one leaves on stdout; every
-diagnostic goes to stderr.
-
-## What holding here does and does not say
-
-A held run says this runtime's own WebCrypto answers the contract's shapes, refusal codes and bytes over the
-corpus. It says nothing about the JavaScript reference, which this bridge does not call, and `js/check`
-deliberately runs none of this.
+Each version sits at `<cache>/node-v<release>` with `bin/node` under it. The download was about 55 MB per
+version on 2026-09-30. The `node` on `PATH` runs the driver, whichever runtime `DCA_JS` names, and never
+answers as this lane's bridge.

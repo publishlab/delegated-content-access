@@ -1,0 +1,6 @@
+{
+  "version": 1,
+  "testCount": 10,
+  "tests": [{ "file": "test-reference/core-publisher/site-resource-plan.test.js" }],
+  "required": [{ "module": "core-publisher/siteResourcePlan.js", "exports": ["planSiteResources"] }]
+}

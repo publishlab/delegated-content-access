@@ -1,0 +1,2 @@
+# <token> <release the installer pins> <default|listed>; newest first. install-toolchain keeps the checksum per token.
+2 2.9.7 default

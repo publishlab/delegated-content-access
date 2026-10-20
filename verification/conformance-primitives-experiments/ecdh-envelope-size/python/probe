@@ -24,7 +24,7 @@ if ! PYTHON="$("$INSTALLER" --print-bin)" || [ ! -x "$PYTHON" ]; then
   exit 2
 fi
 
-SITE="$("$INSTALLER" --print-site)"
+SITE="$("$(dirname "$INSTALLER")/cryptography/install-libraries" --print-site)"
 if [ -n "$SITE" ]; then
   export PYTHONPATH="$SITE"
 else

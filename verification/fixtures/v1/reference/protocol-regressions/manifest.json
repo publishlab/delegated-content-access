@@ -1,0 +1,50 @@
+{
+  "schema": "dca-protocol-fixture-manifest/v1",
+  "protocol": "dca",
+  "version": "1",
+  "stability": "draft",
+  "files": [
+    {
+      "path": "reject-duplicate-member-name.json",
+      "vectorFormat": "2",
+      "consumers": [
+        "reference"
+      ]
+    },
+    {
+      "path": "reject-prototype-name.json",
+      "vectorFormat": "2",
+      "consumers": [
+        "reference"
+      ]
+    },
+    {
+      "path": "seal-factory-content-key-only.json",
+      "vectorFormat": "sealer-factory-v3",
+      "consumers": [
+        "reference"
+      ]
+    },
+    {
+      "path": "seal-factory-mixed-issuers.json",
+      "vectorFormat": "sealer-factory-v3",
+      "consumers": [
+        "reference"
+      ]
+    },
+    {
+      "path": "seal-factory-period-keys.json",
+      "vectorFormat": "sealer-factory-v3",
+      "consumers": [
+        "reference"
+      ]
+    },
+    {
+      "path": "seal-factory-refusals.json",
+      "vectorFormat": "sealer-factory-refusal-v2",
+      "consumers": [
+        "reference"
+      ]
+    }
+  ]
+}

@@ -1,0 +1,14 @@
+{
+  "format": "chain-keys-geometry-admission/v1",
+  "cases": [
+    { "id": "integer", "geometry": { "chainsPerDay": 2, "periodMinutes": 60 } },
+    { "id": "chains-decimal", "geometry": { "chainsPerDay": 2.0, "periodMinutes": 60 } },
+    { "id": "chains-exponent", "geometry": { "chainsPerDay": 2e0, "periodMinutes": 60 } },
+    { "id": "minutes-decimal", "geometry": { "chainsPerDay": 2, "periodMinutes": 60.0 } },
+    { "id": "minutes-exponent", "geometry": { "chainsPerDay": 2, "periodMinutes": 6e1 } },
+    { "id": "chains-fraction", "geometry": { "chainsPerDay": 2.5, "periodMinutes": 60 } },
+    { "id": "minutes-fraction", "geometry": { "chainsPerDay": 2, "periodMinutes": 60.5 } },
+    { "id": "chains-string", "geometry": { "chainsPerDay": "2", "periodMinutes": 60 } },
+    { "id": "minutes-string", "geometry": { "chainsPerDay": 2, "periodMinutes": "60" } }
+  ]
+}

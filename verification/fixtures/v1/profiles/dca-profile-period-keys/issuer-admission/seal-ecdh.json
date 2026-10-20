@@ -1,0 +1,319 @@
+{
+  "name": "seal-ecdh",
+  "vectorFormat": "1",
+  "description": "One render, two content items, two accessGroups, two periods, one issuer, ECDH P-256, one signed envelope. The raw shared secret - the P-256 x-coordinate, 32 bytes - is the AES-256-GCM key with no KDF, which is what spec--sealed-key-envelopes.md specifies under \"4. ECDH P-256 envelope\". Replay: seal `input` and compare against `expected` byte for byte, with one exception. A FRESH SIGNATURE CANNOT BE PINNED: ES256 draws a random k per signature, so the third segment of a freshly sealed resourceJWT differs. Compare the first two segments (header and payload) byte for byte, and check the recorded signature cryptographically: ECDSA P-256 with SHA-256 over the UTF-8 bytes of \"<header>.<payload>\", with the signature the base64url-decoded third segment (raw r||s, 64 bytes, no DER) and the key input.signingKeys[].publicKeyJwk selected by the kid in the header. Everything else - every sealed blob, every nonce and every ciphertext - is byte-stable and compares exactly. THE ENVELOPE. The resourceJWT payload is the resource, and its header is {\"alg\":\"ES256\",\"typ\":\"JWT\",\"kid\":...} and any other alg is rejected. It is the only signature on the wire, and the renderId under it is what every sealed blob of this render is bound to, which is why one signed copy of it is enough. THE BINDING, which an implementation needs before a single blob opens. Each sealed key commits to the coordinate it sits at, and that commitment is never transmitted - the issuer rebuilds it from what it has already verified. \"dca-bind-key-envelope|c|\" + renderId + \"|\" + contentName for a blob in sealed.contentKeys, and \"dca-bind-key-envelope|p|\" + renderId + \"|\" + accessGroup + \"|\" + t for one in sealed.periodKeys: joined on 0x7C, with that byte banned inside every field it separates, and renderId taken as the base64url string the wire carries rather than the bytes behind it. renderId is exactly 16 bytes here, encoded as 22 unpadded base64url characters. expected.bindings records every one of those strings, so a runtime can check its builder against them with no crypto in the way. ON ECDH THE VALUE IS THE AES-256-GCM additionalData. The blob layout is exactly 109 bytes, and a rebuilt value that differs anywhere is an auth tag failure with nothing on the wire to say why - the same failure a wrong private key gives. The renderId comes from the verified resourceJWT and the rest of the coordinate from the map keys being walked; a value built from anything a request said about itself would be built from what the attacker wrote. Publisher-private period-key input is recorded under input.periodKeys, keyed by accessGroup and t. Base assigns no derivation meaning to these opaque 16-byte values. expected.periodKeys records the same keys after recovery from the sealed wire, so input and recovery can be checked independently. The t values come from the clock and input.period ({length: 60 minutes, slots: 2}, current then next). Content-key path: unseal each blob in expected.dcaData.issuerData[issuerName].sealed.contentKeys with the issuer private JWK and the binding value for that contentName as additionalData, and compare against expected.contentKeys; then AES-128-GCM-decrypt expected.sealedContent[name] with that key, twelve zero nonce octets and the content AAD as additionalData, and compare against input.content[].value. The wire carries no content AAD: build it as docs/spec--content-protection.md Section 3.2 states: LP(renderId) || LP(contentName), where renderId is the token payload's value and LP(s) is the four-octet big-endian octet length of UTF8(s) followed by those octets. expected.contentOpen[name].aadBase64url records the result, so a runtime can check its builder with no crypto in the way. It has nothing to do with the binding value above - the two ride on different ciphertexts. Cached path: unseal issuerData[issuerName].sealed.periodKeys[accessGroup][t] the same way, with the period binding value for that pair, and compare against expected.periodKeys; then for each entry in expected.dcaData.contentData[contentName].keys[accessGroup] (an array of {t, nonce, key}) AES-128-GCM- decrypt entry.key with the periodKey for that same t, entry.nonce and NO additionalData - the contentKey comes back, equal to expected.contentKeys[contentName] - and decrypt the content with it as above. Every wire value is base64url with no padding.",
+  "input": {
+    "seed": 20251023,
+    "clockIso": "2025-10-23T14:00:00Z",
+    "origin": "https://www.news-site.example",
+    "resourceId": "123456",
+    "resourceData": {
+      "date.published": "2025-10-20T10:30:00Z",
+      "section": "politics",
+      "tags": [
+        "breaking",
+        "elections"
+      ]
+    },
+    "periodKeys": {
+      "premium": {
+        "251023T1400": "RHITQ8LXhA9LX2eO-sGrgQ",
+        "251023T1500": "Ny_ybN8p7Kx5a3EeWqZcYQ"
+      },
+      "locked-data": {
+        "251023T1400": "DnOWRziRyJG4dyLY3NAHAw",
+        "251023T1500": "pqhx7Xri7OgrCdP6TtUQ2w"
+      }
+    },
+    "period": {
+      "length": 60,
+      "slots": 2
+    },
+    "content": [
+      {
+        "name": "bodytext",
+        "value": "<p>The council voted 7-2 to rezone the harbour.</p>",
+        "contentType": "text/html",
+        "accessGroups": [
+          "premium"
+        ]
+      },
+      {
+        "name": "locked-data",
+        "value": "{\"vote\":{\"for\":7,\"against\":2},\"passed\":true}",
+        "contentType": "application/json",
+        "accessGroups": [
+          "locked-data"
+        ]
+      }
+    ],
+    "issuers": [
+      {
+        "issuerName": "paywall_subscription_service",
+        "keyId": "2025-10",
+        "algorithm": "ecdh-p256",
+        "publicKeyJwk": {
+          "kty": "EC",
+          "crv": "P-256",
+          "x": "KnsL031lVTbNxwtMq3OQmFq-fyPVh3k1__Adl4ieLXw",
+          "y": "-aNkTV8wd6O2rTWc2jkpJgez4Cuvas4J8_Styi-cdsE"
+        },
+        "privateKeyJwk": {
+          "kty": "EC",
+          "crv": "P-256",
+          "x": "KnsL031lVTbNxwtMq3OQmFq-fyPVh3k1__Adl4ieLXw",
+          "y": "-aNkTV8wd6O2rTWc2jkpJgez4Cuvas4J8_Styi-cdsE",
+          "d": "iWEhz6AHq-n4l_YzhTZcyQH7O9B1A1AKl4maOJh3z5g"
+        }
+      }
+    ],
+    "signingKeys": [
+      {
+        "kid": "sign-2025-10",
+        "publicKeyJwk": {
+          "kty": "EC",
+          "crv": "P-256",
+          "x": "wjapTnuqn7FYYz7TbSiG283dToV0I1zpHoiVpbYGUYU",
+          "y": "9vgUr7XBOhco_Pf-7CczUPW8tmscQKhkiK0zybXWVCI"
+        },
+        "privateKeyJwk": {
+          "kty": "EC",
+          "crv": "P-256",
+          "x": "wjapTnuqn7FYYz7TbSiG283dToV0I1zpHoiVpbYGUYU",
+          "y": "9vgUr7XBOhco_Pf-7CczUPW8tmscQKhkiK0zybXWVCI",
+          "d": "yEB3Y-dXMSyFCoarJYWXaM6c0R82R-y_NgGNDV4vX10"
+        }
+      }
+    ],
+    "signingKid": "sign-2025-10",
+    "ephemeralKeys": [
+      {
+        "issuerName": "paywall_subscription_service",
+        "contentName": "bodytext",
+        "publicKeyJwk": {
+          "kty": "EC",
+          "crv": "P-256",
+          "x": "_-uukcCcIVx_w156EOBQbfD2S1QJtv_Us08hfmlPy7s",
+          "y": "s5xZErWJNnNAJfmyMYNXO4LYDDMaasFJMMGHk63Fqho"
+        },
+        "privateKeyJwk": {
+          "kty": "EC",
+          "crv": "P-256",
+          "x": "_-uukcCcIVx_w156EOBQbfD2S1QJtv_Us08hfmlPy7s",
+          "y": "s5xZErWJNnNAJfmyMYNXO4LYDDMaasFJMMGHk63Fqho",
+          "d": "8bOnBLg9jBNNA0DcpVKLwa74Lp_0Ld1NwYxeFMPslSY"
+        }
+      },
+      {
+        "issuerName": "paywall_subscription_service",
+        "contentName": "locked-data",
+        "publicKeyJwk": {
+          "kty": "EC",
+          "crv": "P-256",
+          "x": "U78MhHxi8EXsoMLpyws47LCBG--CStcZmGC9f7hQRuk",
+          "y": "jbcExTFUDum7lWRXU21llsS3dQpzLxiJJptmVbY-4g8"
+        },
+        "privateKeyJwk": {
+          "kty": "EC",
+          "crv": "P-256",
+          "x": "U78MhHxi8EXsoMLpyws47LCBG--CStcZmGC9f7hQRuk",
+          "y": "jbcExTFUDum7lWRXU21llsS3dQpzLxiJJptmVbY-4g8",
+          "d": "pVLWFcQQe54w3fTbXEeMdHrQsp022PSzdEJ4cXelvFg"
+        }
+      },
+      {
+        "issuerName": "paywall_subscription_service",
+        "accessGroup": "premium",
+        "t": "251023T1400",
+        "publicKeyJwk": {
+          "kty": "EC",
+          "crv": "P-256",
+          "x": "g0aRijquqGBYFVV0mIzRCIuHSyXs9EAOiPWxTLCHVVg",
+          "y": "30j8-6vfS2mXZ0KkOXUnF29fVZLF1YKUUPyeUhpwI44"
+        },
+        "privateKeyJwk": {
+          "kty": "EC",
+          "crv": "P-256",
+          "x": "g0aRijquqGBYFVV0mIzRCIuHSyXs9EAOiPWxTLCHVVg",
+          "y": "30j8-6vfS2mXZ0KkOXUnF29fVZLF1YKUUPyeUhpwI44",
+          "d": "tf8SxGwDTqEdSWZgwsHmsxePi5_OdgELGnin1Id894c"
+        }
+      },
+      {
+        "issuerName": "paywall_subscription_service",
+        "accessGroup": "premium",
+        "t": "251023T1500",
+        "publicKeyJwk": {
+          "kty": "EC",
+          "crv": "P-256",
+          "x": "BZowtpYVMq7WIPnmimluztIJ6OXLEg5EQyZLui0A7Hc",
+          "y": "ZIAWv7cpyI0pH_U12MO4MTIUaBhuLkF0EVTFuneETto"
+        },
+        "privateKeyJwk": {
+          "kty": "EC",
+          "crv": "P-256",
+          "x": "BZowtpYVMq7WIPnmimluztIJ6OXLEg5EQyZLui0A7Hc",
+          "y": "ZIAWv7cpyI0pH_U12MO4MTIUaBhuLkF0EVTFuneETto",
+          "d": "SqeHO93UgSSFVarxYhUvtrxxgTILYqW_ez6XuYsX2EY"
+        }
+      },
+      {
+        "issuerName": "paywall_subscription_service",
+        "accessGroup": "locked-data",
+        "t": "251023T1400",
+        "publicKeyJwk": {
+          "kty": "EC",
+          "crv": "P-256",
+          "x": "JTU43mJjv55pu96IFyBakmtbNz_m9YCmbaSi2MQGRU8",
+          "y": "XEeyvi2q1CZQgghDAdZds0Le4a0zopxM_a0OZrDEUJQ"
+        },
+        "privateKeyJwk": {
+          "kty": "EC",
+          "crv": "P-256",
+          "x": "JTU43mJjv55pu96IFyBakmtbNz_m9YCmbaSi2MQGRU8",
+          "y": "XEeyvi2q1CZQgghDAdZds0Le4a0zopxM_a0OZrDEUJQ",
+          "d": "HvBPy3Yppk3hKh9IijHOu-MDY0afnPtPFZreYGqCrpU"
+        }
+      },
+      {
+        "issuerName": "paywall_subscription_service",
+        "accessGroup": "locked-data",
+        "t": "251023T1500",
+        "publicKeyJwk": {
+          "kty": "EC",
+          "crv": "P-256",
+          "x": "z4blPb0udnXhgGrGbpIAwJsodzB1fnC_-IsvQURv8PQ",
+          "y": "C-MPak9ZNDvcMsAOHjaiKcg9spCJnuVa-PDS7RcExw4"
+        },
+        "privateKeyJwk": {
+          "kty": "EC",
+          "crv": "P-256",
+          "x": "z4blPb0udnXhgGrGbpIAwJsodzB1fnC_-IsvQURv8PQ",
+          "y": "C-MPak9ZNDvcMsAOHjaiKcg9spCJnuVa-PDS7RcExw4",
+          "d": "WJ4UOECHzxCufvq44bR8vlUQHonEdFnnS7zku2ruSE0"
+        }
+      }
+    ]
+  },
+  "expected": {
+    "dcaData": {
+      "version": "1",
+      "resource": {
+        "renderId": "uUT576O34BoGKpgXpdMucw",
+        "origin": "https://www.news-site.example",
+        "issuedAt": "2025-10-23T14:00:00.000Z",
+        "resourceId": "123456",
+        "data": {
+          "date.published": "2025-10-20T10:30:00Z",
+          "section": "politics",
+          "tags": [
+            "breaking",
+            "elections"
+          ]
+        }
+      },
+      "resourceJWT": "eyJhbGciOiJFUzI1NiIsInR5cCI6IkpXVCIsImtpZCI6InNpZ24tMjAyNS0xMCJ9.eyJyZW5kZXJJZCI6InVVVDU3Nk8zNEJvR0twZ1hwZE11Y3ciLCJvcmlnaW4iOiJodHRwczovL3d3dy5uZXdzLXNpdGUuZXhhbXBsZSIsImlzc3VlZEF0IjoiMjAyNS0xMC0yM1QxNDowMDowMC4wMDBaIiwicmVzb3VyY2VJZCI6IjEyMzQ1NiIsImRhdGEiOnsiZGF0ZS5wdWJsaXNoZWQiOiIyMDI1LTEwLTIwVDEwOjMwOjAwWiIsInNlY3Rpb24iOiJwb2xpdGljcyIsInRhZ3MiOlsiYnJlYWtpbmciLCJlbGVjdGlvbnMiXX19.J2wve9h-80DsFuL9VHtY8X5jYpTDierdPyigKhQFaocp-EnSJlRNTPs5yNmSVF_HrinwqfN84rzalG5l0osBFQ",
+      "contentData": {
+        "bodytext": {
+          "contentType": "text/html",
+          "keys": {
+            "premium": [
+              {
+                "t": "251023T1400",
+                "nonce": "yvCNyaDUubIBVhnC",
+                "key": "DS0SjvUYybNN2IB9uvPO2gcuPo8eigHdW7XpgW3GLwI"
+              },
+              {
+                "t": "251023T1500",
+                "nonce": "a-zjyB7E7V86t7sC",
+                "key": "lYaMNO97Q9KQh0Sp2wJ4Kr4FEX7EfYB6UPl9yueVIM4"
+              }
+            ]
+          }
+        },
+        "locked-data": {
+          "contentType": "application/json",
+          "keys": {
+            "locked-data": [
+              {
+                "t": "251023T1400",
+                "nonce": "mU2raNPTPDD3dmQ7",
+                "key": "G1dBCVNdttRUugELc9XcD6RldOIzg0AZoyI6HEBJMjw"
+              },
+              {
+                "t": "251023T1500",
+                "nonce": "ykEzo3OUbfxEjve8",
+                "key": "sM5qBBgVQ-dUFhIpDiD7tm0jVpfatNw_tv2oklAxE_o"
+              }
+            ]
+          }
+        }
+      },
+      "issuerData": {
+        "paywall_subscription_service": {
+          "sealed": {
+            "contentKeys": {
+              "bodytext": "BP_rrpHAnCFcf8NeehDgUG3w9ktUCbb_1LNPIX5pT8u7s5xZErWJNnNAJfmyMYNXO4LYDDMaasFJMMGHk63Fqhq7HFCl2Riv6VpJWXGn1bo7kpiOOOAZK60nnqSnp_4nz4lh24tpU4auZAgwkQ",
+              "locked-data": "BFO_DIR8YvBF7KDC6csLOOywgRvvgkrXGZhgvX-4UEbpjbcExTFUDum7lWRXU21llsS3dQpzLxiJJptmVbY-4g9bAr-k7mM8ltrpiAp74cmqwlkSLtHWnLAjCXiJfID525xaAnkLSSwCCazoUg"
+            },
+            "periodKeys": {
+              "premium": {
+                "251023T1400": "BINGkYo6rqhgWBVVdJiM0QiLh0sl7PRADoj1sUywh1VY30j8-6vfS2mXZ0KkOXUnF29fVZLF1YKUUPyeUhpwI44saqe6Y6UyHEziB6sk9ByFJkxFl7TYIEMbD4e4TSsFiaAG8Cpf5bFfNWsULQ",
+                "251023T1500": "BAWaMLaWFTKu1iD55oppbs7SCejlyxIOREMmS7otAOx3ZIAWv7cpyI0pH_U12MO4MTIUaBhuLkF0EVTFuneETtoqfRNQEv0AcNYEiG3xTNfDp4zKSvzt2C266vaU00lMk5gxfa9BUEC4W70KMw"
+              },
+              "locked-data": {
+                "251023T1400": "BCU1ON5iY7-eabveiBcgWpJrWzc_5vWApm2kotjEBkVPXEeyvi2q1CZQgghDAdZds0Le4a0zopxM_a0OZrDEUJR9IIsktg7TzyWqZE8JzzbzDAtAmz8RWWtJ7tlw3Xsa2IZY8vHgjD9qbeC1Fw",
+                "251023T1500": "BM-G5T29LnZ14YBqxm6SAMCbKHcwdX5wv_iLL0FEb_D0C-MPak9ZNDvcMsAOHjaiKcg9spCJnuVa-PDS7RcExw6TGmtnzfyKr7dq6DfWQRzkZsRJrcMnVlzKRoJ10SEd1TaWzVoyUdxjZViNsA"
+              }
+            }
+          },
+          "keyId": "2025-10"
+        }
+      }
+    },
+    "sealedContent": {
+      "bodytext": "iAk476TqTiroifhRbObZ6d0asIrEHOwdZTpLi-SoupBMYNuqFVQlNn336hOO2w8XrNUUOWPis69PDraolcie9aO_vg",
+      "locked-data": "d3wDsUJrn0-q1GCyXElgAboLWpSzP9R03XCVSOGOT4fcYw-mK_g8m-KP5Nq5w30Rs00VvHAgtrYG3ltL"
+    },
+    "contentOpen": {
+      "bodytext": {
+        "aadBase64url": "AAAAFnVVVDU3Nk8zNEJvR0twZ1hwZE11Y3cAAAAIYm9keXRleHQ",
+        "valueBase64url": "PHA-VGhlIGNvdW5jaWwgdm90ZWQgNy0yIHRvIHJlem9uZSB0aGUgaGFyYm91ci48L3A-"
+      },
+      "locked-data": {
+        "aadBase64url": "AAAAFnVVVDU3Nk8zNEJvR0twZ1hwZE11Y3cAAAALbG9ja2VkLWRhdGE",
+        "valueBase64url": "eyJ2b3RlIjp7ImZvciI6NywiYWdhaW5zdCI6Mn0sInBhc3NlZCI6dHJ1ZX0"
+      }
+    },
+    "bindings": {
+      "contentKeys": {
+        "bodytext": "dca-bind-key-envelope|c|uUT576O34BoGKpgXpdMucw|bodytext",
+        "locked-data": "dca-bind-key-envelope|c|uUT576O34BoGKpgXpdMucw|locked-data"
+      },
+      "periodKeys": {
+        "premium": {
+          "251023T1400": "dca-bind-key-envelope|p|uUT576O34BoGKpgXpdMucw|premium|251023T1400",
+          "251023T1500": "dca-bind-key-envelope|p|uUT576O34BoGKpgXpdMucw|premium|251023T1500"
+        },
+        "locked-data": {
+          "251023T1400": "dca-bind-key-envelope|p|uUT576O34BoGKpgXpdMucw|locked-data|251023T1400",
+          "251023T1500": "dca-bind-key-envelope|p|uUT576O34BoGKpgXpdMucw|locked-data|251023T1500"
+        }
+      }
+    },
+    "contentKeys": {
+      "bodytext": "jfv7AgoOggA8XPOEE055ww",
+      "locked-data": "TFkjME8nXOC96pSh0-xxOQ"
+    },
+    "periodKeys": {
+      "premium": {
+        "251023T1400": "RHITQ8LXhA9LX2eO-sGrgQ",
+        "251023T1500": "Ny_ybN8p7Kx5a3EeWqZcYQ"
+      },
+      "locked-data": {
+        "251023T1400": "DnOWRziRyJG4dyLY3NAHAw",
+        "251023T1500": "pqhx7Xri7OgrCdP6TtUQ2w"
+      }
+    }
+  }
+}

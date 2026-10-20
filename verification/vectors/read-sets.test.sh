@@ -84,6 +84,95 @@ case_dir unnamed-directory alpha beta
 printf 'alpha\n' > "$scratch/unnamed-directory/sets.txt"
 expect_refusal unnamed-directory "$scratch/unnamed-directory/beta is a set directory and no $scratch/unnamed-directory/sets.txt line names it."
 
+# A baseline algorithm package must be discovered at the exact supported depth.
+case_dir baseline-package v1
+mkdir -p "$scratch/baseline-package/v1/baseline/rsa-oaep-envelope-open" \
+    "$scratch/baseline-package/v1/baseline/unlisted" || exit 2
+printf 'v1/baseline/rsa-oaep-envelope-open\n' > "$scratch/baseline-package/sets.txt"
+expect_refusal baseline-package "$scratch/baseline-package/v1/baseline/unlisted is a baseline package and no $scratch/baseline-package/sets.txt line names it."
+
+case_dir baseline-agreed v1
+mkdir -p "$scratch/baseline-agreed/v1/baseline/rsa-oaep-envelope-open" || exit 2
+printf 'v1/baseline/rsa-oaep-envelope-open\n' > "$scratch/baseline-agreed/sets.txt"
+run_case baseline-agreed
+[ "$case_status" -eq 0 ] || fail "a listed baseline package returned $case_status"
+[ "$(cat "$scratch/baseline-agreed.sets")" = "v1/baseline/rsa-oaep-envelope-open" ] \
+    || fail "baseline package was omitted from the set list"
+
+# Root v1/ is a container: neither a payload nor an old set manifest belongs there.
+case_dir stranded-vector v1
+mkdir -p "$scratch/stranded-vector/v1/baseline/rsa-oaep-envelope-open" || exit 2
+printf 'v1/baseline/rsa-oaep-envelope-open\n' > "$scratch/stranded-vector/sets.txt"
+printf '{}' > "$scratch/stranded-vector/v1/open-rsa-oaep.json"
+expect_refusal stranded-vector "$scratch/stranded-vector/v1/open-rsa-oaep.json is stranded in the v1 container"
+
+case_dir stranded-manifest v1
+mkdir -p "$scratch/stranded-manifest/v1/baseline/rsa-oaep-envelope-open" || exit 2
+printf 'v1/baseline/rsa-oaep-envelope-open\n' > "$scratch/stranded-manifest/sets.txt"
+printf '{}' > "$scratch/stranded-manifest/v1/set.json"
+expect_refusal stranded-manifest "$scratch/stranded-manifest/v1/set.json is stranded in the v1 container"
+
+# Regression case: one listed package, and payloads dropped where no
+# group scan looks. `check-sums.sh` hashed the listed package, printed
+# "CHECKED SETS: 1" and exited 0 over the three files below. The reader has to
+# name each of them, whatever depth it sits at.
+case_dir off-layout v1
+mkdir -p "$scratch/off-layout/v1/baseline/rsa-oaep-envelope-open/nested" \
+    "$scratch/off-layout/v1/extras/hidden" || exit 2
+printf 'v1/baseline/rsa-oaep-envelope-open\n' > "$scratch/off-layout/sets.txt"
+printf '{}' > "$scratch/off-layout/v1/baseline/rsa-oaep-envelope-open/open-rsa-oaep.json"
+printf '{}' > "$scratch/off-layout/v1/baseline/rsa-oaep-envelope-open/nested/vector.json"
+printf '{}' > "$scratch/off-layout/v1/baseline/stray.json"
+printf '{}' > "$scratch/off-layout/v1/extras/hidden/vector.json"
+expect_refusal off-layout "$scratch/off-layout/v1/baseline/rsa-oaep-envelope-open/nested/vector.json sits outside the vector layout"
+for stray in v1/baseline/stray.json v1/extras/hidden/vector.json; do
+    grep -qF "$scratch/off-layout/$stray sits outside the vector layout" "$scratch/off-layout.err" \
+        || fail "off-layout did not name $stray"
+done
+grep -qF "open-rsa-oaep.json" "$scratch/off-layout.err" \
+    && fail "off-layout refused a member at the package depth"
+
+# A root set is flat for the same reason: the checksum walk reads only its
+# top-level files.
+case_dir root-set-nested alpha
+mkdir -p "$scratch/root-set-nested/alpha/deeper" || exit 2
+printf 'alpha\n' > "$scratch/root-set-nested/sets.txt"
+printf '{}' > "$scratch/root-set-nested/alpha/deeper/vector.json"
+expect_refusal root-set-nested "$scratch/root-set-nested/alpha/deeper/vector.json sits outside the vector layout"
+
+case_dir old-root-set v1
+printf 'v1\n' > "$scratch/old-root-set/sets.txt"
+expect_refusal old-root-set "$scratch/old-root-set/sets.txt has an invalid set path: v1 (container)"
+
+# A nested profile package must be discovered at the exact supported depth.
+case_dir nested-package v1
+mkdir -p "$scratch/nested-package/v1/profiles/dca-profile-client-bound-ecdh-p256" \
+    "$scratch/nested-package/v1/profiles/dca-profile-client-bound-rsa-oaep" || exit 2
+printf 'v1/profiles/dca-profile-client-bound-ecdh-p256\n' > "$scratch/nested-package/sets.txt"
+expect_refusal nested-package "$scratch/nested-package/v1/profiles/dca-profile-client-bound-rsa-oaep is a profile package and no $scratch/nested-package/sets.txt line names it."
+
+case_dir nested-agreed v1
+mkdir -p "$scratch/nested-agreed/v1/profiles/dca-profile-client-bound-ecdh-p256" || exit 2
+printf 'v1/profiles/dca-profile-client-bound-ecdh-p256\n' > "$scratch/nested-agreed/sets.txt"
+run_case nested-agreed
+[ "$case_status" -eq 0 ] || fail "a listed nested profile package returned $case_status"
+[ "$(cat "$scratch/nested-agreed.sets")" = "v1/profiles/dca-profile-client-bound-ecdh-p256" ] \
+    || fail "nested package was omitted from the set list"
+
+case_dir experiment-package v1
+mkdir -p "$scratch/experiment-package/v1/experiments/bind-on-renderId-and-slot" || exit 2
+printf 'v1/experiments/bind-on-renderId-and-slot\n' > "$scratch/experiment-package/sets.txt"
+mkdir -p "$scratch/experiment-package/v1/experiments/unlisted" || exit 2
+expect_refusal experiment-package "$scratch/experiment-package/v1/experiments/unlisted is an experiment package and no $scratch/experiment-package/sets.txt line names it."
+
+case_dir experiment-agreed v1
+mkdir -p "$scratch/experiment-agreed/v1/experiments/bind-on-renderId-and-slot" || exit 2
+printf 'v1/experiments/bind-on-renderId-and-slot\n' > "$scratch/experiment-agreed/sets.txt"
+run_case experiment-agreed
+[ "$case_status" -eq 0 ] || fail "a listed experiment package returned $case_status"
+[ "$(cat "$scratch/experiment-agreed.sets")" = "v1/experiments/bind-on-renderId-and-slot" ] \
+    || fail "experiment package was omitted from the set list"
+
 # A set named twice would be hashed twice and reported twice.
 case_dir named-twice alpha
 printf 'alpha\nalpha\n' > "$scratch/named-twice/sets.txt"
@@ -137,6 +226,25 @@ run_case agreed
 [ "$(cat "$scratch/agreed.sets")" = "alpha beta" ] \
     || fail "agreed sets are $(cat "$scratch/agreed.sets"), not alpha beta"
 [ ! -s "$scratch/agreed.err" ] || fail "the agreed manifest drew a complaint"
+
+# The agreed layout with members in it, so the layout check refuses only what
+# sits off the layout: package members, root-set members and the tooling beside
+# sets.txt all pass.
+case_dir layout-agreed v1 alpha
+mkdir -p "$scratch/layout-agreed/v1/baseline/rsa-oaep-envelope-open" \
+    "$scratch/layout-agreed/v1/profiles/dca-profile-chain-keys" \
+    "$scratch/layout-agreed/v1/experiments/bind-on-renderId-and-slot" || exit 2
+printf 'alpha\nv1/baseline/rsa-oaep-envelope-open\nv1/profiles/dca-profile-chain-keys\nv1/experiments/bind-on-renderId-and-slot\n' \
+    > "$scratch/layout-agreed/sets.txt"
+for member in alpha/a.json v1/baseline/rsa-oaep-envelope-open/set.json \
+    v1/baseline/rsa-oaep-envelope-open/SHA256SUMS \
+    v1/profiles/dca-profile-chain-keys/chain-key-primitives.json \
+    v1/experiments/bind-on-renderId-and-slot/bind-blobs.json README.md check-sums.sh; do
+    printf '{}' > "$scratch/layout-agreed/$member" || exit 2
+done
+run_case layout-agreed
+[ "$case_status" -eq 0 ] || fail "the agreed layout returned $case_status: $(cat "$scratch/layout-agreed.err")"
+[ ! -s "$scratch/layout-agreed.err" ] || fail "the agreed layout drew a complaint"
 
 # Splitting a manifest line needs globbing off and the directory scan needs it
 # on, and the reader is sourced into a caller that had its own setting. Both

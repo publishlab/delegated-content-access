@@ -1,0 +1,113 @@
+#!/usr/bin/env bash
+# The workerd operation bridge, in the two shapes the runner starts it in.
+#
+#   ./bridge --prepare   # install the pinned workerd if absent, run one empty batch
+#   ./bridge             # read one batch on stdin, write one on stdout
+#
+# The runner installs first and answers later. `bridge.json` names both forms:
+# `--prepare` runs first, outside the batch's 10 second budget, and the runner
+# then starts the second form as a program that is already runnable.
+#
+# The version is DCA_VERSION, which the lane check sets to one token of
+# ../versions for each run, and both forms pass it to the installer as
+# --version, so the workerd that answers is the one that run selected and never
+# a `workerd` on PATH.
+#
+# workerd cannot read the batch from stdin: inside its isolate fd 0 reads
+# empty. So each batch gets a fresh `mktemp -d` directory holding copies of
+# `config.capnp`, `worker.mjs` and the shared `answer.mjs`, and this script
+# writes stdin there as `batch.txt`, which the config embeds as a text module.
+# `workerd test` then runs the Worker's `test()` handler once, with no socket
+# and no listener, and exits 0 when the handler returns and nonzero when it
+# throws. The directory is removed on exit.
+#
+# The wrapper does not know the protocol, the operations or what an observation
+# says. It moves bytes and maps workerd's exit status:
+#   - workerd's stdout is the answer. It reaches this script's stdout only when
+#     workerd exits 0; on any other status nothing reaches stdout and this
+#     script exits 1, so a fault batch never leaves a partial answer.
+#   - workerd's stderr passes through, except its own test-runner lines,
+#     `[ TEST ] main`, `[ PASS ] main`, `[ FAIL ] main` and `Tests failed!`. A
+#     bridge never prints a verdict, a count or a pass word, and those lines are
+#     workerd's verdict on its own test run.
+# Every line this script writes goes to stderr, where the runner reprints it
+# beside a failure.
+#
+# The bridge downloads nothing while answering. `--prepare` installs the pinned
+# release when it is absent, and the answering form asks `--print-bin`, which
+# installs nothing.
+set -euo pipefail
+
+HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+INSTALLER="$HERE/../install-toolchain"
+ANSWER="$HERE/../../_source/js/v1/answer.mjs"
+VERSION="${DCA_VERSION:-default}"
+
+mode=answer
+case "${1:-}" in
+  --prepare) mode=prepare; shift ;;
+  --help|-h) awk 'NR>1 && /^#/ { sub(/^# ?/, ""); print; next } NR>1 { exit }' "${BASH_SOURCE[0]}"; exit 0 ;;
+esac
+if [ $# -gt 0 ]; then
+  echo "bridge takes --prepare or nothing, got: $1" >&2
+  exit 2
+fi
+
+# One batch from stdin through `workerd test`. Returns 0 with the answer on
+# stdout, or 1 with nothing on stdout.
+answer_batch() {
+  local bin="$1" stage status
+  stage="$(mktemp -d)"
+  # Global, not local: the EXIT trap runs after this function has returned.
+  STAGE="$stage"
+  trap 'rm -rf "$STAGE"' EXIT
+  cp "$HERE/config.capnp" "$HERE/worker.mjs" "$ANSWER" "$stage/"
+  cat > "$stage/batch.txt"
+
+  status=0
+  (cd / && "$bin" test "$stage/config.capnp") > "$stage/answer" 2> "$stage/stderr" || status=$?
+  grep -v -E '\[ (TEST|PASS|FAIL) \]|^Tests failed!$' "$stage/stderr" >&2 || true
+
+  if [ "$status" -ne 0 ]; then
+    echo "bridge: workerd test exited $status, so this batch has no answer." >&2
+    return 1
+  fi
+  cat "$stage/answer"
+}
+
+if [ "$mode" = prepare ]; then
+  [ -f "$ANSWER" ] || { echo "no $ANSWER; the JavaScript answer source has not landed yet" >&2; exit 2; }
+
+  if ! BASE="$("$INSTALLER" --version "$VERSION")"; then
+    echo "no workerd for version $VERSION, so the bridge was not prepared." >&2
+    exit 2
+  fi
+  BIN="$BASE/workerd"
+  if [ ! -x "$BIN" ]; then
+    echo "install-toolchain named $BASE, which holds no executable workerd." >&2
+    exit 2
+  fi
+
+  echo "== $("$BIN" --version) ==" >&2
+
+  # One empty batch proves that this binary starts, compiles the config and
+  # answers. The runner refuses an empty selection long before a bridge is
+  # started, so the only caller that ever sends one is this line.
+  empty='{"protocol":"dca-operation-bridge-v1","requests":[]}'
+  if ! printf '%s\n' "$empty" | answer_batch "$BIN" >/dev/null; then
+    echo "the bridge installed and did not answer an empty batch." >&2
+    exit 2
+  fi
+  exit 0
+fi
+
+if ! BIN="$("$INSTALLER" --version "$VERSION" --print-bin)"; then
+  echo "bridge: no workerd path could be resolved for version $VERSION." >&2
+  exit 1
+fi
+if [ ! -x "$BIN" ]; then
+  echo "bridge: no workerd at $BIN. Run ./bridge --prepare, or install-toolchain." >&2
+  exit 1
+fi
+
+answer_batch "$BIN"

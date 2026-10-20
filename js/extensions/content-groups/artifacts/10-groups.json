@@ -1,0 +1,149 @@
+{
+  "profile": "10-groups",
+  "setup": {
+    "groupsUsedByItem": 10,
+    "items": 1,
+    "authorizedGroups": 10,
+    "returnedGroups": 10,
+    "sourceWindows": 2,
+    "renderPeriod": "261014T1200",
+    "cutoff": "261014T1800",
+    "transport": "direct"
+  },
+  "metadata": {
+    "version": "1",
+    "resource": {
+      "renderId": "S7Z3LnEbs4DtjLKG_Y4SMg",
+      "origin": "https://news.example",
+      "issuedAt": "2026-10-14T12:20:00.000Z",
+      "resourceId": "story1",
+      "data": {}
+    },
+    "resourceJWT": "eyJhbGciOiJFUzI1NiIsInR5cCI6IkpXVCIsImtpZCI6InAxIn0.eyJyZW5kZXJJZCI6IlM3WjNMbkViczREdGpMS0dfWTRTTWciLCJvcmlnaW4iOiJodHRwczovL25ld3MuZXhhbXBsZSIsImlzc3VlZEF0IjoiMjAyNi0xMC0xNFQxMjoyMDowMC4wMDBaIiwicmVzb3VyY2VJZCI6InN0b3J5MSIsImRhdGEiOnt9fQ.eiXKKbiG_sS2_k1AtycwfTFKWkjnqrfFNWoofKm5EqbfKeiqv29rHOD5Jp-33kvTl8zEJz5JEQb8GfF1gmxhvg",
+    "periodGeometry": {
+      "chainsPerDay": 2,
+      "periodMinutes": 60
+    },
+    "renderPeriod": "261014T1200",
+    "contentData": {
+      "bodytext": {
+        "contentType": "text/plain",
+        "nonce": "9T3BrBfFDoeEmmNv",
+        "connectors": {
+          "group0000": "VcoGf5P8GFPVQzKb_kXCSA",
+          "group0001": "-zvfxrkyLWE2p5rPaT4ntA",
+          "group0002": "IAVptTSFvRZticYU6DUjsg",
+          "group0003": "sJuvcMERtlTnkWaux2WqCw",
+          "group0004": "xRdCxVNDRlmW8gkURD2Dsw",
+          "group0005": "M0zm-pFoRa853Ohpmxq1bQ",
+          "group0006": "PYHiYRYMlNw16ix87D0fBw",
+          "group0007": "WT0YDsh4zgVQjckzgSjTDg",
+          "group0008": "sxjpZ6UaovOu1-d475LccA",
+          "group0009": "3E3NISThmEPLPdecy7xRkQ"
+        }
+      }
+    },
+    "issuerData": {
+      "issuer": {
+        "sealed": {
+          "contentWindowSeeds": {
+            "bodytext": {
+              "261014T1200": "BEnoHfAYKW7lrYIApZATmHsrPvn5lKNMfC1w2b2Vy5HJv5sKzJrMGLCrsXOKXo_EJbJtfuFsoZujxCHySwPrs-EHs7ToW3HNZDzi1SXjhhf8MCabueUQS7bfDHRskBWEjJVKZCmhRG0Ss2JSyYsj5mNF7uhAn8DXeeqJWrU",
+              "261015T0000": "BHR4lTgvYjuiKkSSo9a7LB2hn8Rr7AncfD5pxtqL6A_Y8I-2nc0IgxiwxF216u0hL_WVoD8eRUiKRTNxQEtr10OsSmZA-U1rnoWzswmDVz1teCnQZMnKhz3_pnIaVIw7WigcmYJzfKHQKnVmpbK3qUfSkmd64_QV3MT-fkQ"
+            }
+          }
+        },
+        "keyId": "issuer-k1"
+      }
+    }
+  },
+  "request": {
+    "version": "1",
+    "issuerName": "issuer",
+    "resourceJWT": "eyJhbGciOiJFUzI1NiIsInR5cCI6IkpXVCIsImtpZCI6InAxIn0.eyJyZW5kZXJJZCI6IlM3WjNMbkViczREdGpMS0dfWTRTTWciLCJvcmlnaW4iOiJodHRwczovL25ld3MuZXhhbXBsZSIsImlzc3VlZEF0IjoiMjAyNi0xMC0xNFQxMjoyMDowMC4wMDBaIiwicmVzb3VyY2VJZCI6InN0b3J5MSIsImRhdGEiOnt9fQ.eiXKKbiG_sS2_k1AtycwfTFKWkjnqrfFNWoofKm5EqbfKeiqv29rHOD5Jp-33kvTl8zEJz5JEQb8GfF1gmxhvg",
+    "keyId": "issuer-k1",
+    "sealed": {
+      "contentKeys": {},
+      "contentWindowSeeds": {
+        "bodytext": {
+          "261014T1200": "BEnoHfAYKW7lrYIApZATmHsrPvn5lKNMfC1w2b2Vy5HJv5sKzJrMGLCrsXOKXo_EJbJtfuFsoZujxCHySwPrs-EHs7ToW3HNZDzi1SXjhhf8MCabueUQS7bfDHRskBWEjJVKZCmhRG0Ss2JSyYsj5mNF7uhAn8DXeeqJWrU",
+          "261015T0000": "BHR4lTgvYjuiKkSSo9a7LB2hn8Rr7AncfD5pxtqL6A_Y8I-2nc0IgxiwxF216u0hL_WVoD8eRUiKRTNxQEtr10OsSmZA-U1rnoWzswmDVz1teCnQZMnKhz3_pnIaVIw7WigcmYJzfKHQKnVmpbK3qUfSkmd64_QV3MT-fkQ"
+        }
+      }
+    },
+    "renderPeriod": "261014T1200",
+    "periodGeometry": {
+      "chainsPerDay": 2,
+      "periodMinutes": 60
+    },
+    "requestedContentGroups": {
+      "bodytext": [
+        "group0000",
+        "group0001",
+        "group0002",
+        "group0003",
+        "group0004",
+        "group0005",
+        "group0006",
+        "group0007",
+        "group0008",
+        "group0009"
+      ]
+    }
+  },
+  "response": {
+    "keys": {
+      "contentKeys": {}
+    },
+    "contentGroups": {
+      "chainKeys": {
+        "bodytext": {
+          "group0000": {
+            "261014T1800": "yLx65AgtQcQGGY_2i9qXLA"
+          },
+          "group0001": {
+            "261014T1800": "Eo7CWee_eucqS3aNP0cLdw"
+          },
+          "group0002": {
+            "261014T1800": "y8O4zmPAw2qUfH0KNU3yjQ"
+          },
+          "group0003": {
+            "261014T1800": "my-4LYB8WwKM1sZHU-snGA"
+          },
+          "group0004": {
+            "261014T1800": "yQw5owDDs7kFgaQ7PNKSHQ"
+          },
+          "group0005": {
+            "261014T1800": "v8EiIChv0Vj0VfzmphSuzA"
+          },
+          "group0006": {
+            "261014T1800": "2WOVqYqI28aPNevfHrIQiQ"
+          },
+          "group0007": {
+            "261014T1800": "ehkl3VgpT58U-bmvJzzH3A"
+          },
+          "group0008": {
+            "261014T1800": "NdqSttkpJ5XHFdEuUUa93g"
+          },
+          "group0009": {
+            "261014T1800": "_29O0bHD8v2JVwFZrAGVeQ"
+          }
+        }
+      }
+    }
+  },
+  "bytes": {
+    "metadata": {
+      "json": 1521,
+      "gzip": 1065
+    },
+    "request": {
+      "json": 1075,
+      "gzip": 763
+    },
+    "response": {
+      "json": 602,
+      "gzip": 324
+    }
+  }
+}

@@ -1,0 +1,18 @@
+{
+  "version": 1,
+  "testCount": 5,
+  "tests": [
+    { "file": "test-reference/core-shared/aead.test.js" },
+    { "file": "test-reference/adapter-client/periodkeys.test.js" },
+    { "file": "test-reference/core-shared/shared-primitive-misuse.test.js" }
+  ],
+  "required": [
+    { "module": "core-shared/aead.js", "exports": ["encrypt"] },
+    {
+      "module": "core-shared--publisher-issuer/periodKeys.js",
+      "exports": ["formatT", "currentT"]
+    },
+    { "module": "core-shared--publisher-issuer/bind.js", "exports": ["bindValue"] },
+    { "module": "core-shared/periodKeyProfiles.js", "exports": ["periodKeyProfile"] }
+  ]
+}

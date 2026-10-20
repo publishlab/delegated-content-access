@@ -6,11 +6,21 @@ answers from stdout. It computes observations. It never judges them.
 This file is everything a bridge needs. An implementer writing one in Go, Python, Java or C# reads this and
 nothing else; the case corpus is not an input to a bridge, and the harness source is not a specification.
 
-Seven operations are carried, and each is one stock library call in every language: decode a strict base64url
-field, derive octets with HKDF-SHA-256, open and seal an AES-GCM carrier, agree a P-256 ECDH secret, encode a
-P-256 public point, and open an RSA-OAEP ciphertext. Each refusal below is a fact about bytes: a spelling that
-does not decode, a tag that does not verify, and a ciphertext that does not open. An operation whose answer a runtime's own libraries cannot reach is not here, because reaching it would
-mean every bridge reimplementing the harness once per language.
+Seven operations are carried: decode a strict base64url field, derive octets with HKDF-SHA-256, open and seal
+an AES-GCM carrier, agree a P-256 ECDH secret, encode a P-256 public point, and open an RSA-OAEP ciphertext.
+The member the lane's `bridge.json` names answers each one. In most lanes that member is a library call, and
+in some it is code written in the lane: the strict base64url verdict in every lane, the P-256 point layout in
+every lane whose library does not export the uncompressed point itself, HKDF in `jvm/jca-jackson` over the
+JCA's HMAC, and OAEP unpadding in `php/openssl` over ext/openssl's raw private-key operation ([Building is not
+answering](#building-is-not-answering)). Each refusal below is a fact about bytes: a spelling that does not
+decode, a tag that does not verify, and a ciphertext that does not open. An operation whose answer a runtime's
+own libraries cannot reach is not here, because reaching it would mean every bridge reimplementing the harness
+once per language.
+
+For strict base64url decoding, `lane` owns the answer because its canonical
+alphabet, length and re-encode checks decide whether the input is accepted.
+The runtime decoder supplies bytes only after those checks; that library call
+does not make the acceptance rule its member attribution.
 
 No operation decides anything, and no operation knows a protocol. A bridge is handed octets, keys and lengths.
 No input member names anything a DCA specification defines, and no bridge joins, slices or derives a value on a
@@ -49,12 +59,54 @@ which says nothing about the bytes it produces.
 
 A lane names its build command and every operation it implements in its own `bridge.json`, at the lane's
 root: `script`, the bridge's source; `command`, what is started to answer a batch; and an optional
-`prepare: {command, args?}`, the build command itself. `operations` is a mandatory array of the operation names
-this bridge can answer. A set of cases that asks for an operation the lane has not declared is unsupported for
-that lane; it is not a held result. A declared operation that the bridge then omits is incomplete.
+`prepare: {command, args?}`, the build command itself. A set of cases that asks for an operation the lane has
+not declared is unsupported for that lane; it is not a held result. A declared operation that the bridge then
+omits is incomplete.
 Paths in a manifest are written from the conformance directory, not from the lane's own directory. A
 build that fails is a run that could not be completed, reported as incomplete with the build's own output,
 because nothing was asked yet.
+
+The same file says which part of the binding answers each operation:
+
+```json
+{
+    "members": {
+        "openssl": "ext/openssl",
+        "hash": "ext/hash, PHP's own SHA-256 and HKDF",
+        "lane": "code written in this lane"
+    },
+    "operations": {
+        "decode-base64url": "lane",
+        "hkdf-sha256": "hash",
+        "open-aes-gcm": "openssl"
+    }
+}
+```
+
+- `members` is mandatory. A member name is lowercase letters and digits, and its value says in one line what
+  the member is.
+- `operations` is mandatory. Each key is an operation this bridge can answer, and each value names a key of
+  `members`. Every member answers at least one operation.
+- An empty `members` beside an empty `operations` declares an intentionally unavailable operation surface:
+  every set is unsupported for that lane, and its record carries no operation row.
+- The member of an operation is the code that computes the answer bytes, or the accept/refuse verdict, that the
+  harness compares. Lane code around a library call does not change the member unless that lane code decides
+  the contract's answer, as strict base64url acceptance checks do. Reading JWK members for a key import alone
+  does not change the member. Where the code written in the lane is
+  itself the computation, the member is by convention named `lane`. The harness gives that name no special
+  meaning.
+- The attribution is harness metadata. A lane record carries one `operation=<operation> member=<member>` row
+  per declared operation, and the bridge is never asked who answered: nothing about it crosses stdin or
+  stdout.
+- The attribution says which code computes the answer, not that it is independent of a library. A `lane`
+  member may still call a library underneath, such as a raw RSA private-key operation below hand-written OAEP
+  unpadding; the binding README names that call beside the row.
+- The aggregate, `_shared/aggregate-results`, refuses an operation row that is malformed, names an operation
+  outside the seven or repeats one, and it proves nothing more. It does not prove the attribution complete or
+  true: a record with no operation rows, or with fewer rows than the lane declares, passes, and so does any
+  member name of lowercase letters and digits. The aggregate refolds the set verdicts and trusts the
+  attribution the record carries; it attests no provider. Making the rows mandatory, or checking a record
+  against the lane's current `bridge.json`, is a separate decision.
 
 ## Batch envelope
 
@@ -262,8 +314,12 @@ Every `...Jwk` member is one JSON object in RFC 7517 form, passed through unchan
 `crv` `P-256` and the base64url coordinates `x` and `y`, with `d` on a private one. An RSA key is `kty` `RSA`
 with `n` and `e`, and on a private one `d`, `p`, `q`, `dp`, `dq` and `qi`, and it may carry `alg`
 `RSA-OAEP-256`. The harness never reshapes one and never compares one: no observation carries a JWK. A bridge
-hands it to its runtime's own JWK importer, or converts it with its runtime's own key routines, and writes no
-JWK reader of its own.
+reads the JWK members it needs, such as `x`, `y` and `d` of an EC key or `n`, `e` and `d` of an RSA key, and
+builds from them a key its library takes. Where the runtime has no JWK importer, that member handling is code
+written in the lane. Where it has one, such as WebCrypto's `importKey` with the `jwk` format, the importer
+reads the JWK itself and the lane writes no member code.
+Reading members still judges nothing and derives nothing a DCA specification defines, which no bridge ever
+does.
 
 ## ecdh-p256
 
@@ -275,7 +331,8 @@ routines and runs one ECDH agreement over P-256.
 
 Success is `{"sharedSecretBase64url": string}`: the agreed x-coordinate as an unsigned big-endian integer at
 the P-256 field width, exactly 32 octets, keeping or adding leading zero octets as needed. A runtime that
-hands back a big integer drops a leading zero octet, and one recorded case has one.
+hands back a big integer drops a leading zero octet; the corpus includes an agreement whose shared x-coordinate
+starts with `0x00`.
 
 The operation defines no refusal. Every recorded peer value is a valid point, and a value the runtime cannot
 import is a batch fault. The bridge applies no KDF to the secret.
@@ -326,7 +383,7 @@ which one happened would be answering the question a padding oracle asks.
 - Everything a DCA specification defines on top of these calls: a binding string and its grammar, a sealed
   blob's layout, which secret keys which carrier, a derivation's context layout and its labels. An
   implementation tests those in its own suite against `verification/vectors/` and
-  `verification/fixtures/protocol-v1/`. Here they appear only as recorded octets.
+  `verification/fixtures/v1/`. Here they appear only as recorded octets.
 - A batch carries both directions of one value: a `seal-aes-gcm` whose expected ciphertext is the input of an
   `open-aes-gcm` beside it. A bridge that answered one request out of another request's input is not caught by
   that pair. The cases with no partner are where a bridge that answers without computing is caught: opaque
@@ -344,13 +401,18 @@ The cases are literal and this directory owns them. Most octets in them were cut
 vectors, so that a bridge which holds here computes what a DCA implementation on the same runtime will need:
 
 - `ecdh-p256`, `open-aes-gcm` with a 32-octet key and `seal-aes-gcm` carry the agreement, the binding octets
-  and the blob parts of sealed key blobs in `verification/vectors/v1-alt--bind-on-renderId-and-slot/` and
-  `verification/fixtures/protocol-v1/`.
+  and the blob parts of sealed key blobs in `verification/vectors/v1/experiments/bind-on-renderId-and-slot/` and
+  `verification/fixtures/v1/`.
 - `hkdf-sha256` carries the client-bound delivery derivation of
-  `verification/vectors/v1-profile--client-bound-ecdh-p256/` and the `dca-period-chain-v1` contexts that
-  `spec--period-key-chains.md` section 6.4 lays out.
-- `open-rsa-oaep` carries the RSA-OAEP ciphertexts of `verification/vectors/v1/` and
-  `verification/vectors/v1-profile--client-bound-rsa-oaep/`.
+  `verification/vectors/v1/profiles/dca-profile-client-bound-ecdh-p256/` and chain-key contexts in the layout that
+  `spec-profile--chain-keys.md` section 6.4 lays out. Those cases were cut before the construction id became
+  `dca-v1-chain-keys` (since renamed `dca-construction-chain-keys`), so their `info` octets spell the earlier id; the operation is stock HKDF and holds for any
+  `info`.
+- `open-rsa-oaep` carries the zero-label RSA-OAEP ciphertext of
+  `verification/vectors/v1/baseline/rsa-oaep-envelope-open/` and a recorded
+  16-octet plaintext case under the same primitive. Current client-bound
+  RSA-OAEP delivery uses a nonempty key-kind label and is outside this
+  zero-label operation.
 
 Each derived value was proved against those published bytes before it was recorded: a shared secret is right
 when it opens the recorded carrier under the recorded tag, and a sealed value is right when it equals the

@@ -1,0 +1,130 @@
+{
+  "format": "period-key-composition/v1",
+  "description": "What the client and issuer observed after each step: opened text, per-item error, unlock result, what the policy was asked, the cached period keys and the counters.",
+  "steps": [
+    {
+      "step": 1,
+      "texts": {
+        "bodytext": "<p>The council voted 7-2 to rezone the harbour.</p>"
+      },
+      "errors": {
+        "bodytext": null
+      },
+      "unlock": {
+        "ok": true,
+        "issuerName": "paywall_subscription_service",
+        "status": 200,
+        "transportMode": "direct",
+        "attempts": [
+          {
+            "issuerName": "paywall_subscription_service",
+            "url": "https://api.example.com/unlock",
+            "outcome": "answered",
+            "status": 200
+          }
+        ]
+      },
+      "presented": [
+        {
+          "contentNames": [],
+          "accessGroups": [
+            "premium"
+          ],
+          "periodCoordinates": {
+            "premium": [
+              "251023T1400",
+              "251023T1500"
+            ]
+          }
+        }
+      ],
+      "cache": [
+        {
+          "familyName": "https://www.news-site.example|premium",
+          "t": "251023T1400",
+          "key": "Etewfq8XLudt0AXLRs7gqA"
+        }
+      ],
+      "browserUnlocks": 1,
+      "issuer": {
+        "requests": 1,
+        "grants": 1,
+        "denials": 0
+      }
+    },
+    {
+      "step": 2,
+      "texts": {
+        "bodytext": "<p>The harbour plan goes to a second reading.</p>"
+      },
+      "errors": {
+        "bodytext": null
+      },
+      "unlock": null,
+      "presented": [],
+      "cache": [
+        {
+          "familyName": "https://www.news-site.example|premium",
+          "t": "251023T1400",
+          "key": "Etewfq8XLudt0AXLRs7gqA"
+        }
+      ],
+      "browserUnlocks": 1,
+      "issuer": {
+        "requests": 1,
+        "grants": 1,
+        "denials": 0
+      }
+    },
+    {
+      "step": 3,
+      "texts": {
+        "bodytext": null
+      },
+      "errors": {
+        "bodytext": "no_key"
+      },
+      "unlock": {
+        "ok": false,
+        "issuerName": "paywall_subscription_service",
+        "status": 401,
+        "transportMode": null,
+        "attempts": [
+          {
+            "issuerName": "paywall_subscription_service",
+            "url": "https://api.example.com/unlock",
+            "outcome": "denied",
+            "status": 401
+          }
+        ]
+      },
+      "presented": [
+        {
+          "contentNames": [],
+          "accessGroups": [
+            "premium"
+          ],
+          "periodCoordinates": {
+            "premium": [
+              "251023T1500",
+              "251023T1600"
+            ]
+          }
+        }
+      ],
+      "cache": [
+        {
+          "familyName": "https://www.news-site.example|premium",
+          "t": "251023T1400",
+          "key": "Etewfq8XLudt0AXLRs7gqA"
+        }
+      ],
+      "browserUnlocks": 2,
+      "issuer": {
+        "requests": 2,
+        "grants": 1,
+        "denials": 1
+      }
+    }
+  ]
+}

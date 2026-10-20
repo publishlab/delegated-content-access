@@ -1,0 +1,81 @@
+#!/usr/bin/env bash
+# Opt-in Go conformance check. Not part of the default public gate.
+#
+# The default `node --test` run touches no Go at all, so it needs no network and
+# no compiler. This script runs the Go lane on request: every corpus set this
+# lane declares, through this lane's own operation bridge.
+#
+#   ./check                     # every corpus set this lane declares
+#   ./check --record <file>     # also write this run's lane record to that file
+#   ./check --version <v>       # default, all or a token of ../versions; one run per token
+#
+# The corpus runs once per selected runtime version, through run_lane_versions
+# in ../../_shared/driver-steps.sh. For each version this script installs it
+# through ../install-toolchain --version, prints its banner and records the
+# version the installed binary reports. bridge.json's prepare step and the
+# answering process install and run the same version, because DCA_VERSION
+# carries the token to them.
+#
+# It needs network the first time, to download the toolchain (~70 MB). After
+# that the cached toolchain is reused with no network. Some execution
+# environments have no egress, which is exactly why this is never wired into the
+# suite: run it by hand on a machine that has network. Nothing is installed
+# system-wide and no binary is committed; the toolchain lives only in the cache
+# dir install-toolchain names, which `../install-toolchain --print-base`
+# prints without installing anything.
+#
+# Exit codes, the three ../../README.md names:
+#   0  every corpus set this lane was asked held
+#   1  the bridge answered inside the contract and answered wrongly
+#   2  a set verified nothing, no usable toolchain was found, or --version
+#      names a token ../versions does not list
+set -euo pipefail
+
+HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
+# The corpus-set driver step this check is built from.
+# shellcheck source=../../_shared/driver-steps.sh
+. "$HERE/../../_shared/driver-steps.sh"
+
+# What this lane calls itself in a record, which is the name the cross-lane
+# aggregator keys every comparison it makes on.
+DCA_LANE=go/stdlib
+# Where a record goes, empty until --record names a file and no record written
+# while it stays empty.
+DCA_RECORD=""
+# Which runtime versions run: --version, else DCA_VERSION, else default.
+DCA_VERSION_SELECTION="${DCA_VERSION:-default}"
+
+while [ $# -gt 0 ]; do
+    case "$1" in
+        --record)
+            [ $# -ge 2 ] || { echo "--record needs a file path to write the lane record to" >&2; exit 2; }
+            DCA_RECORD="$2"; shift 2 ;;
+        --version)
+            [ $# -ge 2 ] || { echo "--version needs default, all or a token of $HERE/../versions" >&2; exit 2; }
+            DCA_VERSION_SELECTION="$2"; shift 2 ;;
+        *)
+            echo "go/stdlib/check takes --record <file> and --version <v> and nothing else:" >&2
+            echo "it always answers the whole case corpus through the driver." >&2
+            exit 2 ;;
+    esac
+done
+
+# Installs one version, prints its banner and sets DCA_RUNTIME_OBSERVED from
+# what the installed binary says, which is what the record carries.
+lane_runtime() {
+    local base
+    if ! base="$("$HERE/../install-toolchain" --version "$1")"; then
+        echo "no Go toolchain for version $1." >&2
+        return 1
+    fi
+    echo "== $("$base/bin/go" version) ==" >&2
+    # Said out loud because the other lanes name a crypto library here, and a
+    # reader who sees none for Go should learn there is none rather than assume
+    # it was omitted.
+    echo "== crypto: pure Go standard library, no OpenSSL, nothing linked ==" >&2
+    DCA_RUNTIME_OBSERVED="$(GOTOOLCHAIN=local "$base/bin/go" env GOVERSION)" || return 1
+}
+
+run_lane_versions "$HERE/.."
+exit "$DCA_LANE_STATUS"

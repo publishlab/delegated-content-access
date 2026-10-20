@@ -1,4 +1,5 @@
 {
   "script": "lane/bridge.mjs",
-  "command": "lane/run.sh"
+  "command": "lane/run.sh",
+  "members": { "lane": "code written in this lane" }
 }

@@ -1,0 +1,155 @@
+#!/usr/bin/env bash
+# The JVM operation bridge, in the two shapes the runner starts it in.
+#
+#   ./bridge --prepare   # install the JDK and jars if absent, compile, run one empty batch
+#   ./bridge             # read one batch on stdin, write one on stdout
+#
+# The runner compiles first and answers later. `_shared/driver/run.mjs` reads
+# jvm/jca-jackson/bridge.json, which names both forms: it runs `--prepare` before the
+# batch's 10 second clock starts, then starts the bare form as a ready program.
+# javac takes about a second over these two sources and the first JVM start
+# pages in a 346 MB JDK. Both times measure the toolchain, not the bytes this
+# lane produces.
+#
+# This wrapper resolves a JDK, resolves one build directory, and hands stdin and
+# stdout to `v1/Bridge.java`. The protocol, the operations and the observations
+# stay in that file. `v1/Bridge.java` answers on stdout, so every line this
+# wrapper prints goes to stderr, where the runner reprints it beside a
+# failure.
+#
+# The bridge downloads nothing while it answers. `--prepare` calls
+# ../install-toolchain, which installs the pinned Temurin JDK, and then
+# install-libraries beside this file, which installs the pinned Jackson jars,
+# each when missing. The bare form asks the first for `--print-base` and the
+# second for `--print-classpath`, two queries that install nothing. When the bare form finds a
+# missing JDK or a missing jar, a batch is already on stdin, so it names the
+# path and exits nonzero. Fetching 198 MB there would hold the batch open.
+set -euo pipefail
+
+HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+PKG="$HERE/v1"
+# The version this run selected: the lane check sets DCA_VERSION to one token of
+# ../versions per run, and every installer call below passes it on, so the JDK
+# that compiles and answers is that version's pin and never a java on PATH.
+VERSION="${DCA_VERSION:-default}"
+
+# The cache dir rule is written once, in cache.sh, and this script sources it at the one
+# distance the layout fixes: a lane sits two levels under conformance-primitives/ and cache.sh sits
+# under conformance-primitives/_shared/.
+# shellcheck source=../../_shared/cache.sh
+. "$HERE/../../_shared/cache.sh"
+
+# Where this bridge's class files go.
+#
+# Preparing and answering are two processes of one run, so the directory needs a name
+# both of them compute rather than a fresh `mktemp -d` per process, which is what
+# `resolve_build_dir` in cache.sh hands a lane that compiles and runs in one
+# script. The name is keyed on the absolute path of the sources, so two checkouts
+# and two worktrees never share one directory, and the version is in the key,
+# so classes one JDK compiled are never run by another; the directory cannot go
+# stale: `--prepare` recompiles from the sources it finds, every run, before
+# anything is asked.
+#
+# One cache dir is shared across containers and across concurrent runs of the
+# same checkout, so the compile takes the lock exclusively and an answering JVM
+# holds it shared for as long as it runs. The fd is opened before `exec java` because of the shared holder:
+# a file descriptor survives exec, so the lock is held
+# until the JVM that reads those class files exits, and a compile from another
+# run waits rather than deleting the directory out from under it.
+resolve_cache_dir jvm
+CACHE="$DCA_CACHE_DIR"
+KEY="$(printf '%s@%s' "$PKG" "$VERSION" | sha256sum | cut -c1-16)"
+BUILD="$CACHE/build/bridge-v1/$KEY"
+LOCK="$CACHE/build/bridge-v1/$KEY.lock"
+
+# The two sources of this bridge: the bridge itself and the object model it
+# reads a batch through, which is built on the pinned Jackson jars
+# install-libraries puts in this binding's cache.
+SOURCES=("$PKG/Bridge.java" "$PKG/Json.java")
+MAIN=Bridge
+
+mode=answer
+case "${1:-}" in
+  --prepare) mode=prepare; shift ;;
+  --help|-h) awk 'NR>1 && /^#/ { sub(/^# ?/, ""); print; next } NR>1 { exit }' "${BASH_SOURCE[0]}"; exit 0 ;;
+esac
+if [ $# -gt 0 ]; then
+  echo "bridge takes --prepare or nothing, got: $1" >&2
+  exit 2
+fi
+
+if [ "$mode" = prepare ]; then
+  if ! BASE="$("$HERE/../install-toolchain" --version "$VERSION")"; then
+    echo "no JVM toolchain, so the bridge was not built." >&2
+    exit 2
+  fi
+  if ! CLASSPATH="$("$HERE/install-libraries")"; then
+    echo "no JSON library classpath, so the bridge was not built." >&2
+    exit 2
+  fi
+  for source in "${SOURCES[@]}"; do
+    [ -f "$source" ] || { echo "no $source; the JVM bridge has not landed yet" >&2; exit 2; }
+  done
+
+  mkdir -p "$(dirname "$BUILD")"
+  exec 9>"$LOCK"
+  flock 9
+  rm -rf "$BUILD"
+  mkdir -p "$BUILD"
+  echo "== javac ${#SOURCES[@]} sources -> $BUILD ==" >&2
+  if ! "$BASE/bin/javac" -Xlint:all -cp "$CLASSPATH" -d "$BUILD" "${SOURCES[@]}"; then
+    echo "the bridge did not compile, so no batch was answered." >&2
+    exit 2
+  fi
+  echo "== $("$BASE/bin/java" -version 2>&1 | head -1) ==" >&2
+
+  # One empty batch runs through the built classes, as the warmup and to prove
+  # that this classpath starts. A batch of no requests is answered with no
+  # results; the runner refuses an empty selection long before a bridge is
+  # started, so the only caller that ever sends one is this line.
+  empty='{"protocol":"dca-operation-bridge-v1","requests":[]}'
+  if ! printf '%s\n' "$empty" | "$BASE/bin/java" -cp "$BUILD:$CLASSPATH" "$MAIN" >/dev/null; then
+    echo "the bridge compiled and did not answer an empty batch." >&2
+    exit 2
+  fi
+  exit 0
+fi
+
+if ! BASE="$("$HERE/../install-toolchain" --version "$VERSION" --print-base)"; then
+  echo "bridge: no JVM toolchain path could be resolved." >&2
+  exit 1
+fi
+if [ ! -x "$BASE/bin/java" ]; then
+  echo "bridge: no java at $BASE/bin/java. Run ./bridge --prepare, or install-toolchain." >&2
+  exit 1
+fi
+
+# The jars the bridge reads its batch through. A missing one is refused here for
+# the same reason a missing JDK is: this form answers a batch that is already on
+# stdin, and it does not fetch anything to do that.
+if ! CLASSPATH="$("$HERE/install-libraries" --print-classpath)"; then
+  echo "bridge: no JSON library classpath could be resolved." >&2
+  exit 1
+fi
+while IFS= read -r jar; do
+  [ -f "$jar" ] || { echo "bridge: no jar at $jar. Run ./bridge --prepare, or install-libraries." >&2; exit 1; }
+done < <(printf '%s\n' "$CLASSPATH" | tr ':' '\n')
+
+# The shared lock is taken before the built-class test, not after, because the test
+# looks in the directory a concurrent --prepare is mid-`rm -rf`/`mkdir -p`/`javac` over.
+# Testing the class file first can read a `--prepare` in progress, either
+# finding it half torn down and refusing a run that would have started fine a
+# moment later, or finding a stale class file about to be replaced. Waiting on
+# the lock first means this answering form only ever sees a build that is
+# wholly absent or wholly finished. `mkdir -p` matches --prepare's own so a
+# never-prepared cache dir does not fail `exec 9>` before the class-file
+# refusal below gets to say why.
+mkdir -p "$(dirname "$LOCK")"
+exec 9>"$LOCK"
+flock -s 9
+if [ ! -f "$BUILD/$MAIN.class" ]; then
+  echo "bridge: nothing built at $BUILD. Run ./bridge --prepare first." >&2
+  exit 1
+fi
+
+exec "$BASE/bin/java" -cp "$BUILD:$CLASSPATH" "$MAIN"

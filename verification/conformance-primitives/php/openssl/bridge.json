@@ -1,0 +1,19 @@
+{
+    "script": "php/openssl/v1/bridge.php",
+    "command": "php/openssl/bridge",
+    "prepare": { "command": "php/openssl/bridge", "args": ["--prepare"] },
+    "members": {
+        "openssl": "ext/openssl",
+        "hash": "ext/hash, PHP's own SHA-256 and HKDF",
+        "lane": "code written in this lane"
+    },
+    "operations": {
+        "decode-base64url": "lane",
+        "hkdf-sha256": "hash",
+        "open-aes-gcm": "openssl",
+        "seal-aes-gcm": "openssl",
+        "ecdh-p256": "openssl",
+        "p256-point": "lane",
+        "open-rsa-oaep": "lane"
+    }
+}

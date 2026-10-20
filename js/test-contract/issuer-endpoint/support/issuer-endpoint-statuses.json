@@ -1,0 +1,19 @@
+{
+  "success": 200,
+  "partial": 200,
+  "wholeRequest": {
+    "bad_alg": 400,
+    "bad_jwt": 400,
+    "bad_signature": 400,
+    "bad_version": 400,
+    "binding_failed": 400,
+    "body_too_large": 413,
+    "denied": 401,
+    "invalid_json": 400,
+    "too_many_entries": 400,
+    "unknown_key": 503,
+    "out_of_scope_issuer": 400,
+    "policy_unavailable": 503,
+    "unknown_publisher_key": 400
+  }
+}

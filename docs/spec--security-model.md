@@ -1,57 +1,112 @@
-# Delegated Content Access (DCA): Threat Model
+# Delegated Content Access (DCA): Security Model
 
 Status: Public Working Draft
 
-Optional deployment controls do not alter this base threat model.
+## Abstract
 
-The key words **MUST**, **MUST NOT**, **SHOULD** and **MAY** in this document
-are to be interpreted as described in
-[BCP 14](https://www.rfc-editor.org/info/bcp14) when, and only when, they
-appear in all capitals.
+This document describes the base security model of Delegated Content Access
+(DCA). DCA encrypts publisher content so that reading it normally requires a
+key returned through an issuer, which recreates the access boundary of a
+server-side paywall while the encrypted page stays cacheable. The document
+states the trust assumptions that bound the attacker and the enforcement
+boundary at the issuer, including the selected browser-origin check. It lists
+the attacks DCA blocks and the attacks it accepts by design, such as an
+authorized reader sharing keys or plaintext, records the consequences of key
+compromise, replay and error responses, and summarizes the cryptographic
+primitives. DCA blocks CSS-only bypasses; it does not provide DRM.
 
-## Design goal
+## 1. Introduction
+
+Following [RFC 3552](https://www.rfc-editor.org/rfc/rfc3552.html), this
+document states the attacks DCA blocks, the attacks it accepts by design and
+the consequences of each.
+
+### 1.1 Scope and responsibility
+
+This model applies to the core protocol and the profiles selected by a
+deployment. A security property is conditional on its stated trust assumptions
+and on the mechanisms that provide it. Selecting a profile adds its specified
+obligations; it does not add every protection that could be built around DCA.
+
+| Context | Responsibility and limit |
+| --- | --- |
+| Protocol and implementation | Authenticate resource claims, enforce issuer authorization and registration-scoped key use, preserve cryptographic bindings, and deliver only permitted capabilities. Implementations must also support the successful paths their selected profiles specify. |
+| Selected profiles | Provide the additional protection that profile defines. Browser-origin admission and client-bound response protection apply only when selected, with their stated limits. |
+| Publisher and issuer policy | The publisher chooses content, grouping and delegation; the issuer decides grants using authenticated claims and trusted policy. DCA enforces these choices without deciding whether they are commercially or editorially appropriate. |
+| Deployment operations | Provision trusted registrations, protect secrets, configure endpoints and maintain the implementations. Protocol requirements on these operations still apply; protection after a trust root is compromised is limited as described below. |
+| Accepted capability use | Authorized readers can use and share plaintext or keys within their cryptographic reach. Later policy changes cannot retract material already delivered. |
+
+A protocol defect permits behavior contrary to one of these specified
+obligations while its assumptions hold. An implementation defect violates an
+obligation, including a required validation or successful opening path.
+Neither is excused by calling it a deployment concern. Conversely, a choice
+left to the content owner or issuer, an accepted limitation, or additional
+protection after a trust assumption fails does not by itself establish a
+missing protocol requirement.
+
+These boundaries do not promise uninterrupted service, protection from arbitrary
+resource exhaustion, or factual verification of publisher-authored claims.
+The specified input limits, refusal behavior and authorization checks remain
+applicable; deployments choose additional availability and abuse controls.
+
+<a id="design-goal"></a>
+## 2. Design goal
 
 **DCA blocks CSS-only bypasses but does not provide DRM.**
 
-DCA encrypts content so reading it normally requires a key returned through an issuer. It recreates the access boundary of a server-side paywall while keeping the encrypted page cacheable and decrypting it in the client. It does not prevent a reader who has that key or the decrypted content from sharing either one.
+DCA blocks CSS- or markup-only bypass: reading content requires a key that an
+issuer approved, which recreates a server-side paywall's boundary while the
+encrypted page stays cacheable and issuer-independent. It does not stop an
+authorized reader, or code that runs with that reader's access in a browser, a
+native application or a server, from sharing the key or copying plaintext.
 
-The goal is to block CSS- or markup-only bypass and require issuer-approved key
-acquisition while keeping encrypted delivery cacheable and issuer-independent.
-It does not stop an authorized reader or script-capable browser from copying
-plaintext.
+<a id="trust-assumptions"></a>
+## 3. Trust assumptions
 
-## Trust assumptions
-
-In ordinary terms, the publisher must protect its signing key and key source,
-and each issuer must protect its opening private key. Theft of one of those
-secrets is an operational key compromise, not a bypass that base DCA promises
-to contain.
-
-The honest publisher's render-signing key and exact period-key material, and
-each honest issuer's private key, are trust roots. Their theft is an operational
+The publisher's render-signing key and secret content-key material, and each
+entrusted issuer's private key, are trust roots. Their theft is an operational
 key compromise, not an attack the base DCA protocol is required to withstand.
-Base consumes opaque, independently supplied exact `periodKey` values. It
-defines neither a publisher derivation secret nor a derivation from one
-period's key to another. [spec--period-key-chains.md](spec--period-key-chains.md)
-defines the optional extension's bounded construction and the compromise reach
-of its publisher-retained `keyDerivationSecret`.
+The same assumption applies to secret period-key and derivation material used
+by selected profiles. Each profile defines that material's cryptographic reach.
+The [period-key profile](spec-profile--period-keys.md) consumes opaque
+`periodKey` values supplied for their coordinates; the
+[chain-key profile](spec-profile--chain-keys.md) additionally defines bounded
+chain derivation and the reach of its publisher-retained `keyDerivationSecret`.
 
-Containment, isolation and rotation consequences are recorded here; they do
-not by themselves establish a base wire or boundary requirement.
+On suspected signing-key compromise the publisher rotates the key and issuers
+retire the old verification key. An issuer then refuses every new request that
+relies on a render signed only by the retired key
+([core Section 4.2](spec--core-protocol.md#42-verification-and-registration));
+keys and plaintext a client already holds stay usable
+([Section 8.2](#replay-limits)).
 
-On suspected publisher-signing-key compromise, the publisher rotates the key
-and issuers retire its old verification key. Renders signed only by the retired
-key then stop unlocking, including cached renders; that availability cost is
-incident response, not a reason to grant a compromised key continuing
-authority.
+The publisher controls its own content, grouping, signed resource claims and
+choice of entrusted issuers. DCA does not protect that content from its owner's
+decision to disclose it or delegate broad access. Signature verification
+establishes who made the claims and that they have not changed; it does not
+establish their factual truth. Which authenticated claims an issuer accepts
+for its access decisions is part of its trusted registration and policy.
 
-This does not make every registered party honest. A registered malicious
-publisher, an untrusted reader controlling its browser, copied public markup,
-relabelled request fields, and cross-tenant use of authority a party was
-actually given remain in scope. The attacker may use its own credentials and
-every public artifact but does not begin with an honest party's secret key.
+The issuer's ordinary duties enforce the access boundary for every request:
+verify the resource claims, apply its own authorization policy, resolve keys
+within the verified publisher registration, and release only permitted
+capabilities. These duties do not depend on a judgment about the publisher's
+intentions. A request under registration A cannot select a private key available
+only under registration B
+([core Section 6.3](spec--core-protocol.md#63-opening-key-scope-and-bind)).
+Publishers sharing an opening keyset are mutually trusted within that
+cryptographic entrustment domain, as Section 4 explains.
 
-## Enforcement boundary
+An untrusted caller may control its client, whether a browser, native
+application or server process, and use its own credentials, copied public
+markup and relabelled request fields. The attacker does not begin with a
+trusted party's secret key. Those inputs must pass the same verification,
+authorization and binding checks. Publisher responsibility does not excuse
+implementation defects that bypass those checks or prevent an entitled reader
+from opening content through a permitted path.
+
+<a id="enforcement-boundary"></a>
+## 4. Enforcement boundary
 
 DCA is not a soft paywall. A soft paywall ships readable content and hides it
 with client-side presentation logic. DCA ships encrypted content and requires
@@ -60,72 +115,76 @@ A reader who has neither access nor shared access cannot reveal the article
 with a CSS or DOM change. This is separate from reader-to-reader sharing.
 
 Readers can already share access to a server-side paywall by sharing a login,
-session cookie or bearer token, or by proxying an authenticated session. Direct
-DCA delivery has a comparable sharing boundary. Client-bound delivery makes
-copying returned access harder by tying it to the browser, but a rooted or
-otherwise modified browser can still use or relay that access. BIND binds the
-issuer's answer to its decision; it does not address sharing.
+session cookie or bearer token, or by proxying an authenticated session. A DCA
+response in direct transport mode has a comparable sharing boundary: whoever
+copies the returned key bytes can use them within their reach. Client-bound
+transport mode encrypts each returned key for one recipient key that the
+client offered, so a copied response is unusable without that recipient
+private key. It does not stop the reader who controls that client
+([Section 5](#choosing-the-operating-boundary)).
 
-A direct contentKey opens one item. A periodKey opens every item wrapped under
-its publisher-scoped `accessGroup` for that period; the browser uses it to
-unwrap each item's contentKey. An issuer returns the direct contentKey when its
-decision is narrower than the whole group. If the publisher wrapped an item
-under several groups, those are alternative (OR) routes: any one such periodKey
-opens it. The publisher chooses the reach/caching trade-off when it authors
-wraps; conjunction needs a separately authored coordinate or direct delivery.
+When the issuer opens publisher-sealed material, it rebuilds BIND
+([core Section 6.3](spec--core-protocol.md#63-opening-key-scope-and-bind)).
+BIND protects coordinate integrity; it
+neither prevents sharing nor protects the issuer's response. The selected
+[response binding](spec--response-binding.md#2-layered-security-model)
+protects delivery from issuer to client.
 
-The A/B binding case concerns direct delivery only: a request granted A's
-contentKey must not return B's contentKey. BIND distinguishes the two with
-`renderId` and `contentName`. The issuer rebuilds BIND from those fields, so its
-answer matches its decision; BIND does not try to stop a cooperating reader
-from sharing access.
+A contentKey returned by the issuer opens one item. A periodKey opens every
+item wrapped under its publisher-scoped `accessGroup` for that period; the
+client uses it to unwrap each item's contentKey. An issuer returns the item's
+contentKey when its decision is narrower than the whole group. Wraps under
+several groups are OR alternatives
+([period keys Section 6.1](spec-profile--period-keys.md#61-assigning-access-groups-before-sealing));
+the publisher chooses the reach and caching trade-off when it authors them, and
+conjunction needs a separately authored coordinate or an item `contentKey`
+returned by the issuer. What the publisher entrusts to each issuer, and why a
+supplied period key reaches items outside that issuer's item selection, is
+defined in [core Section 2.1](spec--core-protocol.md#21-publisher).
 
-**Issuer-decision invariant.** The browser controls the unsigned unlock
+**Issuer-decision invariant.** The client controls the unsigned unlock
 request, including the `sealed` maps. The client names coordinates with those
 maps; only the issuer decides grants. The
 issuer makes every entitlement, meter and policy decision from verified
 `resourceJWT` claims plus issuer-held identity, configuration and state; it
-then rebuilds BIND from the same requested coordinate it decided on. An issuer
-that grants on presentation alone defeats the access boundary even when BIND
-verifies.
+then opens only sealed values whose use that decision permits
+([core Section 6.3](spec--core-protocol.md#63-opening-key-scope-and-bind)). An
+issuer that grants on presentation alone defeats the access boundary even when
+BIND verifies.
 
 Client relay selection is not authorization. Omitting publisher-authored
-material can remove a usable route, and presenting another authored
+material can remove a usable alternative, and presenting another authored
 alternative can waste request bytes or issuer work; neither action selects a
 profile or widens a grant. A carried configuration that changes issuer
 interpretation becomes trusted only through a verified publisher commitment
 or issuer-held configuration, never through its presence in the unsigned
 request.
 
-The exact-origin requirement follows the browser protection boundary in
-[RFC 6454](https://www.rfc-editor.org/rfc/rfc6454.html#section-3.2) and the
-[WHATWG URL Standard](https://url.spec.whatwg.org/#concept-url-origin): it is
-scheme, host and port, not organizational identity or a registrable domain.
+The client fallback rules in
+[core Section 5.3](spec--core-protocol.md#53-multiple-issuers) are
+coordination among conforming clients in the same sense. They say when a
+client that follows its route configuration may offer an unresolved
+coordinate to another issuer. They do not stop a reader from submitting a
+request to any issuer independently, and each issuer authorizes every request
+it receives on its own verified claims and policy.
 
-For a browser unlock under a selected `dca-v1-browser-origin` binding, the
-issuer application MUST:
+Under a selected `dca-profile-browser-origin` binding, the issuer compares the
+`Origin` it observes at its trusted TLS or proxy boundary byte for byte with
+the canonical origin in the verified `resourceJWT`
+([HTTP binding Section 3.2](spec--http-binding.md#32-canonical-signed-origin),
+[browser-origin Section 2.3](spec-profile--browser-origin.md#23-post-admission-order))
+before it authorizes access, consults a response cache or opens publisher
+envelopes.
 
-- treat `resourceJWT` header `kid` as an untrusted key-selection hint, and
-  resolve one configured verification key or one key from a trusted JWKS
-  source, refusing an unknown or ambiguous lookup;
-- verify the exact `resourceJWT` with that key;
-- require the HTTP `Origin` observed at the issuer's trusted TLS/proxy boundary
-  to equal the verified `resourceJWT.origin`, byte for byte, before policy, a
-  cached answer or opening submitted key material;
-- use that verified origin as the policy coordinate, and resolve unsigned
-  `issuerName`/`keyId` only inside the opening-key namespace of the
-  registration whose key verified the token;
-- return CORS permission only for that exact origin.
+That verified origin, not an unsigned request field, is the policy coordinate
+([core Section 6.2](spec--core-protocol.md#62-authentication-and-policy)), and only
+that origin receives CORS permission.
 
-An issuer that also keeps a registered origin limit per publisher may refuse an
-origin that registration does not list. That limit is defense in depth, and the
-issuer compares the admitted signed origin with the observed origin.
-
-This browser-profile property belongs to the complete issuer composition, not
-to DCA crypto core.
-[spec--browser-http-binding.md](spec--browser-http-binding.md) specifies the
-selected HTTP checks and ordering. The reference supplies a reusable
-adapter outside core; a host may replace it only with equivalent behavior.
+A preflight carries no `resourceJWT`, so the endpoint cannot compare origins
+there. It applies its preflight origin policy to the canonical observed `Origin`;
+syntax alone does not satisfy that policy. A successful preflight grants no DCA
+authority and predicts no successful `POST`
+([browser-origin Section 2.5](spec-profile--browser-origin.md#25-preflight)).
 
 The origin check stops a copy site from using a visitor's browser as a
 key-opening oracle: the copy serves the render from its own origin, the browser
@@ -138,299 +197,237 @@ The signed origin does not isolate registered publishers that share one issuer
 opening keyset: such a publisher signs its own `resourceJWT` for its own origin
 while copying the other's sealed value and `renderId`, and the issuer opens it
 with the key both were sealed to. Publishers sharing one opening keyset are
-therefore mutually trusted. Mutually untrusted publishers receive separate
-issuer opening keysets, and lookup of the unsigned `issuerName`/`keyId` pair
-stays scoped to the registration whose key verified the token, because
-accepting another publisher's copied `keyId` would select its private key.
+therefore mutually trusted. Mutually untrusted publishers need separate opening
+keysets ([sealed-key envelopes](spec--sealed-key-envelopes.md) Section 7), and
+lookup of the unsigned `issuerName`/`keyId` pair stays inside the verifying
+registration
+([core Section 6.3](spec--core-protocol.md#63-opening-key-scope-and-bind)),
+because accepting another publisher's copied `keyId` would select its private
+key.
 
-The three responsibilities stay separate. For browser delivery, the issuer
-compares `resourceJWT.origin` with the observed `Origin`; `renderId` with the
-slot fields supplies sealed-value coordinate integrity. Registration and
-opening-key scope isolates publishers.
+Aliases whose opening-key entries resolve to one private key are one
+cryptographic entrustment domain: every holder of that key can open what is
+sealed to it under any alias. Core Sections
+[2.1](spec--core-protocol.md#21-publisher) and
+[6.3](spec--core-protocol.md#63-opening-key-scope-and-bind) state the
+publisher's duty and the lookup scope.
 
-### Origin at the HTTP boundary
+<a id="choosing-the-operating-boundary"></a>
+## 5. Choosing the operating boundary
 
-The issuer's HTTP host decides what counts as the observed `Origin`, and does
-so before it reaches DCA work:
+Render and slot binding protect integrity against substitution; they are not an
+anti-sharing control. Which capability the issuer returns, a reusable period
+key or a per-item content key, is a choice about online control, reuse and cost;
+[deployment patterns](guide--deployment-patterns.md) compares them.
 
-- A TLS terminator or reverse proxy in front of the issuer either passes the
-  browser's `Origin` header through unchanged, or strips any client-supplied
-  internal forwarding header and writes its own observation. The backend reads
-  that internal header only from the configured proxy address and reads the
-  plain `Origin` header otherwise.
-- Exactly one `Origin` header value reaches the comparison. The issuer refuses
-  a request carrying the header more than once or one comma-joined value.
-- A missing `Origin`, the value `null`, a value that does not parse as
-  `scheme://host[:port]`, and a value carrying userinfo, a path, a query, a
-  fragment or whitespace are each refused. So is any value whose bytes differ
-  from the verified `resourceJWT.origin`.
-- The issuer performs every refusal above before response-cache lookup, policy,
-  or any private-key operation and returns no key material. Coarse failure
-  bodies are recommended. A deployment that claims
-  registration or origin privacy makes these pre-policy refusals externally
-  uniform; the browser-origin mechanism does not require that of every
-  implementation.
-
-CORS on the unlock endpoint follows from the same value:
-
-- The issuer sets `Access-Control-Allow-Origin` to that one exact origin,
-  never `*` and never a list, and sets `Vary: Origin`. A key-bearing response
-  carries `Cache-Control: no-store` under the browser binding, so `Vary: Origin`
-  protects refusals, explicitly cacheable profiles and misconfigured
-  intermediaries; it does not make ordinary caching of key-bearing responses
-  acceptable.
-- The `OPTIONS` preflight carries no JWT, so the issuer admits a syntactically
-  valid origin and answers with `Access-Control-Allow-Methods: POST` and
-  `Access-Control-Allow-Headers: Content-Type`. The `POST` performs the
-  verified equality check before any useful work, so preflight admission grants
-  nothing.
-- An issuer whose authentication uses its own session cookies adds
-  `Access-Control-Allow-Credentials: true`, which requires the exact origin
-  the endpoint already returns.
-
-Under signed origin a publisher starts serving a new origin without an issuer
-configuration change, and retiring an old one stays an operation the issuer
-runs. Renders signed for the old origin keep unlocking there while they are
-cached and while their signing key is still accepted. To stop the old origin,
-the publisher and issuer use a maximum render age, an issuer-side denylist of
-retired origins, or a separate signing key per origin that can be retired on
-its own.
-
-## Choosing the operating boundary
 
 One authorized reader is enough to redistribute a key capability or plaintext.
 Client-bound transport raises the effort for passive response copying, but a
 reader controlling the browser needs no root access: they can submit their own
 extractable client key before the honest scripts run, use an honest handle as
-an oracle, proxy operations, or share the decrypted content. Render/slot
-binding protects integrity against substitution; it is not an anti-sharing
-control.
-
-The product choice is therefore about online control, reuse and cost:
-
-| Operating choice | Publisher page caching | Issuer contact | Reach after delivery | Main cost / limit |
-| --- | --- | --- | --- | --- |
-| Cached `periodKey` | shared encrypted pages remain cacheable | once per applicable period/cache miss | the granted access group and period | least issuer traffic; broadest reusable key |
-| Direct `contentKey` | shared encrypted pages remain cacheable | each unresolved render | that content item and render | more issuer traffic and availability dependence; plaintext can still be shared |
-| Traditional server gating | personalized/plaintext delivery commonly reduces shared caching | each protected request | server decides before each delivery | more origin/edge complexity and cost; login, session, proxy and plaintext sharing still remain |
-| Attested DRM or forensic controls | separate product architecture | product-specific | product-specific | outside DCA; higher platform, operational and user cost |
-
-If a deployment uses the
-[optional period-chain profile](guide--period-key-chains.md), its
-direct `periodChainKeys` result changes how a reusable period capability is
-represented; the issuer still decides the grant. From a returned cutoff, the
-client derives only exact period keys at or before that cutoff within its
-supplied dated window;
-the issuer calculates the cutoff from verified claims, issuer policy and one
-issuer-owned instant, then clamps it to publisher-supplied positioned states.
-That clamp stays within the supplied state at that instant; it never relocates
-the chain anchor into another window or across an absent member. See the
-[period-chain issuer-selection rules](spec--period-key-chains.md#13-issuer-decision-and-response).
-The client-bound profile forbids returning chain bytes. A cache retains
-whatever capability was already
-delivered until its host evicts it, so loss of entitlement cannot claw back
-prior exact or chain reach; it can only stop a later grant.
-
-That backward reach is deliberate. A chain key at T20 authorizes every earlier
-position in its bounded window
-through T20. Useful content reach is the
-intersection of those derivable period keys and the encrypted artifacts that
-are still available under them. A publisher may therefore choose a chain
-window wider than its content-cache horizon: the publisher accepts that reach
-because no useful artifact remains there. If older artifacts do
-remain available and must be excluded from a grant, the publisher or issuer
-uses exact period keys or a separately bounded chain window; it must not treat
-the cutoff as hiding earlier positions in that window.
+an oracle, proxy operations, or share the decrypted content. A native or
+server client holds its keys in its own process, and whoever controls that
+process has the same options.
 
 Issuer-side account, rate, concurrency, IP or network checks can add friction,
-detection and revocation. They do not make a browser-held key or rendered
+detection and revocation. They do not make a client-held key or rendered
 plaintext unshareable, and they can reject legitimate travel, VPN or shared
-network use. Treat them as deployment policy, not as a DCA guarantee.
+network use. Treat them as deployment policy, not as a DCA guarantee; DCA
+specifies no rate-limit algorithm.
 
-If a deployment needs the issuer consulted for every render, use direct
-`contentKey` delivery and avoid reusable period grants; encrypted publisher
-markup can still remain CDN-cacheable. If the requirement is continuous server
-control or prevention of copying by an authorized reader, DCA is not the
-solution. The deployment is choosing a less cacheable, more expensive delivery
-architecture, or a DRM/attestation product, for a different threat model.
-
-### Why disclose the limitation
-
-DCA is an open protocol, so its public specification must describe the
-capability and consequence: a reader-controlled client can substitute its own
-client key, relay key operations, or redistribute plaintext. Hiding that fact
-does not protect an implementation; a reader who can modify the request can
-discover it. Hiding it stops publishers and issuers from making informed
-choices about caching, online control and cost.
-
-The specification and deployment guidance document the durable threat and
-remaining risk, not a brittle recipe tied to one script or function name.
-Reproducible
-mechanics belong in the reference tests and separately labelled platform
-evidence, where engineers can inspect the boundary without mistaking an
-accepted outcome for a protocol failure. This follows ordinary open-standards
-practice: document protected,
-susceptible and out-of-scope attacks, including accepted or transferred risk
-([RFC 3552](https://www.rfc-editor.org/rfc/rfc3552.html),
-[W3C Threat Modeling Guide](https://www.w3.org/TR/threat-modeling-guide/)).
-
-## What DCA protects against
+<a id="what-dca-protects-against"></a>
+## 6. What DCA protects against
 
 | Attack | Protection | How |
 |--------|------------|-----|
 | CSS- or markup-only bypass | **Blocked** | Protected content is AES-128-GCM ciphertext, and no element holds the plaintext. |
-| Unentitled coordinate or request presentation | **Blocked at the issuer** | Unsigned request fields grant nothing; the issuer decides from verified publisher claims plus issuer-held identity, configuration and state. |
+| Unentitled coordinate or request presentation | **Blocked at the issuer** | Unsigned request fields grant nothing ([Section 4](#enforcement-boundary), issuer-decision invariant). |
+| Copied delivery used as a key-opening oracle on another site | **Blocked by selected browser-origin admission** | The issuer compares the observed browser Origin with the verified signed `origin` claim (core Section 4.1) before policy or key opening. A baseline-only non-browser path needs its own trusted caller and credential binding; baseline conformance alone supplies no browser-origin protection. |
 | Offline opening of issuer-sealed material | **Blocked while issuer keys remain secret** | The opening key stays at the issuer; possession of a public envelope or its coordinates grants nothing. |
 | Automated or bulk acquisition | **Authorization-gated, not prevented** | Each missing key requires an issuer grant. An authorized reader can automate acquisition, and one period key opens every retained matching item. |
 | Request or response replay | **Scope-bounded, not prevented** | A repeated request reaches current issuer policy. A captured successful key remains usable for retained ciphertext at the coordinates it covers. |
-| Direct-key substitution between articles | **Blocked at the issuer** | BIND ties each direct key to its signed render and content name. This is separate from period-key reuse within an access group. |
+| Content-key substitution between articles | **Blocked at the issuer** | BIND ties each item content key sealed for the issuer to its signed render and content name. This is separate from period-key reuse within an access group. |
 
-## What DCA does not protect against
+<a id="what-dca-does-not-protect-against"></a>
+## 7. What DCA does not protect against
 
-These are **accepted, by design**:
+These are **accepted, by design**. Each is something an authorized reader, or
+code acting with that reader's access, does with capability the issuer
+actually granted:
 
 | Attack | Why it's accepted |
 |--------|-------------------|
 | Authorized user copies decrypted text | Not DRM. As with any paywall, the user can screenshot, copy/paste or share. |
-| Reader shares returned access or key material | Direct delivery is comparable to sharing a login, session cookie or bearer token. Client-bound delivery raises the effort, but a rooted or modified browser can still use or relay the access. |
-| JS hooks reading DOM post-decrypt | Plaintext must reach the DOM to render. A sufficiently determined extension can read it. |
-| Issuer key compromise | If the issuer's private key leaks, they can unlock any content sealed for them. This is true of any asymmetric system. Mitigation: key rotation, key isolation per issuer. |
+| Reader shares returned access or key material | Direct transport mode is comparable to sharing a login, session cookie or bearer token. Client-bound transport mode makes a copied response unusable without the recipient private key, but the reader who controls the client needs no root access to use or relay the access. |
+| Script, extension or application code reads plaintext after opening | Plaintext must reach the application or DOM to be used. Code that runs with the reader's access there can read it. |
 
-## Limitations and consequences
+An issuer opening-key leak lets its holder open every value sealed for that
+key. That is a trust-root compromise ([Section 3](#trust-assumptions)), not
+reuse of a granted capability; rotation and a separate opening keyset per
+mutually untrusted publisher limit its reach.
 
-### Client-held decryption keys
+<a id="limitations-and-consequences"></a>
+## 8. Limitations and consequences
 
-Client-side decryption requires a usable browser capability. Direct delivery
-exposes raw key bytes before the client imports them; client-bound delivery can
-instead produce a non-extractable `CryptoKey`. Non-extractability prevents
-`exportKey`, not use or structured cloning by script that can reach the handle.
+<a id="client-held-decryption-keys"></a>
+### 8.1 Client-held decryption keys
 
-**Boundary**: A reader-controlled browser can use reachable key handles and
-copy plaintext. Rooted-device and browser-compromise resistance is outside the
+The host performing the DCA client role, a browser page, a native application
+or a server or edge process
+([deployment patterns](guide--deployment-patterns.md)), needs a usable key to
+open content. Direct transport exposes raw key bytes. Client-bound transport
+opens content and period keys to non-extractable handles and leaves a chain key
+usable as bytes
+([response binding Sections 4 and 6](spec--response-binding.md#4-selection-and-agreement)).
+A derivation key a selected profile defines, such as a content-group chain or
+period key, also stays usable as bytes.
+Non-extractability prevents `exportKey`, not use or structured cloning by
+script that can reach a handle.
+
+**Boundary**: Whoever controls the client can use the keys and handles it
+reaches and can copy plaintext ([Section 5](#choosing-the-operating-boundary)).
+Resistance to a compromised device, browser or server host is outside the
 base model.
 
-### Replay limits
+<a id="replay-limits"></a>
+### 8.2 Replay limits
 
-A captured unlock response contains exact periodKeys for the coordinates the
-issuer returned. Those keys continue to open retained ciphertext sealed under
-those same publisher, access-group and period coordinates. A rollover only
-prevents them from opening renders sealed solely under later labels.
+A captured unlock response carries the keys the issuer returned for its
+coordinates: item content keys, period keys or, under the optional
+extension, chain keys. In direct transport mode whoever holds the capture
+holds those key bytes. A captured client-bound response supplies no usable
+key by itself; opening it takes the recipient private key. A period key
+obtained this way opens any matching ciphertext whose item content key is
+wrapped under the same period-key bytes for its publisher, access group and
+period coordinate, including ciphertext produced after the grant. A period
+rollover prevents it from opening renders sealed solely under later labels, and a new
+family generation keeps it out of later renders at the same labels
+([spec-profile--period-keys.md](spec-profile--period-keys.md#base-period-key-requirements)).
+Neither step, nor key retirement or a later loss of entitlement, revokes a
+delivered key: it still opens any ciphertext matching its reach, whether
+already retained or obtained later
+([period keys Section 11](spec-profile--period-keys.md#capability-lifecycle)).
 
 **Consequence**: Replaying the response does not widen the coordinates it
-already granted. A period-chain grant can deliberately reach a bounded set of
-earlier periods; that separate reach is defined by the optional extension.
+already granted. A chain key reaches back through its window to the window
+start by design
+([chain keys Section 5.3](spec-profile--chain-keys.md#capability-reach)).
 
-### Unlock-endpoint rate limiting
+<a id="publisher-signing-key-compromise"></a>
+### 8.3 Publisher signing-key compromise
 
-DCA specifies no rate-limit algorithm. Deployments must enforce finite request
-and resource limits at the issuer boundary. The browser binding specifies the
-HTTPS request and admission ordering, while authentication, entitlement and
-rate-limit policy remain deployment-selected. The issuer can count key grants
-but not later cached-key use or plaintext copying. Limits are only as
-durable as the identity they count. Deployments choose that identity, their
-accounting rules, and what happens when a limit is reached.
-
-### Period-key compromise
-
-Disclosure of one exact periodKey exposes ciphertext sealed for its coordinate.
-No base operation derives another period's key from it. Compromise of an
-external key supplier has the reach of that supplier's own construction. The
-optional period-chain extension separately defines the bounded cross-period
-reach of its `keyDerivationSecret` construction.
-
-**Boundary**: Base does not turn one disclosed periodKey into authority
-over other periods. Implementations still have to protect the key source they
-choose, and extensions account for any wider compromise reach they introduce.
-
-### Publisher signing-key compromise
-
-DCA treats the honest publisher's signing key as a trust root. Its compromise
+DCA treats the publisher's signing key as a trust root. Its compromise
 lets an attacker forge publisher-signed resource claims, but does not reveal an
-issuer private key, independently supplied exact period-key material, or
+issuer private key, independently supplied period-key material, or
 plaintext by itself;
 key delivery still passes through an issuer's policy and opening operation.
 Containing that compromise, for example by keeping browser origins in
 issuer-held registration, may reduce blast radius, but is defense in depth,
-not a base-protocol requirement under this threat model.
+not a base-protocol requirement under this security model.
 
-**Why it's accepted**: Operational key protection, rotation and incident
-response remain required. DCA's mandatory boundary is evaluated while the
-configured trust roots are controlled by their owners.
+**Model boundary**: the signing key is a trust root
+([Section 3](#trust-assumptions)).
 
-### IV and nonce reuse
+<a id="error-response-information-leakage"></a>
+### 8.4 Error-response information leakage
 
-**Content encryption**: each content key is independently generated per item
-and render, and the publisher samples a fresh 96-bit nonce for every
-encryption. Repeating a nonce
-under different independent keys does not repeat the AES-GCM key/nonce pair.
-Production generators and profile invocation bounds still apply; random
-sampling makes collision improbable, not impossible.
+Different externally visible failures can become a probing oracle. Envelope
+opening exposes one generic failure
+([sealed-key envelopes](spec--sealed-key-envelopes.md#6-opening-and-failure)
+Section 6), failure detail stays within
+[core Section 8](spec--core-protocol.md#8-failure-model), and the HTTPS endpoint
+binding recommends coarse bodies
+([HTTP binding Section 4](spec--http-binding.md#4-security-considerations-failures-and-privacy)). A
+`notDelivered` reason
+([period keys Section 5.6](spec-profile--period-keys.md#56-family-reports-notdelivered))
+tells the caller, including a browser reader, whether a presented family was
+denied or unavailable; the deployment accepts that disclosure.
 
-**Exact-period wrapping** (`contentData[contentName].keys`): each entry samples
-a fresh 96-bit nonce, but one exact period key is reused by design across many
-items and renders. Its random-bit-generator-based AES-GCM invocation count
-therefore accumulates across every node, restart, replacement and backfill that
-uses those key bytes. The publisher must enforce the selected profile's
-aggregate bound; it must not claim that nonce reuse is impossible.
+<a id="what-opening-proves"></a>
+### 8.5 What opening proves
 
-All content and wrap nonces are produced by the publisher and carried in the
-delivery. The client does not derive them.
+Opening an item verifies its ciphertext under the held content key, the
+implicit twelve-zero-octet nonce and content AAD built from the delivery's
+`renderId` and item name. A complete item record moved to another slot or render therefore fails, even when
+a cached period key recovers the content key without contacting an issuer.
+The tag does not bind type, encoding list or other JWT claims. Altering such
+admitted metadata can change handling or decoding without authentication
+failure or a new key grant. Opening shows neither publisher authorship nor
+page placement: a holder of the content
+key can build another valid tuple
+([content protection Sections 3.2 and 9](spec--content-protection.md#32-content-aad)).
+The following cases require separate consideration:
 
-### Error-response information leakage
+- **A detached copy.** A saved or forwarded delivery opens under a held key
+  wherever the client finds it. A successful opening says nothing about where
+  that copy came from.
+- **Signed resource claims.** `resourceJWT` authenticates the publisher's
+  claims to the issuer, which verifies it under the registered signing key. A
+  baseline client need not verify it. The client decodes and admits `renderId`
+  for content AAD; other claims and token spelling are outside that tag. A
+  decoded but unverified payload supplies no publisher identity or origin
+  ([core Section 2.2](spec--core-protocol.md#22-client),
+  [Section 4.2](spec--core-protocol.md#42-verification-and-registration)).
+- **Trusted source retrieval.** A client that must know where a delivery came
+  from, such as a server client whose output reaches other readers,
+  establishes that itself by retrieving the delivery from a source it trusts.
+  The selected DCA profiles leave this retrieval procedure to the client.
 
-Different externally visible failures can become a probing oracle. The issuer
-must use the generic opening failure required by
-[the sealed-envelope specification](spec--sealed-key-envelopes.md#6-opening-and-failure),
-and the browser binding requires unauthenticated and unauthorized bodies to be
-coarse enough not to expose sensitive policy state.
+<a id="industry-context"></a>
+## 9. Industry context
 
-## Industry context
+DCA applies an established envelope-encryption pattern;
+[deployment patterns](guide--deployment-patterns.md#how-this-relates-to-familiar-deployments)
+compares it with familiar deployments.
 
-DCA applies an established envelope-encryption pattern: the publisher encrypts
-content under a data key and carries key access separately for authorized
-recipients. Familiar analogies include:
+<a id="cryptographic-primitives"></a>
+## 10. Cryptographic primitives
 
-- **Encrypted messaging:** Encrypt a message with a random symmetric key, then
-  protect that key separately for each recipient. DCA similarly protects a
-  content key separately for each issuer.
-- **Managed envelope encryption:** Encrypt data with a data key, then protect
-  that data key under separately controlled key-encryption material. DCA uses
-  the same broad separation while assigning its actors different duties.
+The following core mechanisms use standard cryptographic primitives available
+through WebCrypto. Selected profiles define their additional constructions and
+security considerations in their own specifications:
 
-These are architectural analogies, not claims that those systems provide DCA's
-protocol properties.
+| Operation | Primitive | Defined in |
+|-----------|-----------|------------|
+| Content encryption | AES-128-GCM | content protection Section 3 |
+| Period key wrapping a content key | AES-128-GCM under a 16-octet period key | content protection Section 4; period keys Section 6.2 |
+| Publisher-to-issuer ECDH envelope | P-256 ECDH raw 32-byte shared x-coordinate + AES-256-GCM | sealed-key envelopes Section 4 |
+| Publisher-to-issuer RSA envelope | RSA-OAEP with SHA-256 | sealed-key envelopes Section 5 |
+| Optional issuer-to-client transport | Selected response-binding profile | response binding Sections 6-8 |
+| Resource signing | ES256 (ECDSA P-256) | core Sections 4.1-4.2; browser-origin Section 2.3 |
 
-## Cryptographic primitives
-
-DCA uses standard, widely deployed primitives exposed by WebCrypto. The
-specifications and the reference tests cover its security-critical DCA-specific
-composition, including BIND and the fixed ECDH transcript:
-
-| Operation | Primitive | Notes |
-|-----------|-----------|-------|
-| Content encryption | AES-128-GCM | Fresh 16-octet content key per item and render. |
-| Exact period key wrapping a content key | AES-128-GCM under a 16-octet exact period key | Random 96-bit nonce; cumulative per-key invocation bound. |
-| Publisher-to-issuer ECDH envelope | P-256 ECDH raw 32-byte shared x-coordinate + AES-256-GCM | No KDF; BIND is GCM additional data. |
-| Publisher-to-issuer RSA envelope | RSA-OAEP with SHA-256 | Recovered BIND and payload share one OAEP plaintext. |
-| Optional issuer-to-client transport | Selected response-binding profile | Direct bytes or a separately identified client-bound construction; not inferred from publisher envelopes. |
-| Resource signing | ES256 (ECDSA P-256) | Authenticates registered publisher claims; the browser profile compares the signed delivery origin with the observed `Origin`. |
-
-DCA v1 fixes delivered `contentKey`, exact `periodKey` and positioned
-`periodChainKey` values at 16 octets. This is a 128-bit classical symmetric-key
-target. Fixed width avoids another interoperable state without a current
-requirement and saves bytes in every wrapped key payload; it is not negotiated
-per render or inferred from key length. A new strength target needs a new
-suite/specification version. The retained `keyDerivationSecret` remains 32 octets;
-the Root operation instead produces the 16-octet terminal/root state.
-The publisher-to-issuer ECDH envelope key and the issuer-to-client HKDF
-transport key both use AES-256-GCM; delivered client-bound handles use AES-128.
+Delivered `contentKey`, `periodKey` and positioned `chainKey` values are 16
+octets in v1 ([sealed-key envelopes](spec--sealed-key-envelopes.md) Section 2),
+a 128-bit classical symmetric-key target. One fixed width gives every producer
+and consumer one delivered-key contract and saves bytes in every wrapped
+payload; another width or security target needs a new suite version
+(sealed-key envelopes Section 2). NIST uses AES-128 key search as its
+post-quantum
+[Category 1](https://csrc.nist.gov/projects/post-quantum-cryptography/post-quantum-cryptography-standardization/evaluation-criteria/security-%28evaluation-criteria%29)
+comparison reference
+([FAQ](https://csrc.nist.gov/Projects/Post-Quantum-Cryptography/faqs)); that is
+not a 128-bit quantum-security claim.
 
 V1 is not post-quantum: its P-256/RSA envelopes and ES256 signatures would need
-replacement. A later migration cannot revoke copied v1 artifacts or
-retroactively protect their recorded envelopes. Chain-state disclosure still
-reaches its bounded window prefix, while one exact leaf reaches one coordinate;
-equal widths do not equate these capabilities. BIND and the derivation contexts
-separate their roles, independently of length.
+replacement, and a migration cannot protect copied v1 artifacts. A disclosed
+chain key reaches its window prefix
+([chain keys Section 24.1](spec-profile--chain-keys.md#capability-monotonicity)), a
+period key one coordinate.
 
-Base defines no period-key derivation primitive. Each extension document
-inventories its own constructions.
+## 11. Normative References
+
+- [DCA core protocol](spec--core-protocol.md)
+- [DCA sealed key envelopes](spec--sealed-key-envelopes.md)
+- [DCA HTTP binding](spec--http-binding.md)
+- [DCA browser-origin profile](spec-profile--browser-origin.md)
+- [DCA response binding](spec--response-binding.md)
+- [DCA content protection](spec--content-protection.md)
+- [DCA period-key capabilities](spec-profile--period-keys.md)
+- [DCA chain keys: construction and delegation](spec-profile--chain-keys.md)
+
+## 12. Informative References
+
+- [RFC 3552: Guidelines for Writing RFC Text on Security Considerations](https://www.rfc-editor.org/info/rfc3552)
+- [NIST post-quantum security categories](https://csrc.nist.gov/projects/post-quantum-cryptography/post-quantum-cryptography-standardization/evaluation-criteria/security-%28evaluation-criteria%29)
+- [NIST post-quantum cryptography FAQ](https://csrc.nist.gov/Projects/Post-Quantum-Cryptography/faqs)
+- [DCA deployment patterns](guide--deployment-patterns.md)

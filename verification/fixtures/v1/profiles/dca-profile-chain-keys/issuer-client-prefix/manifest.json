@@ -1,0 +1,80 @@
+{
+  "schema": "dca-fixture-package-manifest/v1",
+  "package": "fixtures/v1/profiles/dca-profile-chain-keys/issuer-client-prefix",
+  "profile": "dca-profile-chain-keys",
+  "format": "chain-keys-prefix/v1",
+  "stability": "draft",
+  "scope": {
+    "roles": [
+      "issuer",
+      "client"
+    ],
+    "publisherSupply": "chain-key-only: one sealed chain member per render and one item wrap at the render's own coordinate; no sealed content key; no period-key member",
+    "transport": "direct",
+    "algorithms": [
+      "ecdh-p256",
+      "ES256",
+      "AES-128-GCM",
+      "HKDF-SHA-256"
+    ],
+    "geometry": {
+      "chainsPerDay": 2,
+      "periodMinutes": 15
+    },
+    "issuers": 1,
+    "steps": [
+      "thirteen renders: 12:00 through 14:15 (the prefix), 14:30, 11:45 and next-day 00:00",
+      "read 14:15 at issuer time 14:20: policy authorizes the prefix independently and selects zero future periods; the issuer returns the chain key at 14:15",
+      "read 12:00 through 14:00: each opens from the retained chain key with no issuer call",
+      "try 14:30, 11:45 and next-day 00:00 with no unlock: each stays missing and unopened; nothing retained changes"
+    ]
+  },
+  "provenance": {
+    "recorder": "js/tools/record-chain-keys-prefix.js",
+    "sourceCommit": "c69e610a70245c4ede2845b54fa4995d029c22a7",
+    "sourceScenario": "js/test-profiles/dca-profile-chain-keys.test.js",
+    "witness": "js/extensions/chain-keys/test/fixtures/dca-profile-chain-keys.vectors.json case c1"
+  },
+  "discovery": "a leaf root found by discoverFixturePackageRoots (js/test-tools/claim-index.js); verification/fixtures/v1/, v1/profiles/ and v1/profiles/dca-profile-chain-keys/ are path segments, not packages",
+  "members": [
+    {
+      "path": "exchange.json",
+      "sha256": "871c07fffed4a3f07a0ffdb43e76d2b0572c7f5cc976a7d183cdcf0a629c21d5"
+    },
+    {
+      "path": "expected.json",
+      "sha256": "4b4365587b02c0d0aac564d49be1a25ee70c870bdfeefb3bbb66c48576648f52"
+    },
+    {
+      "path": "inputs.json",
+      "sha256": "2d4e66b05534a7f7cc0e72e45102cae802bfac6362c4dcad509693e207278554"
+    },
+    {
+      "path": "renders.json",
+      "sha256": "12b1b4005741bd0f560ed74f53e59ff5842abac7f97a45c28b35e595a25a17dc"
+    }
+  ],
+  "consumers": [
+    {
+      "path": "js/test-vectors/chain-keys-prefix.test.js",
+      "role": "replay",
+      "description": "replays the recorded markup through the real Browser and IssuerServer, holds the assertions, and checks the recorded bytes against the witness with stock WebCrypto"
+    },
+    {
+      "path": "js/test-tools/record-chain-keys-prefix.test.js",
+      "role": "recorder self-test",
+      "description": "tests the package check: membership, checksums, regeneration and refusals"
+    },
+    {
+      "command": "node js/tools/record-chain-keys-prefix.js --check",
+      "role": "package check",
+      "description": "membership both ways, per-member sha256 and a fresh recording; writes nothing"
+    }
+  ],
+  "limitations": [
+    "All claim decisions are incomplete; this package decides no claim.",
+    "It is regression and provenance evidence for the JavaScript issuer and client, not independent conformance.",
+    "The publisher is not replayed: renders are recorded markup, and ES256 signatures are retained values, not reproducible bytes.",
+    "One geometry, one window, one cutoff, one issuer, direct transport and ECDH-P256 envelopes only; no client-bound transport and no rival generation."
+  ]
+}

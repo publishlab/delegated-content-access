@@ -1,0 +1,51 @@
+{
+  "version": 1,
+  "testCount": 48,
+  "tests": [
+    { "file": "test-reference/core-shared/aead.test.js" },
+    { "file": "test-reference/core-shared/binary-strings.test.js" },
+    { "file": "test-reference/core-shared/codec.test.js" },
+    { "file": "test-reference/core-shared/geometry-bounds.test.js" },
+    { "file": "test-reference/core-shared/names.test.js" },
+    { "file": "test-reference/core-shared/publisher-origin.test.js" },
+    { "file": "test-reference/adapter-client/periodkeys.test.js" },
+    { "file": "test-reference/core-shared/shared-primitive-misuse.test.js" },
+    { "file": "test-reference/core-shared/keySealing.test.js" }
+  ],
+  "required": [
+    { "module": "core-shared/aead.js", "exports": ["encrypt", "decrypt", "decryptToKey"] },
+    { "module": "core-shared/binaryStrings.js", "exports": ["binaryStringBytes"] },
+    {
+      "module": "core-shared/codec.js",
+      "exports": ["base64urlEncode", "base64urlDecode", "utf8Encode", "utf8Decode"]
+    },
+    { "module": "core-shared/geometryBounds.js", "exports": ["inspectPeriodGeometryBounds"] },
+    {
+      "module": "core-shared/names.js",
+      "exports": [
+        "isContentName",
+        "isAccessGroup",
+        "isIssuerName",
+        "validateContentName",
+        "validateAccessGroup",
+        "validateIssuerName",
+        "isResourceId"
+      ]
+    },
+    {
+      "module": "core-shared--client-publisher/names.js",
+      "exports": ["validateResourceId"]
+    },
+    {
+      "module": "core-shared--publisher-issuer/periodKeys.js",
+      "exports": ["formatT", "periodsFor", "currentT"]
+    },
+    { "module": "core-shared--publisher-issuer/bind.js", "exports": ["bindValue"] },
+    { "module": "core-shared/publisherOrigin.js", "exports": ["normalizePublisherOrigin"] },
+    {
+      "module": "core-shared/periodKeyProfiles.js",
+      "exports": ["periodKeyProfile"]
+    },
+    { "module": "core-shared/periodLabels.js", "exports": ["isPeriodKeyLabel"] }
+  ]
+}

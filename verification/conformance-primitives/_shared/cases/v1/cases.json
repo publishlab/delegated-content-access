@@ -91,11 +91,11 @@
       "op": "hkdf-sha256",
       "input": {
         "ikmBase64url": "BwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwc",
-        "infoBase64url": "AQATZGNhLXBlcmlvZC1jaGFpbi12MQAHcHJlbWl1bQACAA8Bv-bQAC8",
+        "infoBase64url": "AQATZGNhLXYxLXBlcmlvZC1jaGFpbgAHcHJlbWl1bQACAA8Bv-bQAC8",
         "length": 16
       },
       "expected": {
-        "okmBase64url": "DSpVKZ3ASKdochuahOYJlQ"
+        "okmBase64url": "54VH902u7z-akJ920DekeA"
       },
       "rationale": "32-octet ikm and a 41-octet info carrying 0x00 and octets above 0x7f; an implementation that routes info through a text string answers other bytes, and one that returns the whole 32-octet block instead of 16 octets fails here"
     },
@@ -106,11 +106,11 @@
       "op": "hkdf-sha256",
       "input": {
         "ikmBase64url": "BwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwc",
-        "infoBase64url": "AQATZGNhLXBlcmlvZC1jaGFpbi12MQALbG9ja2VkLWRhdGEABAAFAb_m0ABH",
+        "infoBase64url": "AQATZGNhLXYxLXBlcmlvZC1jaGFpbgALbG9ja2VkLWRhdGEABAAFAb_m0ABH",
         "length": 16
       },
       "expected": {
-        "okmBase64url": "NYSrM2IgPJPh4wVRYqm62g"
+        "okmBase64url": "XYicQsqgVqjumH5nnX401g"
       },
       "rationale": "a 45-octet info, longer than every other row; an implementation that reads info out of a fixed-width buffer or truncates it to 41 octets answers other bytes"
     },
@@ -121,11 +121,11 @@
       "op": "hkdf-sha256",
       "input": {
         "ikmBase64url": "BwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwc",
-        "infoBase64url": "AQATZGNhLXBlcmlvZC1jaGFpbi12MQAHcHJlbWl1bQABAAUBv-QAAR8",
+        "infoBase64url": "AQATZGNhLXYxLXBlcmlvZC1jaGFpbgAHcHJlbWl1bQABAAUBv-QAAR8",
         "length": 16
       },
       "expected": {
-        "okmBase64url": "j0Ds1HxVf5Y7v0gzDg1_sA"
+        "okmBase64url": "Y8u6GGSD9s2ugfh0Y9wr0A"
       },
       "rationale": "the same octet widths as the first row over other octets; it adds no byte-level distinction and stays as a recorded known answer of the construction"
     },
@@ -136,11 +136,11 @@
       "op": "hkdf-sha256",
       "input": {
         "ikmBase64url": "CAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAg",
-        "infoBase64url": "AQATZGNhLXBlcmlvZC1jaGFpbi12MQAHcHJlbWl1bQACAA8Bv-bQAC8",
+        "infoBase64url": "AQATZGNhLXYxLXBlcmlvZC1jaGFpbgAHcHJlbWl1bQACAA8Bv-bQAC8",
         "length": 16
       },
       "expected": {
-        "okmBase64url": "waN292hPmglay75Xeiwm7Q"
+        "okmBase64url": "-WMuUtdBqxeyrB25cyD1MA"
       },
       "rationale": "the first row's info octets with different key material; an implementation that passes ikm as the salt, or derives from info alone, answers the two rows alike"
     },
@@ -150,12 +150,12 @@
       "label": "one Step into position zero",
       "op": "hkdf-sha256",
       "input": {
-        "ikmBase64url": "srHyhGfN6KKAOgBnF4XEng",
-        "infoBase64url": "AgATZGNhLXBlcmlvZC1jaGFpbi12MQAHcHJlbWl1bQACAA8Bv-bQAAA",
+        "ikmBase64url": "Gbt_C2J415XR3SL2Q-hdBw",
+        "infoBase64url": "AgATZGNhLXYxLXBlcmlvZC1jaGFpbgAHcHJlbWl1bQACAA8Bv-bQAAA",
         "length": 16
       },
       "expected": {
-        "okmBase64url": "wGwweDXdPQ-HqlCPVAa05A"
+        "okmBase64url": "bSEVzvlreWqV8XXEW_AipQ"
       },
       "rationale": "16-octet ikm, half the width the four rows above supply; an implementation that accepts one fixed key width, or pads a short ikm to 32 octets, answers other bytes"
     },
@@ -165,12 +165,12 @@
       "label": "one Step whose supplied state is position ten",
       "op": "hkdf-sha256",
       "input": {
-        "ikmBase64url": "IWCmrt9__ksZ-bbz8iDFHA",
-        "infoBase64url": "AgATZGNhLXBlcmlvZC1jaGFpbi12MQAHcHJlbWl1bQACAA8Bv-bQAAk",
+        "ikmBase64url": "m1CO_z2WhE7hvYGBzvPn7A",
+        "infoBase64url": "AgATZGNhLXYxLXBlcmlvZC1jaGFpbgAHcHJlbWl1bQACAA8Bv-bQAAk",
         "length": 16
       },
       "expected": {
-        "okmBase64url": "u2Pe_AoXrnArak89uEc07Q"
+        "okmBase64url": "vilLfeh-GDlTT8YpgCnHBQ"
       },
       "rationale": "a second row at the 16-octet ikm width; it adds no byte-level distinction and stays as a recorded known answer of the construction"
     },
@@ -180,12 +180,12 @@
       "label": "one Step from the terminal state",
       "op": "hkdf-sha256",
       "input": {
-        "ikmBase64url": "DSpVKZ3ASKdochuahOYJlQ",
-        "infoBase64url": "AgATZGNhLXBlcmlvZC1jaGFpbi12MQAHcHJlbWl1bQACAA8Bv-bQAC4",
+        "ikmBase64url": "54VH902u7z-akJ920DekeA",
+        "infoBase64url": "AgATZGNhLXYxLXBlcmlvZC1jaGFpbgAHcHJlbWl1bQACAA8Bv-bQAC4",
         "length": 16
       },
       "expected": {
-        "okmBase64url": "gJJhKCX2mAGNVS8dCQu1Pw"
+        "okmBase64url": "6C8D10P6Bm9D_Wv0jQ4JBA"
       },
       "rationale": "a third row at the 16-octet ikm width, its ikm the first row's output; it adds no byte-level distinction and stays as a recorded known answer of the construction"
     },
@@ -195,12 +195,12 @@
       "label": "a Leaf at position zero",
       "op": "hkdf-sha256",
       "input": {
-        "ikmBase64url": "wGwweDXdPQ-HqlCPVAa05A",
-        "infoBase64url": "AwATZGNhLXBlcmlvZC1jaGFpbi12MQAHcHJlbWl1bQACAA8Bv-bQAAA",
+        "ikmBase64url": "bSEVzvlreWqV8XXEW_AipQ",
+        "infoBase64url": "AwATZGNhLXYxLXBlcmlvZC1jaGFpbgAHcHJlbWl1bQACAA8Bv-bQAAA",
         "length": 16
       },
       "expected": {
-        "okmBase64url": "GgOhN82qi6WwfAHOKFSSOw"
+        "okmBase64url": "LpNZu2wmGaJHxVkIpdivwQ"
       },
       "rationale": "the info of the fifth row under one other leading octet, at the same widths; it adds no byte-level distinction and stays as a recorded known answer of the construction"
     },
@@ -210,12 +210,12 @@
       "label": "a Leaf at an interior fifteen-minute position",
       "op": "hkdf-sha256",
       "input": {
-        "ikmBase64url": "u2Pe_AoXrnArak89uEc07Q",
-        "infoBase64url": "AwATZGNhLXBlcmlvZC1jaGFpbi12MQAHcHJlbWl1bQACAA8Bv-bQAAk",
+        "ikmBase64url": "vilLfeh-GDlTT8YpgCnHBQ",
+        "infoBase64url": "AwATZGNhLXYxLXBlcmlvZC1jaGFpbgAHcHJlbWl1bQACAA8Bv-bQAAk",
         "length": 16
       },
       "expected": {
-        "okmBase64url": "qf4sGKrZcgZ9Et9Ca2Lz9g"
+        "okmBase64url": "Nmy8sWt3wS2y_xpmEJpZvw"
       },
       "rationale": "a 41-octet info and a 16-octet ikm once more; it adds no byte-level distinction and stays as a recorded known answer of the construction"
     },
@@ -225,12 +225,12 @@
       "label": "a Leaf at a five-minute terminal position",
       "op": "hkdf-sha256",
       "input": {
-        "ikmBase64url": "NYSrM2IgPJPh4wVRYqm62g",
-        "infoBase64url": "AwATZGNhLXBlcmlvZC1jaGFpbi12MQALbG9ja2VkLWRhdGEABAAFAb_m0ABH",
+        "ikmBase64url": "XYicQsqgVqjumH5nnX401g",
+        "infoBase64url": "AwATZGNhLXYxLXBlcmlvZC1jaGFpbgALbG9ja2VkLWRhdGEABAAFAb_m0ABH",
         "length": 16
       },
       "expected": {
-        "okmBase64url": "C6YjvhyoGnAuHOKhL2Zh0Q"
+        "okmBase64url": "vb6fcafG5IFa_wxKp82p5g"
       },
       "rationale": "a second 45-octet info, the width the second row already covers; it adds no byte-level distinction and stays as a recorded known answer of the construction"
     },
@@ -240,12 +240,12 @@
       "label": "a Leaf at a 288-position terminal",
       "op": "hkdf-sha256",
       "input": {
-        "ikmBase64url": "j0Ds1HxVf5Y7v0gzDg1_sA",
-        "infoBase64url": "AwATZGNhLXBlcmlvZC1jaGFpbi12MQAHcHJlbWl1bQABAAUBv-QAAR8",
+        "ikmBase64url": "Y8u6GGSD9s2ugfh0Y9wr0A",
+        "infoBase64url": "AwATZGNhLXYxLXBlcmlvZC1jaGFpbgAHcHJlbWl1bQABAAUBv-QAAR8",
         "length": 16
       },
       "expected": {
-        "okmBase64url": "k2HX6xpm9raGfYrA72zF1g"
+        "okmBase64url": "Z2bI-fVIlizdnuGooxMEnA"
       },
       "rationale": "the one-chain geometry's 41-octet info at the widths above; it adds no byte-level distinction and stays as a recorded known answer of the construction"
     },
@@ -401,6 +401,26 @@
         "pointBase64url": "BP_rrpHAnCFcf8NeehDgUG3w9ktUCbb_1LNPIX5pT8u7s5xZErWJNnNAJfmyMYNXO4LYDDMaasFJMMGHk63Fqho"
       },
       "rationale": "the uncompressed SEC 1 encoding: the octet 0x04 and two 32-octet coordinates; a bridge that answers a compressed point, or that leaves the leading octet off, answers a different length. These are the 65 octets that lead the recorded sealed carrier."
+    },
+    {
+      "id": "ecdh/04",
+      "set": "ecdh",
+      "label": "agreement with a leading-zero shared x-coordinate",
+      "op": "ecdh-p256",
+      "input": {
+        "privateKeyJwk": {
+          "kty": "EC",
+          "crv": "P-256",
+          "x": "KnsL031lVTbNxwtMq3OQmFq-fyPVh3k1__Adl4ieLXw",
+          "y": "-aNkTV8wd6O2rTWc2jkpJgez4Cuvas4J8_Styi-cdsE",
+          "d": "iWEhz6AHq-n4l_YzhTZcyQH7O9B1A1AKl4maOJh3z5g"
+        },
+        "peerPointBase64url": "BC8n_T_0Yaclf4IgFWisUAPRKxYi0D7Ns3tJ6rJgQmPBJ9neOqYQCreKcyZ5kIxMO34kNS9zJvjwOT67XOc2fL4"
+      },
+      "expected": {
+        "sharedSecretBase64url": "AJnDbJotM7cnlL2dh4Oyqh0mTjPpxhL5IZD1oGCTmfc"
+      },
+      "rationale": "The ecdh-p256 operation in verification/conformance-primitives/_shared/contract/v1/bridge.md requires the shared x-coordinate at exactly 32 octets. This answer begins with 0x00; a bridge that returns a minimal-width integer drops that octet and disagrees."
     },
     {
       "id": "rsa-oaep/01",

@@ -43,9 +43,9 @@ import { OPERATION_SHAPES, validateResults } from './validate-results.mjs';
 export const CONFORMANCE_DIR = fileURLToPath(new URL('../..', import.meta.url));
 
 // Where each lane's bridge lives, discovered rather than written down here. An
-// immediate child directory of the conformance dir that carries a `bridge.json`
-// is a lane; a child directory without one is not a lane and is skipped without
-// comment. This mirrors how `check` discovers a lane by its executable `check`,
+// immediate child or runtime/binding directory carrying a `bridge.json` is a
+// lane; directories without one are skipped. This mirrors how `check`
+// discovers a lane by its executable `check`,
 // so a bridge and a lane's own gate are found the same way and neither list has
 // to be kept in step with the tree. A lane may carry a `bridge.json` before its
 // `script` lands, and that is what separates an `UNAVAILABLE` bridge from an
@@ -57,11 +57,24 @@ export const CONFORMANCE_DIR = fileURLToPath(new URL('../..', import.meta.url));
 //             unavailable
 //   command   what is started to answer a batch: a path inside the conformance
 //             directory, or absolute
-//   operations  every operation the bridge implements; an empty array is
-//               valid only for an intentionally unavailable operation surface
+//   members   the parts of this binding that answer operations, as
+//             { name: one line saying what it is }, for example
+//             { "openssl": "ext/openssl", "lane": "code written in this lane" };
+//             a name is lowercase letters and digits
+//   operations  every operation the bridge implements, as { operation: member
+//               name }; every value names a key of `members`, and every member
+//               answers at least one operation. An empty `members` beside an
+//               empty `operations` is valid only for an intentionally
+//               unavailable operation surface
 //   prepare   optional: { command, args? }, a command that runs once, outside
 //             the batch's time, to turn `script` into something `command` can
 //             run
+//
+// `members` and the member each operation names are harness metadata: the
+// record carries them, and no bridge is ever asked who answered. The entry
+// keeps `operations` as a list of names in manifest order, because selection
+// only asks whether an operation is declared; `answeredBy` maps each
+// operation to its member name and `members` carries the descriptions.
 //
 // A member this shape does not name, at either level, is refused rather than
 // silently carried or dropped, the same closed-shape rule the rest of this
@@ -70,15 +83,24 @@ export const CONFORMANCE_DIR = fileURLToPath(new URL('../..', import.meta.url));
 // value that is not a JSON object, a missing string `script` or `command`, or
 // an unnamed member. `runConformance` turns that throw into a refusal rather
 // than letting a broken manifest crash the process.
-const MANIFEST_MEMBERS = ['script', 'command', 'operations', 'prepare'];
+const MANIFEST_MEMBERS = ['script', 'command', 'members', 'operations', 'prepare'];
+// A member name travels into a lane record as `member=<name>`, which the shell
+// aggregator splits on spaces and `=`, so it stays one plain token.
+const MEMBER_NAME = /^[a-z0-9]+$/;
 const PREPARE_MEMBERS = ['command', 'args'];
 
 export function loadBridges(conformanceDir) {
     const bridges = {};
-    const lanes = readdirSync(conformanceDir, { withFileTypes: true })
+    const runtimeDirs = readdirSync(conformanceDir, { withFileTypes: true })
         .filter((entry) => entry.isDirectory())
         .map((entry) => entry.name)
         .sort();
+    const lanes = runtimeDirs.flatMap((runtime) => [
+        runtime,
+        ...readdirSync(join(conformanceDir, runtime), { withFileTypes: true })
+            .filter((entry) => entry.isDirectory())
+            .map((entry) => `${runtime}/${entry.name}`),
+    ]).sort();
 
     for (const lane of lanes) {
         const manifestPath = join(conformanceDir, lane, 'bridge.json');
@@ -111,19 +133,9 @@ export function loadBridges(conformanceDir) {
         if (typeof manifest.command !== 'string' || manifest.command === '') {
             throw new Error(`lane ${lane}: bridge.json is missing a string "command".`);
         }
-        if (!Array.isArray(manifest.operations)) {
-            throw new Error(`lane ${lane}: bridge.json is missing an "operations" array.`);
-        }
-        const operations = [];
-        for (const operation of manifest.operations) {
-            if (typeof operation !== 'string' || !Object.hasOwn(OPERATION_SHAPES, operation)) {
-                throw new Error(`lane ${lane}: bridge.json carries an unknown operation: ${JSON.stringify(operation)}.`);
-            }
-            if (operations.includes(operation)) {
-                throw new Error(`lane ${lane}: bridge.json names operation ${operation} more than once.`);
-            }
-            operations.push(operation);
-        }
+        const members = readMembers(lane, manifest.members);
+        const answeredBy = readOperations(lane, manifest.operations, members);
+        const operations = Object.keys(answeredBy);
 
         let prepare;
         if (manifest.prepare !== undefined) {
@@ -151,11 +163,78 @@ export function loadBridges(conformanceDir) {
             script: manifest.script,
             command: manifest.command,
             operations,
+            members,
+            answeredBy,
             ...(prepare ? { prepare } : {}),
         };
     }
 
     return bridges;
+}
+
+function isPlainObject(value) {
+    return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+// `members`: which parts of the binding answer, each described in one line.
+// The description is for a reader of bridge.json; only the name reaches a
+// record.
+function readMembers(lane, given) {
+    if (!isPlainObject(given)) {
+        throw new Error(`lane ${lane}: bridge.json is missing a "members" object.`);
+    }
+    const names = Object.keys(given);
+    const members = {};
+    for (const name of names) {
+        if (!MEMBER_NAME.test(name)) {
+            throw new Error(
+                `lane ${lane}: bridge.json's member ${JSON.stringify(name)} is not a name of lowercase letters and digits.`,
+            );
+        }
+        const description = given[name];
+        if (typeof description !== 'string' || description.trim() === '' || /[\r\n]/.test(description)) {
+            throw new Error(`lane ${lane}: bridge.json's member ${name} is not described: its value is one non-empty line.`);
+        }
+        members[name] = description;
+    }
+    return members;
+}
+
+// `operations`: which member answers each declared operation. The earlier
+// shape was an array of names, and one still written that way is told so
+// rather than read as an empty map.
+function readOperations(lane, given, members) {
+    if (Array.isArray(given)) {
+        throw new Error(
+            `lane ${lane}: bridge.json's "operations" is an array; `
+            + 'it is now an object naming the member that answers each operation.',
+        );
+    }
+    if (!isPlainObject(given)) {
+        throw new Error(`lane ${lane}: bridge.json is missing an "operations" object.`);
+    }
+    const operations = Object.keys(given);
+    const answeredBy = {};
+    for (const operation of operations) {
+        if (!Object.hasOwn(OPERATION_SHAPES, operation)) {
+            throw new Error(`lane ${lane}: bridge.json carries an unknown operation: ${JSON.stringify(operation)}.`);
+        }
+        const member = given[operation];
+        if (typeof member !== 'string' || !Object.hasOwn(members, member)) {
+            throw new Error(
+                `lane ${lane}: bridge.json's operation ${operation} names member ${JSON.stringify(member)}, `
+                + 'which "members" does not declare.',
+            );
+        }
+        answeredBy[operation] = member;
+    }
+    // A member that answers nothing would print as part of the binding in its
+    // README and never appear in a record.
+    const idle = Object.keys(members).find((name) => !Object.values(answeredBy).includes(name));
+    if (idle !== undefined) {
+        throw new Error(`lane ${lane}: bridge.json's member ${idle} answers no operation.`);
+    }
+    return answeredBy;
 }
 
 export const RUN_EXIT = { held: 0, disagreed: 1, incomplete: 2 };
@@ -484,27 +563,48 @@ export function printStderr(write, who, text) {
 // the verdict, and a reader that stopped reading does not change it.
 const guardedStreams = new WeakSet();
 
-export function lineWriter(stream) {
+export function lineWriter(stream, onError = (error) => { throw error; }) {
+    function handleError(error) {
+        if (error && (error.code === 'EPIPE' || error.code === 'ERR_STREAM_DESTROYED')) return;
+        onError(error);
+    }
     if (!guardedStreams.has(stream)) {
         guardedStreams.add(stream);
-        stream.on('error', rethrowUnlessClosed);
+        stream.on('error', handleError);
     }
     return (line) => {
         try {
             stream.write(`${line}\n`);
         } catch (error) {
-            rethrowUnlessClosed(error);
+            handleError(error);
         }
     };
-}
-
-function rethrowUnlessClosed(error) {
-    if (error && (error.code === 'EPIPE' || error.code === 'ERR_STREAM_DESTROYED')) return;
-    throw error;
 }
 
 // When this file is started as a program rather than imported, the whole entry point
 // is here: the arguments come in, the exit code goes out.
 if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
-    process.exitCode = await runConformance({ argv: process.argv.slice(2) });
+    let infrastructureFailed = false;
+    function incomplete(error) {
+        if (infrastructureFailed) return;
+        infrastructureFailed = true;
+        process.exitCode = RUN_EXIT.incomplete;
+        // The diagnostic stream may itself be the failed infrastructure. Report
+        // once, without recursively writing again if that stream cannot write.
+        try {
+            process.stderr.write(`INCOMPLETE: the driver failed unexpectedly: ${error?.message ?? String(error)}\n`);
+        } catch {
+            // The exit code still states that verification was incomplete.
+        }
+    }
+    try {
+        const exit = await runConformance({
+            argv: process.argv.slice(2),
+            out: lineWriter(process.stdout, incomplete),
+            err: lineWriter(process.stderr, incomplete),
+        });
+        process.exitCode = infrastructureFailed ? RUN_EXIT.incomplete : exit;
+    } catch (error) {
+        incomplete(error);
+    }
 }

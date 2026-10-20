@@ -1,0 +1,48 @@
+{
+  "name": "reject-no-coordinate",
+  "vectorFormat": "2",
+  "derivedFrom": "seal-ecdh",
+  "description": "An unlock request that asks for no coordinate at all: a verified envelope, the issuerName and keyId of this issuer, and sealed.contentKeys as the empty map with no periodKeys section beside it. WHERE IT COMES FROM. A client that resolved every contentName out of its own cache and posted anyway, a request whose sealed section a proxy stripped, and a caller probing the endpoint for what it will verify for free. The first is the one that happens: the shipped client sends no request when it needs nothing, so a body like this is a second implementation of the client or a hand-written one. The issuer admits the request shape before policy, BIND construction or private-key work, and a request with no coordinate in it has nothing to admit. It is refused whole with binding_failed, the same code every other unrepresentable coordinate in this directory is refused with. WHAT THE REFUSAL IS WORTH. An answered empty request is a signature verification and a policy call the caller gets for nothing, repeatable as fast as it can post, and an empty 200 a client cannot tell apart from a grant of nothing. Refusing it keeps the endpoint answering requests for keys. NOT CONFORMANT: 200 with an empty keys section, and reaching the issuer private key. REPLAY. Post `rawBody` VERBATIM - the string as it sits in this file, never a re-serialization of it - to the unlock endpoint, with `issuer` as the key material the issuer holds for its own name and keyId, and `publisher.signingKeys` as the public verification halves, read straight from this file rather than resolved by a deployment lookup. A pass is: expected.code where there is one; key material back for exactly the coordinates in expected.keys and no others; and an error back for exactly the coordinates in expected.errors, under the codes recorded there. No publisher private key is in this file, on purpose: an issuer never holds one, so everything a reject vector asks for is checkable with what a real issuer has. HOW FAR THE REFUSAL REACHES IS PART OF WHAT IS PINNED, and expected.privateKeyReached says which side of the line this body lands on. A request that fails integrity - a signature that does not verify, a signed resource with no renderId to bind to - has asked nothing that could be answered, so it is refused whole and before the key store is consulted at all. A blob presented at a coordinate it was not sealed at is one bad blob in an ordinary request: the only way to find out is to try it, so the key store is reached, the blob comes back as an error, and everything else the request carried is answered beside it. The untouched coordinates were never the attack, and a page has to keep working around one bad blob, so they are answered. Everything in the body but the attack is the render this vector was cut from - the envelope, the periodKeys section and the untouched blobs are what the publisher emitted. An unchanged regeneration retains the valid resourceJWT signature segment inside rawBody, so the body is byte-stable with seal-ecdh.json. A fresh seal still draws a new k, which is why a replayer verifies the segment rather than comparing it. The token is the one in the base vector from the same run, byte for byte, except in reject-no-renderid, reject-renderid-noncanonical and reject-renderid-wrong-width, whose envelopes are second tokens signed over resources with the renderId removed, given a noncanonical spelling, or resized, which is each vector's whole subject; in reject-forged-resourcejwt, whose signature segment was drawn by a key the publisher does not hold; in reject-tampered-resourcejwt, which carries the seal-ecdh token's own signature segment under a payload edited after signing; and in the two reject-alg-substituted arms, which carry that token's payload segment under a header rewritten to name another algorithm, with a third segment that is empty or a MAC - neither of which moves between runs.",
+  "issuer": {
+    "issuerName": "paywall_subscription_service",
+    "keyId": "2025-10",
+    "algorithm": "ecdh-p256",
+    "publicKeyJwk": {
+      "kty": "EC",
+      "crv": "P-256",
+      "x": "KnsL031lVTbNxwtMq3OQmFq-fyPVh3k1__Adl4ieLXw",
+      "y": "-aNkTV8wd6O2rTWc2jkpJgez4Cuvas4J8_Styi-cdsE"
+    },
+    "privateKeyJwk": {
+      "kty": "EC",
+      "crv": "P-256",
+      "x": "KnsL031lVTbNxwtMq3OQmFq-fyPVh3k1__Adl4ieLXw",
+      "y": "-aNkTV8wd6O2rTWc2jkpJgez4Cuvas4J8_Styi-cdsE",
+      "d": "iWEhz6AHq-n4l_YzhTZcyQH7O9B1A1AKl4maOJh3z5g"
+    }
+  },
+  "publisher": {
+    "origin": "https://www.news-site.example",
+    "signingKeys": [
+      {
+        "kid": "sign-2025-10",
+        "publicKeyJwk": {
+          "kty": "EC",
+          "crv": "P-256",
+          "x": "wjapTnuqn7FYYz7TbSiG283dToV0I1zpHoiVpbYGUYU",
+          "y": "9vgUr7XBOhco_Pf-7CczUPW8tmscQKhkiK0zybXWVCI"
+        }
+      }
+    ]
+  },
+  "rawBody": "{\n  \"version\": \"1\",\n  \"issuerName\": \"paywall_subscription_service\",\n  \"resourceJWT\": \"eyJhbGciOiJFUzI1NiIsInR5cCI6IkpXVCIsImtpZCI6InNpZ24tMjAyNS0xMCJ9.eyJyZW5kZXJJZCI6InVVVDU3Nk8zNEJvR0twZ1hwZE11Y3ciLCJvcmlnaW4iOiJodHRwczovL3d3dy5uZXdzLXNpdGUuZXhhbXBsZSIsImlzc3VlZEF0IjoiMjAyNS0xMC0yM1QxNDowMDowMC4wMDBaIiwicmVzb3VyY2VJZCI6IjEyMzQ1NiIsImRhdGEiOnsiZGF0ZS5wdWJsaXNoZWQiOiIyMDI1LTEwLTIwVDEwOjMwOjAwWiIsInNlY3Rpb24iOiJwb2xpdGljcyIsInRhZ3MiOlsiYnJlYWtpbmciLCJlbGVjdGlvbnMiXX19.J2wve9h-80DsFuL9VHtY8X5jYpTDierdPyigKhQFaocp-EnSJlRNTPs5yNmSVF_HrinwqfN84rzalG5l0osBFQ\",\n  \"keyId\": \"2025-10\",\n  \"sealed\": {\n    \"contentKeys\": {}\n  }\n}",
+  "expected": {
+    "code": "binding_failed",
+    "keys": {
+      "contentKeys": [],
+      "periodKeys": {}
+    },
+    "errors": {},
+    "privateKeyReached": false
+  }
+}

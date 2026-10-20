@@ -1,0 +1,18 @@
+{
+    "script": "python/cryptography/v1/bridge.py",
+    "command": "python/cryptography/v1/bridge",
+    "prepare": { "command": "python/cryptography/install-libraries" },
+    "members": {
+        "cryptography": "pyca cryptography, pinned in requirements-cp314-linux.txt",
+        "lane": "code written in this lane"
+    },
+    "operations": {
+        "decode-base64url": "lane",
+        "hkdf-sha256": "cryptography",
+        "open-aes-gcm": "cryptography",
+        "seal-aes-gcm": "cryptography",
+        "ecdh-p256": "cryptography",
+        "p256-point": "lane",
+        "open-rsa-oaep": "cryptography"
+    }
+}

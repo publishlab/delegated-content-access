@@ -1,0 +1,36 @@
+# The RustCrypto binding's one package: the `bridge` binary and the
+# `primitives` library it calls. Every dependency is an exact `=` version, and
+# the committed Cargo.lock beside this file records the resolved transitive set
+# with each registry crate's checksum. That lock is the pin; nothing else lists
+# a crate hash.
+#
+# Default features are off wherever they would reach beyond the calls the
+# bridge makes, so the resolved set carries no OS random-number source: every
+# operation here is deterministic, and nothing asks for randomness.
+[package]
+name = "conformance-primitives-rustcrypto"
+version = "1.0.0"
+edition = "2024"
+rust-version = "1.98"
+publish = false
+
+[lib]
+name = "primitives"
+path = "primitives/lib.rs"
+
+[[bin]]
+name = "bridge"
+path = "bridge/main.rs"
+
+[dependencies]
+aes-gcm = { version = "=0.11.1", default-features = false, features = ["aes", "alloc"] }
+base64 = { version = "=0.23.1", default-features = false, features = ["alloc"] }
+hkdf = { version = "=0.13.0", default-features = false }
+p256 = { version = "=0.14.0", default-features = false, features = ["arithmetic", "ecdh"] }
+rsa = { version = "=0.9.10", default-features = false }
+serde_json = { version = "=1.0.151", default-features = false, features = ["std"] }
+sha2 = { version = "=0.11.0", default-features = false }
+# rsa 0.9 is the newest stable `rsa` release and it is built on the digest
+# 0.10 traits, a generation before sha2 0.11. Its OAEP takes the hash as a type
+# from that generation, so the SHA-256 it runs is this older sha2, named apart.
+sha2_010 = { package = "sha2", version = "=0.10.9", default-features = false }

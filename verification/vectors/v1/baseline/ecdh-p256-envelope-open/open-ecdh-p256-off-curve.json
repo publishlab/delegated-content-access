@@ -1,0 +1,25 @@
+{
+  "name": "open-ecdh-p256-off-curve",
+  "vectorFormat": "ecdh-p256-envelope-open/v1",
+  "description": "docs/spec--sealed-key-envelopes.md sections 4 and 6 require a valid P-256 point and a generic unseal_failed refusal. This 109-octet envelope carries the saved off-curve point candidate; an opener that fails to validate peer points could release its content key.",
+  "input": {
+    "algorithm": "ecdh-p256",
+    "binding": {
+      "renderId": "uUT576O34BoGKpgXpdMucw",
+      "contentName": "bodytext"
+    },
+    "recipientPrivateKeyJwk": {
+      "kty": "EC",
+      "crv": "P-256",
+      "x": "KnsL031lVTbNxwtMq3OQmFq-fyPVh3k1__Adl4ieLXw",
+      "y": "-aNkTV8wd6O2rTWc2jkpJgez4Cuvas4J8_Styi-cdsE",
+      "d": "iWEhz6AHq-n4l_YzhTZcyQH7O9B1A1AKl4maOJh3z5g"
+    },
+    "contentKeyBase64url": "jfv7AgoOggA8XPOEE055ww"
+  },
+  "expected": {
+    "bind": "dca-bind-key-envelope|c|uUT576O34BoGKpgXpdMucw|bodytext",
+    "blob": "BP_rrpHAnCFcf8NeehDgUG3w9ktUCbb_1LNPIX5pT8u7s5xZErWJNnNAJfmyMYNXO4LYDDMaasFJMMGHk63Fqhssaqe6Y6UyHEziB6sXe3DGjrotDFBb6mExgzsz3ifzJqNlKZWmsZyM40Xpjg",
+    "error": "unseal_failed"
+  }
+}

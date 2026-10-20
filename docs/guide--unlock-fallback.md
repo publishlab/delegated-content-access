@@ -7,14 +7,13 @@ availability when an issuer endpoint is unavailable. It does not add a
 fallback flag, route list, or emergency mode to the DCA wire format.
 
 The [core protocol](spec--core-protocol.md) and
-[browser and HTTP binding](spec--browser-http-binding.md) define each unlock
-exchange. The [threat model](spec--security-model.md) defines the security
+[HTTPS endpoint binding](spec--http-binding.md) define each unlock
+exchange. The [security model](spec--security-model.md) defines the security
 boundary. Follow those documents where this guide disagrees.
 
-The host-resolved routing model in this guide depends on the proposed
-[removal of `unlockUrl` from the V1 wire](spec-proposal--remove-wire-unlock-url.md).
-Until that proposal is adopted, this is deployment guidance rather than a V1
-interoperability requirement.
+Articles name their issuers and carry sealed material, without an unlock URL.
+Installed client integrations or explicit trusted configuration supply endpoints.
+Clients ignore any URL left in older deliveries; they never use it as a fallback.
 
 ## Why routing does not belong in publisher data
 
@@ -101,27 +100,67 @@ skipped without a network request.
 
 ## When the client may advance
 
-The client advances only after a failure that its trusted route configuration
-classifies as retryable. Every definitive authorization answer is terminal.
+The client advances along a fallback route only after an outcome that its
+trusted route configuration classifies as retryable. Every definitive
+authorization answer is terminal for that route.
 
-- A transport failure or issuer `5xx` response may advance the route.
-- A successful response that supplies any key is terminal, including a
-  partial grant. The client does not shop unresolved items to a more permissive
-  issuer.
-- A policy denial or not-delivered result is terminal. A client under the
-  [`dca-v1-not-delivered-result` profile](spec--profiles.md#8-dca-v1-not-delivered-result-profile)
-  reads non-delivery from an admitted `notDelivered` entry. Any such entry
-  makes the issuer attempt terminal as a whole, even when independent
-  operational errors appear in the same response.
-- A `200` response containing only operational could-not-open results may
-  advance only when the route explicitly classifies that complete outcome as
-  retryable. A no-coordinate `200` is a terminal no-key outcome.
+- Fetch TypeError, opaqueredirect and post-send deadline failures are
+  indeterminate outcomes ([core Section 5.3](spec--core-protocol.md#53-multiple-issuers);
+  the [HTTPS endpoint binding](spec--http-binding.md#34-response) says why
+  script cannot tell a refusal from a network failure); the JS reference
+  transport tags them `indeterminate_transport`. They do not permit a
+  conditional backup, though an independent route remains permitted.
+  An unexpected untagged programming exception propagates and ends the walk.
+- A locally attributable pre-send transport failure or issuer `5xx` response
+  may advance the route when trusted configuration classifies it as retryable.
+  An issuer `4xx` refusal,
+  including a whole-request policy denial, is terminal for conditional
+  fallback. An HTTP `429` rate-limit response is therefore terminal too.
+  Temporary unavailability reported as a `5xx` can advance only when trusted
+  configuration classifies that response as retryable.
+- Apply admitted keys and recompute unresolved items first. Success for an
+  unrelated identity does not cancel an explicitly eligible family retry.
+  An item already opened by a returned or retained key needs no retry. Trusted
+  route policy can still stop the whole attempt after a partial grant.
+- A policy denial is terminal. An admitted
+  [`notDelivered`](spec-profile--period-keys.md#56-family-reports-notdelivered)
+  entry with reason `denied` ends the attempt for that family and never
+  advances the route, whatever else the response carries.
+- An admitted `notDelivered` entry with reason `unavailable` reports
+  availability, not a denial. The route may explicitly classify it as
+  retryable for that family if it remains useful to an unresolved item after
+  applying the result. It qualifies neither a silent item content-key
+  alternative nor a sibling family. Without that trusted classification it
+  is terminal. The next issuer applies its own policy.
+- Core source-coordinate opening errors have no default retry meaning. Only
+  an applicable selected profile may give the actual reported source coordinate
+  local retry meaning; it cannot qualify the whole family. A no-coordinate `200` without a `notDelivered` entry is a
+  terminal no-key outcome, and its silence says nothing about why.
 - The client fails visibly on a malformed, unsupported, or misconfigured answer.
-- The client stops after the finite configured list and returns no key.
+- The client stops after the finite configured list and preserves any admitted
+  capability it already received.
   It never loops.
 
+These rules govern a conditional fallback: a backup issuer that the client
+tries only because of the earlier outcome. Listing an issuer as a backup does
+not by itself authorize an attempt to it. Trusted client configuration permits
+an independent attempt whatever the earlier issuer answers, for example when
+the host is configured to ask both issuer A and issuer B for an item. The
+publisher must have supplied B's own sealed material, and B applies its own
+policy. A's denial, partial grant or `notDelivered` entry neither triggers nor
+cancels the attempt to B, as the
+[core protocol](spec--core-protocol.md#53-multiple-issuers) requires.
+
+Build the next request from eligible issuer-specific `contentName` or
+`accessGroup` identities, not simply from every item still unopened. A retryable
+`unavailable` report for
+`standard` may carry B's own `standard` period supply, but cannot carry A's
+denied `premium` family or silently add an item content-key alternative that
+the prior request omitted. That alternative needs its own retryable outcome
+or an independent attempt. Skip B when no eligible identity remains.
+
 Deployments may refine which operational failures are retryable, but they must
-not reinterpret a denial, partial grant, or malformed response as permission
+not reinterpret a denial, silence, unrelated partial grant, or malformed response as permission
 to seek a wider grant. A non-`200` response supplies no key material under the
 HTTP binding.
 
@@ -133,8 +172,8 @@ safely evaluate:
 
 | Choice | Availability benefit | Access reach and cost |
 | --- | --- | --- |
-| Direct `contentKey` | Limits one answer to one item in one render | Usually requires another issuer answer for another render |
-| Exact `periodKey` | Lets the client reuse one grant across matching renders | Opens every retained item wrapped for that publisher, access group, and period |
+| Item `contentKey` | Limits one answer to one item in one render | Usually requires another issuer answer for another render |
+| `periodKey` | Lets the client reuse one grant across matching renders | Opens every retained item wrapped for that publisher, access group, and period |
 | Client-bound delivery | Makes a captured response less reusable by another client | Prevents shared response caching and does not stop a reader controlling the client |
 | Direct delivery | Allows identical authorized answers to be cached in a safe partition | Returns bearer key material that a recipient can share |
 
@@ -148,12 +187,13 @@ A reader-continuity policy needs issuer-verifiable positive entitlement state,
 such as a locally verifiable snapshot. Identity alone selects an account or
 cache partition; it does not prove entitlement.
 
-A wider emergency audience is a separate operator decision. It must be
-server-owned, explicitly activated, scoped to configured content or access
-groups, expire at a stated time, and leave an audit trail. Request fields and
-client-observed failures cannot activate it.
+Keep a wider emergency audience server-owned: activate it explicitly, scope it
+to configured content or access groups, give it an end time and an audit
+trail. Request fields and client-observed failures never activate it, because
+request presence grants nothing
+([core Section 6.1](spec--core-protocol.md#61-presented-coordinates)).
 
-Direct content-key delivery can bound the cryptographic reach of an emergency
+Item content-key delivery can bound the cryptographic reach of an emergency
 grant to one item and render. The operator must separately choose whether to
 return a period key because it grants wider reusable access. That is a
 deliberate choice. Neither shape
@@ -162,7 +202,7 @@ prevents an authorized reader from copying the key or plaintext.
 No degraded policy relaxes resource-signature verification,
 sealed-coordinate binding, or the rule that authorization finishes before
 release. Browser deployments also retain signed and observed origin admission;
-the HTTPS-only non-browser profile has no observed browser origin to compare.
+a route without the browser-origin profile has no observed browser origin to compare.
 
 ## Health and activation
 
@@ -171,10 +211,10 @@ real entitlement decision, not only whether the issuer process answers a
 health URL. The operator should cache health results and coalesce concurrent
 checks so unlock traffic cannot amplify probes.
 
-The deployment must choose what an inconclusive health check means. A timeout
-must not silently select open or closed operation. When an issuer cannot reach
-the authority needed for its normal decision, it reports temporary
-unavailability rather than fabricating a denial.
+Decide in advance what an inconclusive health check means, so a timeout never
+silently selects open or closed operation. An issuer that cannot reach the
+authority it needs has no policy decision and answers with temporary
+unavailability ([core Section 6.2](spec--core-protocol.md#62-authentication-and-policy)).
 
 Primary and fallback describe deployment roles. An
 endpoint may change role through server-owned configuration without changing
@@ -182,9 +222,15 @@ the publisher's sealed material.
 
 ## Response caching
 
-Response caching is optional and never replaces authorization. Cache only a
-final grant-bearing answer after request admission and policy evaluation. An
-issuer may always return `Cache-Control: no-store`.
+The HTTPS endpoint binding defaults to `Cache-Control: no-store`
+([Section 3.4](spec--http-binding.md#34-response)); reuse needs a
+selected profile that defines its cache key, audience, freshness and
+invalidation, and a client-bound response is never a shared answer
+([response binding Section 9](spec--response-binding.md#9-replay-caching-and-composition)).
+A reused browser-profile response still follows exact-origin CORS and carries
+`Vary: Origin` ([browser-origin Section 2.4](spec-profile--browser-origin.md#24-cors-response)).
+A stored refusal, no-key result or key result is usable only while the current
+policy decision would produce it.
 
 A reusable cache identity includes the issuer namespace, exact admitted
 request, grant and delivery profiles, authorization partition, server-owned
@@ -192,14 +238,7 @@ decision epoch, and an expiry no later than every authority window that
 permitted the answer. Closing an emergency window requires a purge or a new
 epoch so an earlier answer cannot be replayed as a current decision.
 
-Client-bound responses belong to one client capability and are not shared
-answers. A direct response may be shared only inside its explicit
-authorization partition. Cache expiry cannot recall keys already delivered;
-those keys retain their defined cryptographic reach.
-
-A cacheable browser-profile response still follows the HTTP binding's
-exact-origin CORS rules and carries `Vary: Origin`. Authorization partitioning
-does not replace the browser cache boundary.
+Cache expiry cannot recall keys already delivered.
 
 ## Shapes deliberately excluded
 
@@ -209,8 +248,8 @@ This guide does not recommend:
 - inferring authorization from a failed primary request;
 - accepting route membership, order, or activation from page or request
   fields;
-- trying another issuer for the same unresolved family after a denial,
-  not-delivered result, or partial grant;
+- advancing a fallback route to another issuer for the same unresolved family
+  because of a denial, a `denied` entry, or success for another identity;
 - adding route lists to the wire without a demonstrated interoperability need;
   or
 - describing client-bound delivery as DRM.

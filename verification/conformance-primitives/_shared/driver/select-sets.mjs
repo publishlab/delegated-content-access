@@ -11,6 +11,12 @@
 // unsupported one, so a lane answering some of the seven operations reports what it
 // answered and what it was never asked, and neither reads as the other.
 //
+// Then one line per declared operation, in manifest order: `operation`, the
+// operation name and the member `bridge.json` says answers it, as in
+// `operation hkdf-sha256 hash`. Three fields where a set line has two, so the
+// shell tells them apart without parsing JSON; it writes each as an
+// `operation=<name> member=<member>` row of the lane record.
+//
 // The applicability rule lives here rather than in the shell because
 // the driver already reads both the corpus and the manifest. The shell starts processes and
 // folds their exit codes.
@@ -56,4 +62,7 @@ try {
 for (const { set, operations } of sets) {
     const supported = operations.every((operation) => entry.operations.includes(operation));
     process.stdout.write(`${set} ${supported ? 'supported' : 'unsupported'}\n`);
+}
+for (const [operation, member] of Object.entries(entry.answeredBy)) {
+    process.stdout.write(`operation ${operation} ${member}\n`);
 }

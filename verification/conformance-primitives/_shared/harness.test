@@ -83,13 +83,19 @@ expect_aggregate_said() {
 stage_aggregator() {
     banner "the aggregator over lane records"
 
-    # Two lanes, the shape every lane check writes: lane=, one set= row per
-    # corpus set, exit=. Every record below that is meant to compare cleanly
-    # against another carries this same full row set, because the aggregator
-    # refuses two records that cover different rows: a record with fewer rows is
-    # reserved for the dedicated mismatch case further down.
+    # Two lanes, the shape every lane check writes: lane=, one operation= row
+    # per declared operation, one set= row per corpus set, exit=. Every record
+    # below that is meant to compare cleanly against another carries this same
+    # full set row list, because the aggregator refuses two records that cover
+    # different set rows: a record with fewer rows is reserved for the dedicated
+    # mismatch case further down. The two lanes name different members for
+    # hkdf-sha256 and different operation lists, and still compare: attribution
+    # joins no cross-record comparison.
     cat > "$scratch/php-held.record" <<'RECORD'
 lane=php
+operation=decode-base64url member=lane
+operation=hkdf-sha256 member=hash
+operation=open-aes-gcm member=openssl
 set=encoding status=held
 set=aes-gcm-128 status=held
 set=hkdf status=held
@@ -100,6 +106,8 @@ exit=0
 RECORD
     cat > "$scratch/go-held.record" <<'RECORD'
 lane=go
+operation=decode-base64url member=lane
+operation=hkdf-sha256 member=stdlib
 set=encoding status=held
 set=aes-gcm-128 status=held
 set=hkdf status=held
@@ -113,6 +121,43 @@ RECORD
     expect_aggregate_said two-lanes 'set encoding: php held, go held'
     expect_aggregate_said two-lanes 'set ecdh: php unsupported, go unsupported'
     expect_aggregate_said two-lanes 'RESULT: 0. Every answered set held; these lanes explicitly do not support one or more corpus sets: php go.'
+    # Each pair's attribution, one line per operation, under that pair's line
+    # and in the order its record wrote them.
+    grep -A3 '^php: held' "$scratch/two-lanes.out" > "$scratch/two-lanes.php" || true
+    printf '%s\n' 'php: held (exit 0, sets 5 held / 0 disagreed / 0 incomplete / 1 unsupported)' \
+        '  decode-base64url  lane' '  hkdf-sha256       hash' '  open-aes-gcm      openssl' > "$scratch/two-lanes.php-expected"
+    if ! diff -u "$scratch/two-lanes.php-expected" "$scratch/two-lanes.php"; then
+        fail "aggregate two-lanes did not print php's attribution under its line"
+    fi
+    expect_aggregate_said two-lanes '  hkdf-sha256       stdlib'
+
+    # An operation row is part of the record, so a malformed one is refused like
+    # any other malformed row: an operation the contract does not carry, a
+    # member that is not a lowercase token, a second row for one operation, and
+    # a row beside a refused version, which answered nothing.
+    sed 's/^operation=open-aes-gcm member=openssl$/operation=build-bind member=openssl/' \
+        "$scratch/php-held.record" > "$scratch/unknown-operation.record"
+    run_aggregate unknown-operation "$scratch/unknown-operation.record"
+    expect_aggregate_exit unknown-operation 2
+    expect_aggregate_said unknown-operation 'operation=build-bind is not one of the seven operations'
+
+    sed 's/^operation=hkdf-sha256 member=hash$/operation=hkdf-sha256 member=ext\/hash/' \
+        "$scratch/php-held.record" > "$scratch/member-not-token.record"
+    run_aggregate member-not-token "$scratch/member-not-token.record"
+    expect_aggregate_exit member-not-token 2
+    expect_aggregate_said member-not-token 'member=ext/hash, which is not a member name'
+
+    sed 's/^operation=open-aes-gcm member=openssl$/operation=hkdf-sha256 member=openssl/' \
+        "$scratch/php-held.record" > "$scratch/duplicate-operation.record"
+    run_aggregate duplicate-operation "$scratch/duplicate-operation.record"
+    expect_aggregate_exit duplicate-operation 2
+    expect_aggregate_said duplicate-operation 'names hkdf-sha256 more than once among operation= rows'
+
+    printf '%s\n' 'lane=php' 'version=7.3' 'status=refused' 'reason=why' \
+        'operation=hkdf-sha256 member=hash' 'exit=0' > "$scratch/refused-operation.record"
+    run_aggregate refused-operation "$scratch/refused-operation.record"
+    expect_aggregate_exit refused-operation 2
+    expect_aggregate_said refused-operation 'a refused version answers no operation'
 
     # A record with no lane= line says less than a record claims to, and the
     # implementation it would have named cannot be compared with any other.

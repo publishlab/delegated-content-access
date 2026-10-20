@@ -1,0 +1,698 @@
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>DCA Client-Bound Proofs</title>
+<!--
+  DCA client-bound proofs, in the browser.
+
+  One self-contained page: open it directly as a file:// URL, with no server,
+  no build and no dependencies. crypto.subtle is available because file:// is a
+  secure context, so every WebCrypto call below runs as written.
+
+  It ports the Node platform tests beside it (the *.mjs files in this
+  directory) into named in-page tests, then adds a Storage section that Node
+  cannot run: a real IndexedDB round-trip, a real cross-reload survival check for
+  a non-extractable CryptoKey, and a localStorage check showing that a CryptoKey
+  cannot be stored there.
+
+  The ported proof logic and the base64url helpers use only WebCrypto and
+  btoa/atob, so the exact same functions run under Node for pre-ship
+  verification; the DOM and IndexedDB parts are the browser's to run.
+-->
+<style>
+  :root {
+    color-scheme: light dark;
+    --bg: #f6f7f9;
+    --fg: #1c2024;
+    --card: #ffffff;
+    --border: #d6dae0;
+    --muted: #5b6470;
+    --pass-bg: #e3f6e8; --pass-fg: #14622b; --pass-bd: #a7d9b6;
+    --fail-bg: #fde4e4; --fail-fg: #a01212; --fail-bd: #f0b1b1;
+    --warn-bg: #fdf4d6; --warn-fg: #7a5900; --warn-bd: #e8d38a;
+    --info-bg: #e6eefb; --info-fg: #234a86; --info-bd: #b3c9ec;
+    --pend-bg: #eceef1; --pend-fg: #4a5261; --pend-bd: #ccd2da;
+    --mono: ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #14171a;
+      --fg: #e6e9ec;
+      --card: #1d2125;
+      --border: #333a41;
+      --muted: #9aa4b0;
+      --pass-bg: #10331d; --pass-fg: #7ee0a0; --pass-bd: #235d38;
+      --fail-bg: #3a1414; --fail-fg: #ffa3a3; --fail-bd: #6d2626;
+      --warn-bg: #37300f; --warn-fg: #f0d47f; --warn-bd: #6b5c1f;
+      --info-bg: #142743; --info-fg: #9dc0f5; --info-bd: #2c4b7d;
+      --pend-bg: #23272d; --pend-fg: #aab3bf; --pend-bd: #3a424b;
+    }
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; padding: 1.4rem 1.2rem 3rem;
+    background: var(--bg); color: var(--fg);
+    font: 15px/1.5 system-ui, -apple-system, Segoe UI, Roboto, sans-serif;
+  }
+  main { max-width: 960px; margin: 0 auto; }
+  h1 { font-size: 1.35rem; margin: 0 0 .2rem; }
+  .lede { color: var(--muted); margin: 0 0 1.1rem; font-size: .92rem; }
+  #env {
+    font: .82rem/1.4 var(--mono); color: var(--muted);
+    margin: 0 0 .5rem; word-break: break-word;
+  }
+  #summary {
+    font: 700 1.15rem/1.3 var(--mono);
+    padding: .8rem 1rem; border-radius: 10px; border: 2px solid var(--pend-bd);
+    background: var(--pend-bg); color: var(--pend-fg); margin: 0 0 1.2rem;
+  }
+  #summary.ok  { background: var(--pass-bg); color: var(--pass-fg); border-color: var(--pass-bd); }
+  #summary.bad { background: var(--fail-bg); color: var(--fail-fg); border-color: var(--fail-bd); }
+  section {
+    background: var(--card); border: 1px solid var(--border);
+    border-radius: 10px; padding: .5rem .8rem .8rem; margin: 0 0 1rem;
+  }
+  section > h2 { font-size: 1rem; margin: .4rem 0 .1rem; }
+  section > .desc { color: var(--muted); font-size: .84rem; margin: 0 0 .5rem; }
+  .row {
+    display: grid; grid-template-columns: 4.2rem 1fr; gap: .6rem;
+    align-items: start; padding: .4rem .5rem; border-radius: 7px;
+    border: 1px solid transparent; margin: .3rem 0;
+  }
+  .row .tag {
+    font: 700 .72rem/1.5 var(--mono); text-align: center;
+    padding: .05rem .2rem; border-radius: 5px; letter-spacing: .02em;
+  }
+  .row .body .label { font-weight: 600; }
+  .row .body .detail {
+    font: .8rem/1.45 var(--mono); color: var(--muted);
+    white-space: pre-wrap; word-break: break-word; margin-top: .12rem;
+  }
+  .row.pass { background: var(--pass-bg); border-color: var(--pass-bd); }
+  .row.pass .tag { color: var(--pass-fg); }
+  .row.fail { background: var(--fail-bg); border-color: var(--fail-bd); }
+  .row.fail .tag { color: var(--fail-fg); }
+  .row.warn { background: var(--warn-bg); border-color: var(--warn-bd); }
+  .row.warn .tag { color: var(--warn-fg); }
+  .row.info { background: var(--info-bg); border-color: var(--info-bd); }
+  .row.info .tag { color: var(--info-fg); }
+  .row.pend { background: var(--pend-bg); border-color: var(--pend-bd); }
+  .row.pend .tag { color: var(--pend-fg); }
+  #reloadBanner {
+    display: none; margin: 0 0 1rem; padding: .8rem 1rem; border-radius: 10px;
+    border: 2px solid var(--warn-bd); background: var(--warn-bg); color: var(--warn-fg);
+    font-size: .92rem;
+  }
+  #reloadBanner.survived { border-color: var(--pass-bd); background: var(--pass-bg); color: var(--pass-fg); }
+  button {
+    font: 600 .85rem var(--mono); cursor: pointer; margin: .4rem .4rem 0 0;
+    padding: .4rem .8rem; border-radius: 7px; border: 1px solid var(--border);
+    background: var(--card); color: var(--fg);
+  }
+  button:hover { border-color: var(--muted); }
+  code { font-family: var(--mono); }
+</style>
+
+<main>
+  <h1>DCA client-bound proofs</h1>
+  <p class="lede">
+    This page runs the WebCrypto mechanics behind the delegated-content-access
+    client-bound transport in the browser you open it in. The portable proofs come
+    from the Node suite, and the IndexedDB storage checks below them are ones Node
+    cannot run. Green marks a held assertion, red a broken one.
+  </p>
+
+  <div id="env"></div>
+  <div id="summary">running&hellip;</div>
+  <div id="reloadBanner"></div>
+  <div id="report"></div>
+</main>
+
+<script>
+"use strict";
+/* ============================================================================
+ * Pure-crypto portable section
+ * Everything from here down to the DOM RUNNER marker uses only WebCrypto and
+ * btoa/atob, so it runs identically under Node for pre-ship verification.
+ * ==========================================================================*/
+
+const subtle = globalThis.crypto.subtle;
+const enc = new TextEncoder();
+const dec = new TextDecoder();
+
+// Node Buffer base64url -> browser btoa/atob, URL-safe alphabet, no padding.
+function b64urlEncode(u8) {
+  let s = "";
+  for (let i = 0; i < u8.length; i++) s += String.fromCharCode(u8[i]);
+  return btoa(s).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+}
+function b64urlDecode(str) {
+  str = str.replace(/-/g, "+").replace(/_/g, "/");
+  while (str.length % 4) str += "=";
+  const bin = atob(str);
+  const u8 = new Uint8Array(bin.length);
+  for (let i = 0; i < bin.length; i++) u8[i] = bin.charCodeAt(i);
+  return u8;
+}
+
+const same = (a, b) => a.length === b.length && a.every((x, i) => x === b[i]);
+const rawBytes = async (key) => new Uint8Array(await subtle.exportKey("raw", key));
+const refused = async (fn) => { try { await fn(); return false; } catch { return true; } };
+
+/* --- Recorder replaces node:assert here: each check() call adds one green or red row. --- */
+class Recorder {
+  constructor() { this.rows = []; }
+  check(label, cond, detail) { this.rows.push({ status: cond ? "pass" : "fail", label, detail: detail || "" }); }
+  info(label, detail) { this.rows.push({ status: "info", label, detail: detail || "" }); }
+}
+
+/* ---- Proof 1: unwrapOutputExtractability.mjs ----
+ * The caller sets the OUTPUT key's extractability on unwrapKey and deriveKey.
+ * A caller holding the client private key can unwrap the delivered key
+ * extractable and read the raw bytes; on the honest path the client asks for a
+ * non-extractable handle. */
+async function proofUnwrapOutputExtractability(r) {
+  const deliveredKey = crypto.getRandomValues(new Uint8Array(16));
+
+  // RSA-OAEP method
+  {
+    const client = await subtle.generateKey(
+      { name: "RSA-OAEP", modulusLength: 2048, publicExponent: new Uint8Array([1, 0, 1]), hash: "SHA-256" },
+      false, ["wrapKey", "unwrapKey"]);
+    const delivered = await subtle.importKey("raw", deliveredKey, "AES-GCM", true, ["encrypt"]);
+    const wrapped = await subtle.wrapKey("raw", delivered, client.publicKey, { name: "RSA-OAEP" });
+    const honest = await subtle.unwrapKey("raw", wrapped, client.privateKey, { name: "RSA-OAEP" }, "AES-GCM", false, ["decrypt"]);
+    r.check("RSA-OAEP: honest unwrap yields a non-extractable handle", honest.extractable === false, "extractable = " + honest.extractable);
+    const opened = await subtle.unwrapKey("raw", wrapped, client.privateKey, { name: "RSA-OAEP" }, "AES-GCM", true, ["decrypt"]);
+    r.check("RSA-OAEP: caller with the handle can unwrap extractable and read the bytes", same(await rawBytes(opened), deliveredKey), "recovered raw bytes match the delivered key");
+  }
+
+  // ECDH P-256 method
+  {
+    const client = await subtle.generateKey({ name: "ECDH", namedCurve: "P-256" }, false, ["deriveKey"]);
+    const ephem = await subtle.generateKey({ name: "ECDH", namedCurve: "P-256" }, false, ["deriveKey"]);
+    const nonce = crypto.getRandomValues(new Uint8Array(12));
+    const issuerTransport = await subtle.deriveKey({ name: "ECDH", public: client.publicKey }, ephem.privateKey, { name: "AES-GCM", length: 256 }, false, ["wrapKey"]);
+    const delivered = await subtle.importKey("raw", deliveredKey, "AES-GCM", true, ["encrypt"]);
+    const wrapped = await subtle.wrapKey("raw", delivered, issuerTransport, { name: "AES-GCM", iv: nonce });
+    const clientTransport = await subtle.deriveKey({ name: "ECDH", public: ephem.publicKey }, client.privateKey, { name: "AES-GCM", length: 256 }, false, ["unwrapKey"]);
+    const honest = await subtle.unwrapKey("raw", wrapped, clientTransport, { name: "AES-GCM", iv: nonce }, "AES-GCM", false, ["decrypt"]);
+    r.check("ECDH P-256: honest unwrap yields a non-extractable handle", honest.extractable === false, "extractable = " + honest.extractable);
+    const opened = await subtle.unwrapKey("raw", wrapped, clientTransport, { name: "AES-GCM", iv: nonce }, "AES-GCM", true, ["decrypt"]);
+    r.check("ECDH P-256: caller with the handle can unwrap extractable and read the bytes", same(await rawBytes(opened), deliveredKey), "recovered raw bytes match the delivered key");
+  }
+}
+
+/* ---- Proof 2: nonExtractableKeyExportRefusal.mjs ----
+ * exportKey and wrapKey refuse to hand out a private key generated
+ * non-extractable, and the key still unwraps a delivered key. The one ECDH
+ * oracle a script gets, deriveBits, returns d*P for a chosen point, never the
+ * scalar d. */
+async function proofNonExtractableKeyExportRefusal(r) {
+  const deliveredKey = crypto.getRandomValues(new Uint8Array(16));
+  const kek = await subtle.generateKey({ name: "AES-GCM", length: 256 }, true, ["wrapKey"]);
+
+  // RSA-OAEP method
+  {
+    const client = await subtle.generateKey(
+      { name: "RSA-OAEP", modulusLength: 2048, publicExponent: new Uint8Array([1, 0, 1]), hash: "SHA-256" },
+      false, ["wrapKey", "unwrapKey"]);
+    r.check("RSA-OAEP: privateKey reports extractable = false", client.privateKey.extractable === false, "");
+    r.check("RSA-OAEP: exportKey('pkcs8') refused", await refused(() => subtle.exportKey("pkcs8", client.privateKey)), "");
+    r.check("RSA-OAEP: exportKey('jwk') refused", await refused(() => subtle.exportKey("jwk", client.privateKey)), "");
+    r.check("RSA-OAEP: wrapKey('pkcs8') refused", await refused(() => subtle.wrapKey("pkcs8", client.privateKey, kek, { name: "AES-GCM", iv: new Uint8Array(12) })), "");
+    const delivered = await subtle.importKey("raw", deliveredKey, "AES-GCM", true, ["encrypt"]);
+    const wrapped = await subtle.wrapKey("raw", delivered, client.publicKey, { name: "RSA-OAEP" });
+    const opened = await subtle.unwrapKey("raw", wrapped, client.privateKey, { name: "RSA-OAEP" }, "AES-GCM", false, ["decrypt"]);
+    r.check("RSA-OAEP: the non-extractable key still opens a delivery", opened.type === "secret", "opened.type = " + opened.type);
+  }
+
+  // ECDH P-256 method
+  {
+    const client = await subtle.generateKey({ name: "ECDH", namedCurve: "P-256" }, false, ["deriveKey", "deriveBits"]);
+    r.check("ECDH P-256: privateKey reports extractable = false", client.privateKey.extractable === false, "");
+    r.check("ECDH P-256: exportKey('pkcs8') refused", await refused(() => subtle.exportKey("pkcs8", client.privateKey)), "");
+    r.check("ECDH P-256: exportKey('jwk') refused", await refused(() => subtle.exportKey("jwk", client.privateKey)), "");
+    r.check("ECDH P-256: wrapKey('pkcs8') refused", await refused(() => subtle.wrapKey("pkcs8", client.privateKey, kek, { name: "AES-GCM", iv: new Uint8Array(12) })), "");
+    const other = await subtle.generateKey({ name: "ECDH", namedCurve: "P-256" }, false, ["deriveBits"]);
+    const viaBits = new Uint8Array(await subtle.deriveBits({ name: "ECDH", public: other.publicKey }, client.privateKey, 256));
+    const derived = await subtle.deriveKey({ name: "ECDH", public: other.publicKey }, client.privateKey, { name: "AES-GCM", length: 256 }, true, ["encrypt"]);
+    const viaKey = new Uint8Array(await subtle.exportKey("raw", derived));
+    r.check("ECDH P-256: deriveBits yields a 32-byte point (d*P), not the scalar", viaBits.length === 32, "deriveBits length = " + viaBits.length);
+    r.check("ECDH P-256: deriveKey yields a key from d*P, not the scalar", viaKey.length === 32, "derived key length = " + viaKey.length);
+  }
+}
+
+/* ---- Proof 3: nonExtractableDecryptChain.mjs ----
+ * periodKey(handle) -> unwrap -> contentKey(handle) -> decrypt -> content,
+ * every hop non-extractable, no key bytes in JavaScript. */
+async function proofNonExtractableDecryptChain(r) {
+  const periodBytes = crypto.getRandomValues(new Uint8Array(16));
+  const contentBytes = crypto.getRandomValues(new Uint8Array(16));
+  const nonceC = crypto.getRandomValues(new Uint8Array(12));
+  const nonceM = crypto.getRandomValues(new Uint8Array(12));
+
+  const periodForWrap = await subtle.importKey("raw", periodBytes, "AES-GCM", false, ["wrapKey"]);
+  const contentExtractable = await subtle.importKey("raw", contentBytes, "AES-GCM", true, ["encrypt"]);
+  const wrappedContentKey = await subtle.wrapKey("raw", contentExtractable, periodForWrap, { name: "AES-GCM", iv: nonceC });
+  const contentForEnc = await subtle.importKey("raw", contentBytes, "AES-GCM", false, ["encrypt"]);
+  const article = new Uint8Array(await subtle.encrypt({ name: "AES-GCM", iv: nonceM }, contentForEnc, enc.encode("the paywalled article")));
+
+  const periodKey = await subtle.importKey("raw", periodBytes, "AES-GCM", false, ["unwrapKey"]);
+  r.check("periodKey handle refuses exportKey('raw')", await refused(() => subtle.exportKey("raw", periodKey)), "");
+  const contentKey = await subtle.unwrapKey("raw", wrappedContentKey, periodKey, { name: "AES-GCM", iv: nonceC }, "AES-GCM", false, ["decrypt"]);
+  r.check("contentKey arrives non-extractable", contentKey.extractable === false, "");
+  r.check("contentKey handle refuses exportKey('raw')", await refused(() => subtle.exportKey("raw", contentKey)), "");
+  const plain = dec.decode(await subtle.decrypt({ name: "AES-GCM", iv: nonceM }, contentKey, article));
+  r.check("article decrypts through the handle-only chain", plain === "the paywalled article", plain);
+}
+
+/* ---- Proof 4: periodKeyCachedAsCiphertext.mjs ----
+ * The client reopens later articles in the same period from a periodKey cached
+ * as ciphertext plus a durable non-extractable opener, with no key bytes on
+ * disk. The btoa/atob helpers above stand in for Node's Buffer base64url. */
+async function proofPeriodKeyCachedAsCiphertext(r) {
+  const b64 = b64urlEncode;
+  const unb64 = b64urlDecode;
+
+  const gen = await subtle.generateKey(
+    { name: "RSA-OAEP", modulusLength: 2048, publicExponent: new Uint8Array([1, 0, 1]), hash: "SHA-256" },
+    true, ["wrapKey", "unwrapKey"]);
+  const durablePub = gen.publicKey;
+  const durableJwk = await subtle.exportKey("jwk", gen.privateKey);
+  const durablePriv = await subtle.importKey("jwk", durableJwk, { name: "RSA-OAEP", hash: "SHA-256" }, false, ["unwrapKey"]);
+  r.check("durable opener imported non-extractable refuses exportKey('pkcs8')", await refused(() => subtle.exportKey("pkcs8", durablePriv)), "");
+
+  const periodBytes = crypto.getRandomValues(new Uint8Array(16));
+  const periodForWrap = await subtle.importKey("raw", periodBytes, "AES-GCM", false, ["wrapKey"]);
+  const periodForCarrier = await subtle.importKey("raw", periodBytes, "AES-GCM", true, ["encrypt"]);
+  const wrappedPeriodKey = new Uint8Array(await subtle.wrapKey("raw", periodForCarrier, durablePub, { name: "RSA-OAEP" }));
+
+  async function articleUnder(period, text) {
+    const cBytes = crypto.getRandomValues(new Uint8Array(16));
+    const nC = crypto.getRandomValues(new Uint8Array(12));
+    const nM = crypto.getRandomValues(new Uint8Array(12));
+    const cForWrap = await subtle.importKey("raw", cBytes, "AES-GCM", true, ["encrypt"]);
+    const wrappedContentKey = new Uint8Array(await subtle.wrapKey("raw", cForWrap, period, { name: "AES-GCM", iv: nC }));
+    const cForEnc = await subtle.importKey("raw", cBytes, "AES-GCM", false, ["encrypt"]);
+    const body = new Uint8Array(await subtle.encrypt({ name: "AES-GCM", iv: nM }, cForEnc, enc.encode(text)));
+    return { wrappedContentKey: b64(wrappedContentKey), nC: b64(nC), nM: b64(nM), body: b64(body) };
+  }
+  const article1 = await articleUnder(periodForWrap, "article one, delivered at T");
+  const article2 = await articleUnder(periodForWrap, "article two, same period, later");
+
+  const cache = { periodBlob: b64(wrappedPeriodKey), a1: article1, a2: article2 };
+  r.check("cached periodKey entry is ciphertext, not the key bytes", cache.periodBlob !== b64(periodBytes), "");
+
+  async function openPeriodFromCache() {
+    const handle = await subtle.unwrapKey("raw", unb64(cache.periodBlob), durablePriv, { name: "RSA-OAEP" }, "AES-GCM", false, ["unwrapKey"]);
+    r.check("reopened periodKey handle refuses exportKey('raw')", await refused(() => subtle.exportKey("raw", handle)), "");
+    return handle;
+  }
+  async function openArticle(entry) {
+    const period = await openPeriodFromCache();
+    const contentKey = await subtle.unwrapKey("raw", unb64(entry.wrappedContentKey), period, { name: "AES-GCM", iv: unb64(entry.nC) }, "AES-GCM", false, ["decrypt"]);
+    r.check("reopened contentKey is non-extractable", contentKey.extractable === false, "");
+    return dec.decode(await subtle.decrypt({ name: "AES-GCM", iv: unb64(entry.nM) }, contentKey, unb64(entry.body)));
+  }
+
+  r.check("T2: article one opens from the cached blob alone", (await openArticle(cache.a1)) === "article one, delivered at T", "");
+  r.check("T3: article two opens from the same cached blob, no re-unlock", (await openArticle(cache.a2)) === "article two, same period, later", "");
+}
+
+/* ---- Proof 5: nonExtractabilityBoundary.mjs ----
+ * The holes: non-extractability stops copying key bytes, not sharing what the
+ * key can do. The reader decrypts with the handle, rents the handle out as an
+ * oracle, and mints their own extractable key. All three succeed here. */
+async function proofNonExtractabilityBoundary(r) {
+  const keyBytes = crypto.getRandomValues(new Uint8Array(32));
+  const nonce = crypto.getRandomValues(new Uint8Array(12));
+  const forEnc = await subtle.importKey("raw", keyBytes, "AES-GCM", false, ["encrypt"]);
+  const article = new Uint8Array(await subtle.encrypt({ name: "AES-GCM", iv: nonce }, forEnc, enc.encode("the paywalled article")));
+  const handle = await subtle.importKey("raw", keyBytes, "AES-GCM", false, ["decrypt"]);
+  r.check("delivered content handle is non-extractable", handle.extractable === false, "");
+
+  // Hole 1: JS decrypts with the handle.
+  const plain = dec.decode(await subtle.decrypt({ name: "AES-GCM", iv: nonce }, handle, article));
+  r.check("hole 1: non-extractable handle decrypts content to plaintext in JS", plain === "the paywalled article", plain);
+
+  // Hole 2: handle rented as an oracle; capability shared, bytes still refused.
+  const oracle = ((k) => async (iv, ct) => new Uint8Array(await subtle.decrypt({ name: "AES-GCM", iv }, k, ct)))(handle);
+  const viaOracle = dec.decode(await oracle(nonce, article));
+  const bytesRefused = await refused(() => subtle.exportKey("raw", handle));
+  r.check("hole 2: handle rented as a decrypt oracle returns plaintext", viaOracle === "the paywalled article", "");
+  r.check("hole 2: the oracle rents capability while key bytes stay refused", bytesRefused, "");
+
+  // Hole 3: reader mints their own extractable key and exports it.
+  const own = await subtle.generateKey({ name: "RSA-OAEP", modulusLength: 2048, publicExponent: new Uint8Array([1, 0, 1]), hash: "SHA-256" }, true, ["unwrapKey"]);
+  const exported = await subtle.exportKey("pkcs8", own.privateKey);
+  r.check("hole 3: reader-generated extractable key exports to portable bytes", exported.byteLength > 0, "pkcs8 length = " + exported.byteLength);
+}
+
+const CRYPTO_PROOFS = [
+  ["unwrapOutputExtractability", "The caller sets the output key's extractability: a caller holding the client key can unwrap extractable and read the bytes.", proofUnwrapOutputExtractability],
+  ["nonExtractableKeyExportRefusal", "An honestly non-extractable key refuses export and wrap-out, yet still opens a delivery; ECDH derive routes give d*P, not d.", proofNonExtractableKeyExportRefusal],
+  ["nonExtractableDecryptChain", "periodKey -> contentKey -> content, every hop a non-extractable handle, no key bytes in JavaScript.", proofNonExtractableDecryptChain],
+  ["periodKeyCachedAsCiphertext", "A periodKey cached as ciphertext plus a durable non-extractable opener reopens later articles, no key bytes on disk.", proofPeriodKeyCachedAsCiphertext],
+  ["nonExtractabilityBoundary", "The holes: non-extractability stops copying key bytes, not decrypting with the handle, renting it, or minting their own key.", proofNonExtractabilityBoundary],
+];
+
+/* Exported for Node verification of the ported crypto (no DOM, no IndexedDB). */
+if (typeof module !== "undefined" && module.exports) {
+  module.exports = { b64urlEncode, b64urlDecode, Recorder, CRYPTO_PROOFS };
+}
+
+/* ============================================================================
+ * DOM RUNNER  (browser only, from here down)
+ * ==========================================================================*/
+
+const $report = document.getElementById("report");
+const $summary = document.getElementById("summary");
+const $env = document.getElementById("env");
+const $banner = document.getElementById("reloadBanner");
+let PASS = 0, FAIL = 0;
+
+const TAG = { pass: "PASS", fail: "FAIL", warn: "SKIP", info: "INFO", pend: "WAIT" };
+
+function renderRow(parent, row) {
+  const el = document.createElement("div");
+  el.className = "row " + row.status;
+  const tag = document.createElement("div");
+  tag.className = "tag";
+  tag.textContent = TAG[row.status] || row.status.toUpperCase();
+  const body = document.createElement("div");
+  body.className = "body";
+  const label = document.createElement("div");
+  label.className = "label";
+  label.textContent = row.label;
+  body.appendChild(label);
+  if (row.detail) {
+    const d = document.createElement("div");
+    d.className = "detail";
+    d.textContent = row.detail;
+    body.appendChild(d);
+  }
+  el.appendChild(tag);
+  el.appendChild(body);
+  parent.appendChild(el);
+  if (row.status === "pass") PASS++;
+  if (row.status === "fail") FAIL++;
+}
+
+function renderSection(title, desc, rows) {
+  const s = document.createElement("section");
+  const h = document.createElement("h2");
+  h.textContent = title;
+  s.appendChild(h);
+  if (desc) {
+    const p = document.createElement("p");
+    p.className = "desc";
+    p.textContent = desc;
+    s.appendChild(p);
+  }
+  rows.forEach((row) => renderRow(s, row));
+  $report.appendChild(s);
+  return s;
+}
+
+function updateSummary(extra) {
+  const total = PASS + FAIL;
+  $summary.textContent = PASS + "/" + total + " passed" + (extra ? "  -  " + extra : "");
+  $summary.className = FAIL === 0 ? "ok" : "bad";
+}
+
+/* ---- IndexedDB helpers: open with a timeout, so a blocked origin gets a warning row ---- */
+function idbOpen(timeoutMs) {
+  return new Promise((resolve, reject) => {
+    if (typeof indexedDB === "undefined" || indexedDB === null) {
+      reject(new Error("indexedDB is not defined on this origin"));
+      return;
+    }
+    let settled = false;
+    const timer = setTimeout(() => {
+      if (!settled) { settled = true; reject(new Error("IndexedDB open timed out")); }
+    }, timeoutMs);
+    const finish = (fn, arg) => { if (!settled) { settled = true; clearTimeout(timer); fn(arg); } };
+    let req;
+    try {
+      req = indexedDB.open("dca-proofs-browser", 1);
+    } catch (e) {
+      finish(reject, e);
+      return;
+    }
+    req.onupgradeneeded = () => { req.result.createObjectStore("kv"); };
+    req.onsuccess = () => finish(resolve, req.result);
+    req.onerror = () => finish(reject, req.error || new Error("IndexedDB open failed"));
+    req.onblocked = () => finish(reject, new Error("IndexedDB blocked"));
+  });
+}
+function idbPut(db, key, val) {
+  return new Promise((res, rej) => {
+    const tx = db.transaction("kv", "readwrite");
+    tx.objectStore("kv").put(val, key);
+    tx.oncomplete = () => res();
+    tx.onerror = () => rej(tx.error);
+    tx.onabort = () => rej(tx.error || new Error("transaction aborted"));
+  });
+}
+function idbGet(db, key) {
+  return new Promise((res, rej) => {
+    const tx = db.transaction("kv", "readonly");
+    const rq = tx.objectStore("kv").get(key);
+    rq.onsuccess = () => res(rq.result);
+    rq.onerror = () => rej(rq.error);
+    tx.onabort = () => rej(tx.error || new Error("transaction aborted"));
+  });
+}
+function idbDel(db, key) {
+  return new Promise((res, rej) => {
+    const tx = db.transaction("kv", "readwrite");
+    tx.objectStore("kv").delete(key);
+    tx.oncomplete = () => res();
+    tx.onerror = () => rej(tx.error);
+    tx.onabort = () => rej(tx.error || new Error("transaction aborted"));
+  });
+}
+
+/* ---- Storage test 1: IndexedDB round-trip within the page ---- */
+async function storageRoundTrip(db, r) {
+  const key = await subtle.generateKey({ name: "AES-GCM", length: 256 }, false, ["encrypt", "decrypt", "wrapKey", "unwrapKey"]);
+  const iv = crypto.getRandomValues(new Uint8Array(12));
+  const ct = new Uint8Array(await subtle.encrypt({ name: "AES-GCM", iv }, key, enc.encode("idb round-trip probe")));
+
+  // wrapped-key blob, wrapped under the non-extractable key itself.
+  const contentKey = await subtle.importKey("raw", crypto.getRandomValues(new Uint8Array(16)), "AES-GCM", true, ["encrypt"]);
+  const wIv = crypto.getRandomValues(new Uint8Array(12));
+  const wrapped = new Uint8Array(await subtle.wrapKey("raw", contentKey, key, { name: "AES-GCM", iv: wIv }));
+
+  await idbPut(db, "roundtrip", { key, wrapped, wIv, iv, ct });
+  const back = await idbGet(db, "roundtrip");
+
+  r.check("stored value returns from IndexedDB", Boolean(back), back ? "value returned" : "no value returned");
+  if (!back) return;
+  r.check("stored value returns as a CryptoKey (structured clone)", back.key instanceof CryptoKey, "constructor = " + (back.key && back.key.constructor && back.key.constructor.name));
+  r.check("retrieved key reports extractable = false", back.key.extractable === false, "");
+  const plain = dec.decode(await subtle.decrypt({ name: "AES-GCM", iv: back.iv }, back.key, back.ct));
+  r.check("retrieved key still DECRYPTS the test ciphertext", plain === "idb round-trip probe", plain);
+  r.check("retrieved key still REFUSES exportKey('raw')", await refused(() => subtle.exportKey("raw", back.key)), "non-extractable preserved across the round-trip");
+  const unwrapped = await subtle.unwrapKey("raw", back.wrapped, back.key, { name: "AES-GCM", iv: back.wIv }, "AES-GCM", false, ["encrypt"]);
+  r.check("stored wrapped-key blob unwraps under the retrieved key", unwrapped.extractable === false, "recovered contentKey handle is non-extractable");
+
+  await idbDel(db, "roundtrip");
+}
+
+/* ---- Storage test 2: real cross-reload survival ----
+ * First load: generate a key, store it, and ask the reader to reload.
+ * Reload:     read it back and run the unwrap/decrypt chain from the stored key. */
+async function storageSurvival(db, r) {
+  const existing = await idbGet(db, "survival");
+  if (!existing) {
+    const durable = await subtle.generateKey({ name: "AES-GCM", length: 256 }, false, ["wrapKey", "unwrapKey"]);
+    const contentBytes = crypto.getRandomValues(new Uint8Array(16));
+    const nC = crypto.getRandomValues(new Uint8Array(12));
+    const nM = crypto.getRandomValues(new Uint8Array(12));
+    const cForWrap = await subtle.importKey("raw", contentBytes, "AES-GCM", true, ["encrypt"]);
+    const wrappedContentKey = new Uint8Array(await subtle.wrapKey("raw", cForWrap, durable, { name: "AES-GCM", iv: nC }));
+    const cForEnc = await subtle.importKey("raw", contentBytes, "AES-GCM", false, ["encrypt"]);
+    const article = new Uint8Array(await subtle.encrypt({ name: "AES-GCM", iv: nM }, cForEnc, enc.encode("the paywalled article, survived a reload")));
+    await idbPut(db, "survival", { durable, wrappedContentKey, nC, nM, article, stored: new Date().toISOString() });
+
+    r.info("first load: a non-extractable key + a wrapped periodKey-style blob are now stored in IndexedDB", "Reload the page to prove the key survives and still decrypts with no key bytes ever leaving the handle.");
+    return { firstLoad: true };
+  }
+
+  r.check("stored durable key returned as a CryptoKey after reload", existing.durable instanceof CryptoKey, "");
+  r.check("stored durable key still REFUSES exportKey('raw') after reload", await refused(() => subtle.exportKey("raw", existing.durable)), "non-extractable survived the reload");
+  const contentKey = await subtle.unwrapKey("raw", existing.wrappedContentKey, existing.durable, { name: "AES-GCM", iv: existing.nC }, "AES-GCM", false, ["decrypt"]);
+  r.check("contentKey unwrapped from the stored blob is non-extractable", contentKey.extractable === false, "");
+  const plain = dec.decode(await subtle.decrypt({ name: "AES-GCM", iv: existing.nM }, contentKey, existing.article));
+  r.check("article decrypts after reload from the stored non-extractable key", plain === "the paywalled article, survived a reload", plain);
+  return { firstLoad: false, stored: existing.stored };
+}
+
+/* ---- Storage test 3: localStorage / sessionStorage negative ---- */
+async function localStorageNegative(r) {
+  const key = await subtle.generateKey({ name: "AES-GCM", length: 256 }, false, ["encrypt"]);
+  const json = JSON.stringify(key);
+  r.info("JSON.stringify(cryptoKey) yields " + json + ": the key reference is lost", "localStorage and sessionStorage hold strings only, so a CryptoKey cannot be stored there; the value round-trips as an empty object.");
+  try {
+    localStorage.setItem("dca-key-probe", json);
+    const back = localStorage.getItem("dca-key-probe");
+    localStorage.removeItem("dca-key-probe");
+    r.info("localStorage round-trip of that string returns " + back, "No usable key comes back. IndexedDB can store a CryptoKey because it structured-clones the value.");
+  } catch (e) {
+    r.info("localStorage was not available to demonstrate the negative", String(e && e.message || e));
+  }
+}
+
+function warnRow(label, detail) { return { status: "warn", label, detail: detail || "" }; }
+
+async function runStorage() {
+  const r = new Recorder();
+  let db = null;
+  let idbError = null;
+  try {
+    db = await idbOpen(3000);
+  } catch (e) {
+    idbError = e;
+  }
+
+  let survivalResult = null;
+
+  if (db) {
+    try {
+      survivalResult = await storageSurvival(db, r);
+    } catch (e) {
+      r.check("cross-reload survival check", false, "unexpected error: " + (e && e.message || e));
+    }
+    try {
+      await storageRoundTrip(db, r);
+    } catch (e) {
+      r.check("IndexedDB round-trip", false, "unexpected error: " + (e && e.message || e));
+    }
+  } else {
+    r.rows.push(warnRow(
+      "IndexedDB unavailable on this origin (open via localhost to test storage)",
+      (idbError && idbError.message ? idbError.message + ". " : "") +
+      "Some browsers (e.g. Safari) block IndexedDB on file://. The crypto proofs above use no storage and ran anyway."));
+  }
+
+  try {
+    await localStorageNegative(r);
+  } catch (e) {
+    r.rows.push(warnRow("localStorage negative could not run", String(e && e.message || e)));
+  }
+
+  renderSection("Storage  -  IndexedDB, cross-reload, localStorage", "What Node cannot run: whether a non-extractable CryptoKey survives real browser storage and a page reload.", r.rows);
+
+  // Reload banner + controls.
+  if (db && survivalResult) {
+    if (survivalResult.firstLoad) {
+      $banner.className = "";
+      $banner.style.display = "block";
+      $banner.innerHTML = "";
+      const msg = document.createElement("div");
+      msg.innerHTML = "<strong>Stored.</strong> A non-extractable key and a wrapped blob are now in IndexedDB. " +
+        "Reload this page to prove the key survives and still decrypts.";
+      const reloadBtn = document.createElement("button");
+      reloadBtn.textContent = "Reload to prove survival";
+      reloadBtn.onclick = () => location.reload();
+      const clearBtn = document.createElement("button");
+      clearBtn.textContent = "Clear & start over";
+      clearBtn.onclick = async () => { try { await idbDel(db, "survival"); } catch {} location.reload(); };
+      $banner.appendChild(msg);
+      $banner.appendChild(reloadBtn);
+      $banner.appendChild(clearBtn);
+    } else {
+      $banner.className = "survived";
+      $banner.style.display = "block";
+      $banner.innerHTML = "";
+      const msg = document.createElement("div");
+      msg.innerHTML = "<strong>Survived the reload.</strong> The stored non-extractable key opened the wrapped blob and decrypted the article" +
+        (survivalResult.stored ? " (stored " + survivalResult.stored + ")" : "") + ". Its bytes never left the handle.";
+      const clearBtn = document.createElement("button");
+      clearBtn.textContent = "Clear & start over";
+      clearBtn.onclick = async () => { try { await idbDel(db, "survival"); } catch {} location.reload(); };
+      $banner.appendChild(msg);
+      $banner.appendChild(clearBtn);
+    }
+  }
+}
+
+/* ---- Which browser ran this, so whoever runs the page can quote it with the results ---- */
+
+// The user-agent string names the engine more reliably than the browser:
+// Chromium builds still carry Safari in the string, and iOS browsers all report
+// WebKit. Chromium's userAgentData names the browser more directly, so ask that
+// first and fall back to parsing common tokens.
+function labelFromUserAgent() {
+  const ua = navigator.userAgent;
+  const named = [
+    [/FxiOS\/([\d.]+)/, "Firefox iOS"],
+    [/EdgiOS\/([\d.]+)/, "Edge iOS"],
+    [/OPiOS\/([\d.]+)/, "Opera iOS"],
+    [/CriOS\/([\d.]+)/, "Chrome iOS"],
+    [/Firefox\/([\d.]+)/, "Firefox"],
+    [/Edg\/([\d.]+)/, "Edge"],
+    [/OPR\/([\d.]+)/, "Opera"],
+    [/Chrome\/([\d.]+)/, "Chrome"],
+    [/Version\/([\d.]+).*Safari/, "Safari"],
+  ];
+  for (const [re, name] of named) {
+    const m = ua.match(re);
+    if (m) return name + " " + m[1];
+  }
+  return "Unknown browser";
+}
+
+async function browserLabel() {
+  const uad = navigator.userAgentData;
+  if (!uad || typeof uad.getHighEntropyValues !== "function") return labelFromUserAgent();
+  try {
+    const hi = await uad.getHighEntropyValues(["fullVersionList"]);
+    // Chromium adds deliberate padding brands ("Not)A;Brand") to break brand
+    // sniffing, and lists Chromium itself alongside the actual browser.
+    const real = (hi.fullVersionList || []).filter((b) => !/not.*a.*brand/i.test(b.brand));
+    const pick = real.find((b) => !/^chromium$/i.test(b.brand)) || real[0];
+    if (!pick) return labelFromUserAgent();
+    return pick.brand + " " + pick.version;
+  } catch {
+    return labelFromUserAgent();
+  }
+}
+
+async function showEnvironment() {
+  const label = await browserLabel();
+  const where = location.protocol === "file:" ? "file://" : location.origin;
+  $env.textContent = label + "  -  " + where
+    + (globalThis.isSecureContext ? " (secure context)" : " (NOT a secure context)");
+}
+
+async function runAll() {
+  await showEnvironment();
+
+  if (!globalThis.crypto || !globalThis.crypto.subtle) {
+    $summary.className = "bad";
+    $summary.textContent = "crypto.subtle unavailable: open this file directly (file://) or over https, both secure contexts.";
+    return;
+  }
+
+  for (const [name, desc, fn] of CRYPTO_PROOFS) {
+    const r = new Recorder();
+    try {
+      await fn(r);
+    } catch (e) {
+      r.check(name + " threw before finishing", false, "unexpected error: " + (e && e.stack || e && e.message || e));
+    }
+    renderSection(name, desc, r.rows);
+    updateSummary();
+  }
+
+  await runStorage();
+  updateSummary();
+}
+
+runAll().catch((e) => {
+  $summary.className = "bad";
+  $summary.textContent = "Runner error: " + (e && e.message || e);
+});
+</script>

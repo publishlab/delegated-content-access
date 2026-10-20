@@ -1,9 +1,0 @@
-{
-    "script": "python/v1/bridge.py",
-    "command": "python/v1/bridge",
-    "prepare": { "command": "python/install-toolchain" },
-    "operations": [
-        "decode-base64url", "hkdf-sha256", "open-aes-gcm", "seal-aes-gcm", "ecdh-p256", "p256-point",
-        "open-rsa-oaep"
-    ]
-}

@@ -7,26 +7,29 @@
 # it by hand is optional.
 #
 #   ./install-toolchain                    # install if absent, then print BASE
+#   ./install-toolchain --version <token>  # the pin `versions` lists for <token>; default when absent
 #   ./install-toolchain --base <dir>       # use this JDK as is, fetch no JDK
 #   ./install-toolchain --cache-root <dir> # put or find the JDK under this root
 #   ./install-toolchain --print-base       # print where BASE is or would be, install nothing
 #   ./install-toolchain --print-bin        # print the java binary a caller drives, install nothing
 #   ./install-toolchain --print-cache      # print this lane's cache dir, install nothing
-#   ./install-toolchain --print-classpath  # print the JSON library classpath, install nothing
 #   ./install-toolchain --force            # re-download over an existing install
 #   ./install-toolchain --help             # this text
 #
 # Run it directly: the shebang names bash.
+#
+# The version comes from --version, else DCA_VERSION, else `default`, the first
+# default line of `versions` beside this script. A token that file does not
+# list is refused with exit 2. Each version installs into a directory of its
+# own, so two versions sit side by side in one cache.
 #
 # BASE is the unpacked JDK: the directory JAVA_HOME names, with bin/java and
 # bin/javac under it. --print-bin answers with bin/java because that is the
 # binary a caller drives; the lane wrapper reaches bin/javac from BASE itself.
 # Nothing here searches PATH and nothing here is put on PATH.
 #
-# The pinned Jackson jars this lane reads its batch through land beside the JDK,
-# under the same cache dir. --print-classpath answers with them joined by ':'
-# whether or not they have been fetched yet, so a caller that must not download
-# can ask where they would be.
+# This installs only the runtime. A binding's libraries, such as the Jackson
+# jars, are pinned and installed by that binding, under jca-jackson/ for example.
 #
 # --cache-root and --print-cache are one level apart, which is why the flag
 # carries the word root: the root holds every lane and this lane's directory is
@@ -43,29 +46,24 @@
 set -euo pipefail
 
 # Pinned by release name, not by `latest`. The Adoptium `latest` endpoint moves
-# to the next CPU the day it ships, and these checksums stop matching. Bumping
-# the pin means changing all three values below together, from the API:
+# to the next CPU the day it ships, and these checksums stop matching. Each
+# token's release name is the second field of its line in `versions`, and its
+# two checksums are below, keyed by token; the token is the feature release, so
+# 21 is Temurin 21 LTS. Bumping a pin means changing the release there and both
+# checksums here together, from the API:
 #   https://api.adoptium.net/v3/assets/latest/21/hotspot?architecture=x64&image_type=jdk&os=linux&vendor=eclipse
-JDK_RELEASE='jdk-21.0.12.1+1'          # Temurin 21 LTS, java -version says 21.0.12.1
-SHA256_x64=ce79869e1307ed8ee1e2baa86a412b1eb5b75d10a01006d788a6f968bcfaee94
-SHA256_aarch64=23e37e026f12f3e706f18938ff611db3032d075b09d0879a25d06718c773e223
-
-# The JSON library, pinned to exact versions rather than to a range. Maven
-# Central serves a .sha256 beside every jar and the three digests below were read
-# off it. jackson-databind fixes the other two: jackson-bom 2.22.2 resolves
-# jackson-core to 2.22.2 and jackson-annotations to 2.22. All three are
-# Apache-2.0 and all three target Java 8 bytecode, which the pinned JDK runs.
-# Bumping the pin means changing a version and its digest together, from:
-#   https://repo1.maven.org/maven2/com/fasterxml/jackson/core/jackson-databind/maven-metadata.xml
-MAVEN_CENTRAL=https://repo1.maven.org/maven2
-JACKSON_JARS=(
-  "com/fasterxml/jackson/core/jackson-databind/2.22.2/jackson-databind-2.22.2.jar d0da14c12b16b5d54719aa172d83b542ff4abeb8b0fb7db476fde8ceece760ca"
-  "com/fasterxml/jackson/core/jackson-core/2.22.2/jackson-core-2.22.2.jar ff167a6317be15895706c26668f45b898efe40ab8780970658210fe1393d52a6"
-  "com/fasterxml/jackson/core/jackson-annotations/2.22/jackson-annotations-2.22.jar 21ddb598807d3a51a876704eb979d9296e1c6a6f47ab1826ff88c6d6a127a2d0"
-)
-
-# The asset spells the same build with an underscore: jdk-21.0.12.1+1 -> 21.0.12.1_1
-ASSET_VERSION="$(printf '%s' "${JDK_RELEASE#jdk-}" | tr '+' '_')"
+pin_checksums() {
+  case "$1" in
+    21) SHA256_x64=ce79869e1307ed8ee1e2baa86a412b1eb5b75d10a01006d788a6f968bcfaee94
+        SHA256_aarch64=23e37e026f12f3e706f18938ff611db3032d075b09d0879a25d06718c773e223 ;;
+    *) echo "versions lists $1, and this installer carries no checksum for it." >&2
+       echo "Add both checksums for its release to pin_checksums before the token can install." >&2
+       exit 2 ;;
+  esac
+  # The asset spells the same build with an underscore: jdk-21.0.12.1+1 -> 21.0.12.1_1
+  ASSET_VERSION="$(printf '%s' "${JDK_RELEASE#jdk-}" | tr '+' '_')"
+  JDK_FEATURE="$1"
+}
 
 # Which pinned asset this host would download, resolved on the leg that
 # downloads one and nowhere else.
@@ -94,7 +92,7 @@ pinned_platform() {
     *) echo "unsupported arch $(uname -m); install Temurin ${JDK_RELEASE} by hand and pass --base" >&2; exit 2 ;;
   esac
   sha_var="SHA256_${JARCH}"; WANT_SHA="${!sha_var}"
-  TARBALL="OpenJDK21U-jdk_${JARCH}_linux_hotspot_${ASSET_VERSION}.tar.gz"
+  TARBALL="OpenJDK${JDK_FEATURE}U-jdk_${JARCH}_linux_hotspot_${ASSET_VERSION}.tar.gz"
 }
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -113,6 +111,7 @@ base=""
 cache_root=""
 print=""
 force=0
+version="${DCA_VERSION:-default}"
 while [ $# -gt 0 ]; do
   case "$1" in
     --base)
@@ -121,15 +120,23 @@ while [ $# -gt 0 ]; do
     --cache-root)
       [ $# -ge 2 ] || { echo "--cache-root needs a directory to hold the lanes" >&2; exit 2; }
       resolve_absolute_path "$2"; cache_root="$DCA_ABSOLUTE_PATH"; shift 2 ;;
+    --version)
+      [ $# -ge 2 ] || { echo "--version needs a token from $HERE/versions, or default" >&2; exit 2; }
+      version="$2"; shift 2 ;;
     --print-base)  print=base; shift ;;
     --print-bin)   print=bin; shift ;;
     --print-cache) print=cache; shift ;;
-    --print-classpath) print=classpath; shift ;;
     --force)       force=1; shift ;;
     --help|-h)     awk 'NR>1 && /^#/ { sub(/^# ?/, ""); print; next } NR>1 { exit }' "${BASH_SOURCE[0]}"; exit 0 ;;
     *) echo "unknown argument: $1" >&2; exit 2 ;;
   esac
 done
+
+# The version first: an unlisted token refuses every action, print queries
+# included, so no caller is handed a path for a version nobody pinned.
+resolve_version_pin "$HERE/versions" "$version" || exit 2
+JDK_RELEASE="$DCA_VERSION_RELEASE"
+pin_checksums "$DCA_VERSION_TOKEN"
 
 if [ -n "$cache_root" ]; then
   CACHE="$cache_root/jvm"
@@ -142,19 +149,6 @@ fi
 # first, ahead of everything that depends on the pin.
 if [ "$print" = cache ]; then printf '%s\n' "$CACHE"; exit 0; fi
 
-# The jars sit under the lane's cache dir beside the JDK. Their file names carry
-# their versions, so a bumped pin writes new files rather than over the old ones,
-# and a classpath built from the pin names only the jars this pin asks for.
-JARS="$CACHE/jars"
-jackson_classpath() {
-  CLASSPATH=""
-  local entry name
-  for entry in "${JACKSON_JARS[@]}"; do
-    name="${entry%% *}"
-    CLASSPATH="${CLASSPATH:+$CLASSPATH:}$JARS/${name##*/}"
-  done
-}
-
 BASE="${base:-$CACHE/$JDK_RELEASE}"
 JAVA_BIN="$BASE/bin/java"
 JAVAC_BIN="$BASE/bin/javac"
@@ -165,7 +159,6 @@ JAVAC_BIN="$BASE/bin/javac"
 case "$print" in
   base)  printf '%s\n' "$BASE"; exit 0 ;;
   bin)   printf '%s\n' "$JAVA_BIN"; exit 0 ;;
-  classpath) jackson_classpath; printf '%s\n' "$CLASSPATH"; exit 0 ;;
 esac
 
 # --force and --base name opposite things, and taken together this script
@@ -242,35 +235,5 @@ fi
 # Printed on the reuse path too. If a JDK is off PATH and nobody can name it,
 # the next caller downloads it again, or concludes it is not there.
 [ "$installed" = 1 ] || echo "already present at $BASE" >&2
-
-# The jars, fetched one at a time and only when absent. A jar is checked against
-# its pinned digest while it is still a temp file, so a download that does not
-# match is thrown away and the cache keeps whatever it already had. The same
-# exclusive lock the JDK install takes covers this, because one cache dir is
-# shared across containers and across concurrent runs. --base names a JDK and
-# says nothing about the jars, so this runs under it too.
-mkdir -p "$JARS"
-exec 9>"$CACHE/.install.lock"
-flock 9
-for entry in "${JACKSON_JARS[@]}"; do
-  jar_path="${entry%% *}"
-  want_sha="${entry##* }"
-  jar="$JARS/${jar_path##*/}"
-  if [ "$force" = 1 ] || [ ! -f "$jar" ]; then
-    jar_tmp=""
-    trap 'rm -f "$jar_tmp"' EXIT
-    jar_tmp="$(mktemp "$jar.XXXXXX")"
-    echo "fetching ${jar_path##*/} (needs network) ..." >&2
-    curl -fSL --max-time 300 -o "$jar_tmp" "$MAVEN_CENTRAL/$jar_path"
-    echo "${want_sha}  $jar_tmp" | sha256sum -c - >&2
-    # mktemp makes a file only its owner can read, and one cache dir is read by
-    # every run that names it, so the jar goes back to ordinary read permissions.
-    chmod 644 "$jar_tmp"
-    # The rename is the last step, so a jar on the classpath is a whole jar.
-    mv "$jar_tmp" "$jar"
-    trap - EXIT
-  fi
-done
-exec 9>&-
 
 printf '%s\n' "$BASE"

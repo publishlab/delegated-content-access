@@ -5,9 +5,9 @@ Status: Public Working Draft
 ## Abstract
 
 This document defines the minimum interoperable DCA v1 profile and optional
-profiles that compose browser-origin enforcement, exact-period caching,
-layered content representations, client-bound key custody and an issuer report
-that a family received no capability. It distinguishes what an implementation supports
+profiles that compose the HTML carrier, browser-origin enforcement,
+period-key caching, content compression, client-bound key custody and
+recipient-grant unlock. It distinguishes what an implementation supports
 from what a deployment enables and selects.
 
 <a id="1-scope-and-requirements-language"></a>
@@ -17,28 +17,52 @@ This document selects mechanisms defined by the DCA topic specifications. It
 does not reproduce their algorithms, wire grammar, authority or local failure
 rules. A profile adds requirements that only the complete composition creates;
 the linked topic specification remains the normative specification for each mechanism.
+The [overview glossary](spec---overview.md#terms-across-the-specifications)
+distinguishes a profile from an endpoint binding, response agreement and key kind.
 
 The profile names in this document identify conformance claims. They are not
 wire values unless another specification explicitly carries them.
+Each identifier names the fixed duties and dependency contract this document
+assigns to it. Editorial clarification and use of an explicitly specified
+compatible extension point do not change that identity. A later DCA release
+may reuse an unchanged profile identifier; it MUST use a distinct identifier
+when it changes duties, dependencies or their interpretation incompatibly.
+This rule also applies to the baseline: `dca-profile-baseline` denotes the DCA
+v1 baseline duties below, not a moving alias for the latest release.
 
-This document designates `dca-v1-direct-https` as the **baseline**: the one
+This document designates `dca-profile-baseline` as the **baseline**: the one
 default profile from which DCA v1 implementations start. The term and the
 identifier refer to the same profile; baseline is not a second unnamed profile
-or a layer above it.
-
-The optional profiles make additional capabilities and wire-cost choices
-interoperable without requiring every implementation to carry every mechanism.
-A deployment can select only the paths it uses and, where the owning profile
-permits it, omit redundant request or response material and the work needed to
-process it. That can reduce transferred bytes, bandwidth cost and transfer
-latency; it does not guarantee lower end-to-end latency. A simple
-implementation can remain baseline-only. Each optional profile therefore has
-to earn its additional implementation and testing complexity with a complete,
-usable cross-role path.
+or a layer above it. The baseline is the interoperability floor, not a
+deployment recommendation:
+[deployment guidance](guide--deployment-patterns.md#choosing-profiles)
+describes which optional profiles a deployment adds and who decides.
 
 The key words **MUST**, **MUST NOT**, **SHOULD** and **MAY** in this document
 are to be interpreted as described in BCP 14 when, and only when, they appear
 in all capitals.
+
+### 1.1. Separate profile documents
+
+This document is the profile catalogue and defines shared selection and
+composition rules. Each specialized feature keeps its profile duties with its
+feature specification in `spec-profile--<name>.md`. This catalogue records
+which complete composition an implementer selects, its dependencies and where
+to read its duties. Each feature document states its status and whether the
+profile is required or optional; the filename alone implies neither.
+
+The [content groups profile](spec-profile--content-groups.md) is
+currently a **Proposal** for an optional profile. Its separate document keeps
+window seeds, content connectors and their cross-role requirements together.
+It does not change the current baseline or adopted profile requirements.
+
+The optional [compact ECDH profile](spec-profile--compact-ecdh.md),
+`dca-profile-compact-ecdh`, depends on `dca-profile-baseline`. It adds publisher
+HPKE sealing and compressed-point transport, client selector relay, and issuer
+configuration-gated opening. A publisher selects it per issuer block using
+`envelope`; the issuer public key and keyId can remain the same. Its separate
+specification defines the complete construction and duties. Baseline ECDH stays
+unchanged; support does not require use for every issuer.
 
 ## 2. Mechanism selection states
 
@@ -47,13 +71,13 @@ For a mechanism or profile in this document:
 - **implements** means the role contains conforming behavior and can be
   configured to use it;
 - **enables** means deployment configuration permits its use;
-- **authors** means a publisher makes a route or marked alternative available
+- **authors** means a publisher makes an item-opening or marked alternative available
   in a protected delivery;
 - **emits** means a producer places an operation's protocol member or result on
   the wire;
 - **offers** means one peer advertises a selectable behavior;
 - **selects** means the profile's deciding actor or trusted configuration
-  chooses behavior for its declared scope, such as a route, render, item,
+  chooses behavior for its declared scope, such as an issuer endpoint, render, item,
   request or response; and
 - **accepts** means the receiving peer admits and applies the selected result.
 
@@ -62,25 +86,16 @@ implement mechanism MAY remain disabled when the deployment selects another
 complete compatible path. Enabling one role's mechanism does not imply that
 another role supports it.
 
-An implementation MAY implement and test one role's profile duties without a
-deployed peer. That is support, not operational selection. A delivery MAY also
-carry optional material as one authored alternative. Its presence does not
-require a recipient to select or use it for every operation.
+A delivery MAY carry optional material as one authored alternative; its
+presence does not require a recipient to select or use it for every operation.
 
 An implementation MUST NOT infer from field presence alone that omission of
 another form selects the remaining form. The owning profile defines whether an
-omission removes a fallback and which duties complete the retained route.
-Before relying on that route, configuration MUST establish every assigned
+omission removes a fallback and which duties complete the retained alternative.
+Before relying on that alternative, configuration MUST establish every assigned
 relay, admission, consumption or conversion duty through the role that
 recovers a usable dependency form or consumes the optional form. Relay does not
 imply interpretation.
-
-Private use of a profile's construction or helper code, with no observable
-profile duty selected, remains an implementation choice. Where a role converts
-optional material to a dependency form, the selected optional path MAY end at
-that conversion and downstream roles need only the dependency profile.
-Carrying the optional form farther is another selection and binds the
-producer, intermediaries and consumer requirements for that continuation.
 
 A deployment configuration MAY request only its most-specific profile names.
 Before using that configuration, an implementation MUST resolve the baseline
@@ -94,59 +109,41 @@ both the requested profiles and the resolved profile closure.
 
 The named profiles do not all present the same kind of implementer choice:
 
-- `dca-v1-direct-https` is the baseline resolved for every DCA v1 claim, not an
+- `dca-profile-baseline` is the baseline resolved for every DCA v1 claim, not an
   optional feature toggle.
-- `dca-v1-browser-origin` is selected by a trusted browser-endpoint contract
+- `dca-profile-html-carrier` is selected per delivery by the publisher's
+  publication arrangement, for clients that implement the profile.
+- `dca-profile-browser-origin` is selected by a trusted browser-endpoint contract
   for routes that rely on calling-page-origin admission. An observed `Origin`
   header does not select it.
-- `dca-v1-exact-period` and the period-chain profile govern publisher-authored
-  optional routes; their role duties apply only where the deployment relies on
-  those routes.
-- `dca-v1-content-representations` is selected per item by an authored transform
-  list after publisher/client support has been established.
+- `dca-profile-period-keys` and the chain-key profile govern publisher-authored
+  optional item-opening alternatives; their role duties apply only where the
+  deployment relies on those alternatives.
+- `dca-profile-content-compression` is selected per item by the publisher
+  (Section 6).
 - a client-bound custody profile combines an endpoint contract, a client offer,
   issuer selection and response confirmation for one method.
-- `dca-v1-not-delivered-result` is selected by endpoint/deployment
-  configuration before a response is interpreted; its result member cannot
-  select its own meaning.
-
-These scopes do not dictate source packaging. A conforming implementation may
-keep optional behavior in ordinary role code, an adapter or a removable module
-while preserving the same externally observable requirements.
+- `dca-profile-recipient-grant-unlock` is selected for one recipient attempt by
+  trusted host configuration of the accepting issuer, publisher and resource;
+  the bearer or an untrusted link does not make that selection.
 
 The baseline does not select another named profile. It directly composes the
 required mechanisms listed in Section 3. Optional profiles resolve the baseline
 as their dependency; a focused mechanism selected by the baseline does not
 thereby become a nested profile.
 
-An implementation or conformance report may present that resolution as two
-arrays. `requestedProfiles` contains the most-specific requested profile
-identifiers and has set semantics: caller order carries no meaning and
-duplicates are invalid. `resolvedProfiles` contains the de-duplicated baseline,
-transitive dependencies and requested leaves in canonical dependency order.
-These names describe a reporting model; they are not DCA wire members.
+A conformance report may present the requested profiles and their resolved
+closure as arrays; the
+[profile catalogue README](../verification/profile-catalogue/README.md)
+defines that projection.
 
-For the intended post-normalization period-chain name, the projection is:
+## 3. `dca-profile-baseline` profile
 
-```text
-requestedProfiles: [dca-v1-period-chain]
-resolvedProfiles:  [dca-v1-direct-https,
-                    dca-v1-exact-period,
-                    dca-v1-period-chain]
-```
-
-The current period-chain identifier remains `dca-period-chain-v1` until the
-coordinated migration described in Section 5. The profile arrays declare
-profile closure. They do not encode scope-specific selections such as supply
-form, response representation, transform list or fallback permission; a claim
-records those separately in the typed configuration owned by the applicable
-profile.
-
-## 3. `dca-v1-direct-https` baseline
-
-The baseline profile is one complete direct-content-key path over HTTPS. A
-conforming baseline implementation supports the portions applicable to each
-role it claims.
+The baseline profile is one complete path. The publisher delivers the
+protected items in one serialized JSON document, and the issuer returns an
+item's content key in direct transport mode over HTTPS. A conforming
+baseline implementation supports the portions applicable to each role it
+claims.
 
 ### 3.1. Common substrate
 
@@ -157,8 +154,8 @@ All roles in the path implement the applicable requirements of:
 - [spec--content-protection.md](spec--content-protection.md);
 - [spec--sealed-key-envelopes.md](spec--sealed-key-envelopes.md);
 - [spec--response-binding.md](spec--response-binding.md); and
-- the DCA HTTPS JSON profile in
-  [spec--browser-http-binding.md](spec--browser-http-binding.md).
+- the DCA HTTPS JSON mechanism in
+  [spec--http-binding.md](spec--http-binding.md).
 
 The common cryptographic substrate is canonical unpadded base64url, ES256 for
 the publisher assertion and AES-128-GCM for item protection. Each claimed role
@@ -169,249 +166,179 @@ MUST implement the operations it performs.
 A baseline publisher:
 
 - produces at least one protected item and a conforming ES256
-  `resourceJWT`;
-- implements and emits the markup carrier for baseline interchange;
-- authors at least one usable direct sealed-content-key route for every item;
+  `resourceJWT`, signed before item encryption;
+- encrypts each item under the content AAD of
+  [content protection Section 3.2](spec--content-protection.md#32-content-aad)
+  using the fixed twelve-zero-octet nonce and a fresh independent key for one
+  encryption, and omits item `aad` and `nonce` members;
+- implements the JSON delivery of
+  [data format Section 6](spec--data-format.md#6-object-delivery);
+- authors at least one usable issuer-mediated item content-key envelope for
+  every item;
+- declares `contentEncodings` as
+  [content protection Section 8.1](spec--content-protection.md#81-ordered-representation-layers)
+  requires;
 - implements the `ecdh-p256` publisher-to-issuer envelope; and
-- emits the route using the envelope algorithm selected for that issuer.
+- emits each issuer envelope using the algorithm selected for that issuer.
 
-The publisher MAY also implement object delivery and optional routes. Object
-delivery is an additional declared carrier capability; it does not replace
-markup when the delivery claims compatibility with a baseline-only client.
-Optional routes do not replace the direct route for such a delivery.
+The publisher MAY also implement the HTML carrier (Section 9) and optional
+item-opening alternatives.
 
 ### 3.3. Issuer requirements
 
 A baseline issuer:
 
 - implements ES256 publisher verification and the core processing order;
-- implements the `ecdh-p256` envelope opener and direct-content-key result;
+- implements the `ecdh-p256` envelope opener and item content-key result;
 - implements direct response representation; and
 - exposes a conforming DCA HTTPS JSON endpoint.
 
-Caller authentication and business policy remain deployment choices, but the
-browser-facing endpoint MUST supply an authenticated principal or an explicit
-anonymous principal to policy as required by core.
-An unavailable or unusable entitlement source supplies no policy decision, so
-the issuer fails closed and returns no key material as core requires.
+Caller authentication and business policy remain deployment choices inside
+[core Section 6.2](spec--core-protocol.md#62-authentication-and-policy).
 
 ### 3.4. Client requirements
 
 A baseline client:
 
-- implements and accepts the markup carrier for baseline interchange and the
-  core request relay;
+- consumes the JSON delivery as serialized octets under
+  [data format Sections 2, 6 and 7](spec--data-format.md#6-object-delivery);
+  a client that accepts only a language-native object does not meet this
+  duty;
+- implements the core request relay;
 - implements DCA HTTPS JSON with direct response admission;
-- admits only response coordinates presented by its associated request;
-- recognizes `contentEncodings` and fails a marked item unless it has selected
-  compatible inverse transforms; and
-- opens the protected item under the admitted 16-octet direct `contentKey`.
+- admits a response coordinate only when it was presented by the associated
+  request or belongs to a deterministically checkable admissible result set
+  that an implemented, selected capability extension derives from an admitted,
+  presented source coordinate, under [core Section 7](spec--core-protocol.md#7-baseline-issuer-core-result);
+- processes `contentEncodings` as
+  [content protection Section 8.1](spec--content-protection.md#81-ordered-representation-layers)
+  requires; and
+- builds the content AAD of
+  [content protection Section 3.2](spec--content-protection.md#32-content-aad)
+  from the captured render ID and item name, uses the implicit twelve-zero-octet
+  nonce, ignores carried item `aad` and `nonce` members, and
+  opens the protected item under the admitted 16-octet `contentKey`.
 
-It need not implement reusable period capabilities, period chains,
-client-bound custody or browser CORS.
+It need not implement the HTML carrier, any named content transform,
+reusable period capabilities, chain keys, client-bound custody or browser
+CORS. A baseline client that parses no HTML and supports no transform
+conforms.
 
 ### 3.5. Mandatory-to-implement versus selected algorithms
 
-`ecdh-p256` is mandatory to implement for baseline publisher and issuer roles.
 `rsa-oaep` is optional to implement. A deployment MAY select `rsa-oaep` for an
-issuer when both publisher and issuer implement it; the algorithm is selected
-by the registered issuer key and is not carried in the envelope.
+issuer when both publisher and issuer implement it.
 
 Direct response representation is mandatory to implement for baseline issuer
 and client roles but optional to enable for deployments that select a complete
 client-bound profile. A client-bound-only deployment is conforming only when
 its endpoint fails rather than silently selecting direct representation.
 
-These rules keep one common implementation path across deployments without
-forcing a deployment to use every mandatory-to-implement mechanism.
+### 3.6. Compatibility with a baseline-only client
 
-## 4. `dca-v1-browser-origin` profile
+A baseline-only client needs all of the conditions below to consume a
+delivery. This section summarizes the cited requirements and adds none.
+
+- **Key route.** Every item has an envelope from which the issuer of a usable
+  issuer block returns that item's content key
+  ([core Section 9](spec--core-protocol.md#9-delegation-completeness)).
+- **Endpoint configuration.** The client holds trusted endpoint configuration
+  for that issuer in the publisher's context
+  ([core Section 9](spec--core-protocol.md#9-delegation-completeness)); the
+  delivery supplies no endpoint.
+- **Carrier.** The publication offers the delivery as the JSON document,
+  through the access arrangement the deployment has established for its
+  publications, and that document supplies the ciphertext of each item the
+  client is to open. An HTML-only publication does not meet this condition,
+  and neither does a conversion that the client cannot use (Section 9 and
+  [HTML carrier Section 2](spec-profile--html-carrier.md#2-profile-selection-and-role-duties)).
+- **Representation.** No item carries `contentEncodings`. The baseline
+  guarantees no named decoder, so a baseline client fails a marked item
+  unless it supports every named transform (Section 3.4).
+- **Endpoint.** The issuer route's endpoint admits the client's request under
+  DCA HTTPS JSON, with the caller authentication that the deployment chose
+  (Section 3.3). An endpoint that admits browser-origin callers only refuses
+  a request without `Origin`
+  ([browser-origin Section 2.2](spec-profile--browser-origin.md#22-observed-origin-admission)).
+- **Response.** The endpoint returns the direct response representation. A
+  client-bound-only endpoint fails the request instead (Section 3.5).
+
+Obtaining a content key satisfies one condition. The client still needs
+support for each item's content representation; obtaining the key or
+completing the HTTPS exchange establishes no such support.
+
+## 4. `dca-profile-browser-origin` profile
 
 This optional profile composes the baseline with the DCA browser-origin mechanism
-in [spec--browser-http-binding.md](spec--browser-http-binding.md). The
-publisher, browser client, issuer endpoint and any trusted proxy implement all
+in [the browser-origin profile](spec-profile--browser-origin.md). The
+publisher, browser client, issuer endpoint and any trusted proxy implement the
 requirements assigned to them there.
 
-The publisher signs the canonical delivery origin. The browser platform
-supplies the `Origin` header; a page cannot override that browser-provided
-value at the trusted HTTP boundary. The issuer
-requires verified signed/observed-origin equality before response-cache,
-policy-decision or opening-key work and emits CORS permission only as that
-profile permits.
+[Security model Section 4](spec--security-model.md#enforcement-boundary) and
+[browser-origin security considerations](spec-profile--browser-origin.md#3-security-considerations-browser-failures-and-privacy)
+state what this boundary does not cover.
 
-This profile provides the stated calling-page-origin boundary. It does not
-authenticate the caller, replace HTTPS issuer authentication, stop a
-non-browser caller or protect against script executing in the admitted origin.
+Credentialed browser mode
+([browser-origin Sections 2.4 and 2.5](spec-profile--browser-origin.md#24-cors-response))
+is not a separately named DCA profile.
 
-An uncredentialed browser call is the profile default. A deployment using
-browser credentials additionally enables credentialed browser mode and
-configures both Fetch credential mode and exact-origin credentialed CORS. That
-mode is not a separately named DCA profile.
+## 5. `dca-profile-period-keys` profile
 
-## 5. `dca-v1-exact-period` profile
+The optional [period-key profile](spec-profile--period-keys.md#2-profile-selection-and-role-duties)
+selects reusable period-key supply, item wraps, issuer delivery and client
+caching. It depends on `dca-profile-baseline`; every affected role follows
+the duties in that document. Selection is required when a publication relies
+on period-key wraps alone for opening.
 
-This optional profile adds reusable exact period-key delivery and caching. It
-depends on [spec--period-keys.md](spec--period-keys.md) and the exact-period
-content-key wrapping transcript in
-[spec--content-protection.md](spec--content-protection.md).
+### 5.1. `dca-profile-chain-keys` profile
 
-When selected:
+The optional [chain-key profile](spec-profile--chain-keys.md#12-profile-selection-and-dependencies)
+depends on `dca-profile-period-keys`. It adds the canonical construction,
+chain supply, relay and response duties defined together in that document.
+Supply forms and issuer output choices do not create further profile names.
 
-- the publisher produces exact period capabilities at this profile's 16-octet
-  width, wraps the one item `contentKey` at every emitted `(accessGroup, t)`
-  with AES-128-GCM and supplies at least one issuer-mediated matching exact
-  route;
-- the request path relays admitted exact coordinates required by unresolved
-  items and SHOULD omit coordinates already satisfied locally;
-- the issuer opens and returns only presented and authorized exact leaves; and
-- the client admits, scopes, stores and attempts exact candidates according to
-  the period and content-protection specifications.
+<a id="52-fixed-v1-width-and-security-positioning"></a>
+### 5.2. Fixed v1 width
 
-Every affected publisher, issuer and client role MUST implement this profile
-before a deployment relies on an exact-only authoring route. For that selected
-deployment, the exact route MAY replace emission of the baseline direct route;
-all roles still implement the baseline mechanisms applicable to them. Such a
-delivery is not baseline-compatible. An item that retains a baseline direct
-route remains openable by a baseline-only client.
+Every delivered `contentKey`, `periodKey` and positioned `chainKey` is 16
+octets, as [envelopes Section 2](spec--sealed-key-envelopes.md#2-envelope-model)
+requires.
 
-Selecting exact-period support does not select the period-chain profile, chain
-relay, chain response acceptance, content representations, browser CORS or
-client-bound custody.
+## 6. `dca-profile-content-compression` profile
 
-### 5.1. `dca-period-chain-v1` profile
+This optional profile composes the baseline with the `gzip` transform in
+[content protection Section 8.2](spec--content-protection.md#82-gzip-transform).
+The baseline already requires ordered `contentEncodings` processing; this
+profile adds one guaranteed transform sequence. It changes only the publisher
+and client roles. Issuers and their key-delivery behavior are unaffected and
+acquire no duty.
 
-The remaining period-chain rules in this section apply only when the
-period-chain profile is additionally selected and its exact-period dependency
-has resolved. Exact-period alone authorizes no chain carrier, relay, issuer
-processing or chain-state response.
+A publisher that claims the profile implements the `gzip` forward operation
+and can emit an item whose `contentEncodings` is exactly `["gzip"]`. A client
+that claims the profile implements the `gzip` inverse operation and opens
+such an item. Each role MUST meet the stream contract of that section in
+full; a decoder that accepts concatenated members, ignores trailer integrity
+or releases partial output does not satisfy the claim.
 
-The profile relationship is:
+Support is mandatory for a role that claims the profile. Use stays a per-item
+publisher choice: the publisher MAY compress an item or leave it unencoded,
+and it selects compression only where the deployment has established that the
+intended clients support the profile. The list that an item carries is the
+selection signal. The profile defines no capability negotiation, unlock-time
+offer or HTTP compression behavior.
 
-```text
-dca-v1-direct-https                 baseline profile
-└── dca-v1-exact-period             optional conformance profile
-    └── dca-period-chain-v1         optional period-chain profile
-```
-
-The hierarchy states dependencies, not three key types. A direct-only
-deployment selects neither optional profile. The period-chain profile depends
-on the exact-period floor. Its canonical construction produces positioned
-chain capability and the same exact `periodKey[t]` leaves that exact-only
-issuers and clients use.
-
-For each issuer route, the publisher may supply exact members, chain members
-or both as the period-chain specification permits. Chain material beside a
-complete exact supply does not require the issuer to use it. If the route omits
-the exact period members and an operation relies on that period route, the
-request path MUST relay the chain material and the issuer MUST accept and
-process it; otherwise that route is not usable. A separately authored direct
-content-key route remains an alternative and is not forced through the chain.
-
-The omission occurs in the issuer-capability layer. The item's period route
-still wraps its `contentKey` under exact `periodKey[t]` leaves. The issuer block
-supplies either exact period capability, chain capability from which the same
-leaves can be derived, or both.
-
-These supply shapes do not create separate profile identifiers. Exact-only
-supply is the dependency path. Exact-plus-chain supply permits transition or a
-chain-capable alternative but adds publisher-delivery bytes. Only chain-only
-period supply can reduce publisher-delivery bytes by replacing exact issuer
-members. It requires the relay and issuer-input obligations above only when an
-operation relies on that retained route. Within one chain window, extending
-the authorized cutoff does not add another chain member, while exact supply
-adds one member per additional period. Chain supply thus preserves fine period
-granularity while its member count scales with touched windows rather than
-granted periods. The actual byte saving depends on the envelope algorithm,
-number of exact members replaced, number of chain windows supplied and
-compression used for delivery.
-
-A chain-input issuer MAY project authorized exact leaves into the exact-period
-response, so the client need not implement chain derivation. Returning
-positioned chain state selects an additional response path: the issuer MUST
-emit it only for a client population and transport configured to accept it,
-and that client MUST admit, retain and derive it under the period-chain rules.
-
-The current `dca-period-chain-v1` spelling is inconsistent with the other
-named DCA v1 profiles. The intended pre-v1 name is `dca-v1-period-chain`.
-Until that change lands, the current spelling remains the profile identifier
-and also enters its canonical construction's derivation contexts, so the
-change requires new derived bytes and corresponding evidence.
-
-Selection occurs from trusted publisher and deployment configuration before a
-render is produced. Merely implementing exact-period or period-chain behavior
-does not select it. When no complete exact-period issuer route is selected, the
-publisher omits item period wraps and sealed period material. DCA v1 defines
-no runtime issuer-capability advertisement from which a publisher can infer
-selection, and a client request arrives too late to change an existing render.
-
-### 5.2. Fixed v1 width and security positioning
-
-DCA v1 MUST use exactly 16 octets for each delivered `contentKey`, exact
-`periodKey` and positioned `periodChainKey`. Content encryption and exact
-content-key wrapping use AES-128-GCM. This width applies before sealing and
-after opening, including direct delivery and permitted client-bound `c`/`p`
-delivery; `pc` remains forbidden on client-bound transport. A publisher, issuer
-or client MUST NOT select a second width, infer a profile from length,
-accept a retired width profile, or emit duplicate width-specific wrap sets.
-
-The canonical construction fixed by the optional `dca-period-chain-v1` profile
-produces the same 16-octet exact leaves consumed by Section 5. It does not
-alter their width or meaning. Its publisher-retained derivation secret remains
-32 octets. The internal
-publisher-to-issuer P-256 shared coordinate and issuer-to-client ECDH/HKDF
-transport key each remain 32-octet AES-256-GCM keys; they are not delivered
-capabilities. A shared AES helper may admit both widths only after its caller
-identifies the operation and validates that operation's required width.
-
-The remainder of this subsection is informative.
-
-One fixed width gives all producers and consumers one delivered-key contract.
-Mandatory support for two widths is technically possible, but adds a conforming
-state without a current requirement. Per-route selection risks incompatible
-consumers; duplicate wraps increase wire cost. Neither supplies a post-quantum
-property to the current public-key suite. A different width or security target
-requires a new suite/specification version, not another v1 profile.
-
-V1 targets 128-bit classical symmetric-key strength. NIST uses AES-128 key
-search as its post-quantum Category 1 comparison reference; that is not a
-128-bit quantum-security claim. A chain state grants a bounded window prefix,
-so its disclosure reaches more coordinates than disclosure of one exact leaf.
-The current P-256/RSA envelopes and ES256 signatures are not post-quantum.
-A future transition needs new public-key suites and a publication/retirement
-strategy; it cannot erase copied v1 artifacts or retrofit their confidentiality.
-See NIST's
-[post-quantum security categories](https://csrc.nist.gov/projects/post-quantum-cryptography/post-quantum-cryptography-standardization/evaluation-criteria/security-%28evaluation-criteria%29)
-and [post-quantum FAQ](https://csrc.nist.gov/Projects/Post-Quantum-Cryptography/faqs).
-
-A 16-octet capability encodes to 22 unpadded-base64url characters. Exact wraps
-contain 16 ciphertext octets and a 16-octet tag, and P-256 publisher envelopes
-are 109 decoded octets. Each AEAD-encrypted key payload therefore carries 16
-raw octets of key material, in every content-key wrap and applicable issuer
-envelope. RSA ciphertexts remain
-modulus-wide, and article ciphertext length and tag/nonce sizes do not change.
-Uniform key material is not usefully reduced by ordinary content compression.
-
-## 6. `dca-v1-content-representations` profile
-
-This optional profile selects the ordered `contentEncodings` mechanism in
-[spec--content-protection.md](spec--content-protection.md). It changes only the
-publisher and client roles; issuers and key-delivery routes are unaffected.
-
-When selected, the publisher emits a non-empty encoding sequence only where
-the deployment has established that intended clients support every named
-transform. The list carried by an item is its per-item selection signal. The
-client admits the entire sequence and reverses it only after successful
-content authentication and decryption. Each named transform remains separately
-optional and is defined by its own profile or external specification.
+The profile guarantees the single-layer sequence `["gzip"]`. It does not
+prohibit another sequence that publisher and client separately support, and
+it guarantees neither a repeated `gzip` layer nor `gzip` combined with
+another transform. A later optional transform does not weaken this guarantee.
 
 A delivery claiming compatibility with a baseline-only client MUST omit
-`contentEncodings`. A client that has not selected compatible transforms MUST
-fail a marked item; it MUST NOT expose the represented bytes as base content.
+`contentEncodings`.
 
 ## 7. Client-bound custody profiles
 
-The optional profiles `dca-v1-client-bound-ecdh-p256` and
-`dca-v1-client-bound-rsa-oaep` select the corresponding methods in
+The optional profiles `dca-profile-client-bound-ecdh-p256` and
+`dca-profile-client-bound-rsa-oaep` select the corresponding methods in
 [spec--response-binding.md](spec--response-binding.md). They layer on the HTTPS
 channel and do not replace issuer authentication.
 
@@ -422,109 +349,95 @@ For either profile:
 - the issuer endpoint implements that method, admits the offer before opening
   publisher-supplied keys when client-bound delivery is required, and confirms
   selection in the response;
-- every delivered content or exact period key uses the selected wrapped-leaf
-  form; and
-- the client admits the transport and opens each accepted leaf directly to a
-  non-extractable handle with the usage assigned to its key kind.
+- every delivered content, period or selected chain key uses the selected
+  wrapped key-entry form; and
+- the client admits the transport and opens each accepted key as
+  [response binding Section 6](spec--response-binding.md#6-client-bound-common-representation)
+  requires.
 
-Authenticated endpoint metadata or trusted deployment configuration states
-whether client-bound delivery is required or direct fallback is permitted.
-Required client-bound delivery MUST fail on an absent, unsupported or malformed
-offer and MUST NOT return direct keys. A deployment that permits fallback must
-establish that the client accepts direct delivery; the current request grammar
-has no interoperable fallback signal.
+Required client-bound delivery and any direct fallback follow the endpoint
+response agreement of
+[response binding Section 4](spec--response-binding.md#4-selection-and-agreement).
 
 The ECDH-P256 and RSA-OAEP methods are independent alternatives. Implementing
-one does not imply the other. Neither v1 method accepts direct chain state;
-client-bound `periodChainKeys` requires a future explicitly selected
-byte-free expansion profile.
+one does not imply the other. Either method may protect a selected chain-key
+result; that composition adds no profile identifier or chain-key construction.
 
-The `ECDH-P256` name here is the issuer-to-client client-bound method, which
-uses HKDF-SHA-256. It is distinct from the publisher-to-issuer `ecdh-p256`
-envelope, whose selected transcript uses the raw ECDH shared x-coordinate with
-no KDF.
+The client-bound `ECDH-P256` method (HKDF-SHA-256) is distinct from the
+`ecdh-p256` envelope
+([envelopes Section 4](spec--sealed-key-envelopes.md#4-ecdh-p-256-envelope),
+no KDF).
 
-## 8. `dca-v1-not-delivered-result` profile
+## 8. `dca-profile-recipient-grant-unlock` profile
 
-This optional profile lets an issuer report why it did not deliver a capability for
-one access-group family, and lets a client read that report. It selects the
-`notDelivered` core-result member in
-[spec--core-protocol.md](spec--core-protocol.md#72-not-delivered-access-group-families)
-and the client admission rules for it in
-[spec--response-binding.md](spec--response-binding.md#3-inputs-and-common-response-form).
+The optional [recipient-grant unlock profile](spec-profile--recipient-grant-unlock.md#11-profile-selection-and-dependencies)
+depends on `dca-profile-baseline`. It selects a bearer-credential issuer
+unlock path for one accountless recipient. The feature document defines its
+grant, endpoint, role and conformance duties. Browser and HTML use additionally
+select their respective profiles.
 
-When selected:
+## 9. `dca-profile-html-carrier` profile
 
-- the issuer emits a `notDelivered` entry for each presented family for which its
-  policy step of core Section 6.2 decided to deliver no capability, whether it
-  denied the family or has no period to serve for it. Its `reason` MUST be
-  `denied` for the former or `no_current_period` for the latter. If both
-  conditions apply, `denied` takes precedence; `no_current_period` is used only
-  when policy did not deny the family. It omits the member when it has no
-  presented family for which it makes no delivery. Under the profile a
-  `notDelivered` family carries neither a delivered period capability nor a
-  period-coordinate `errors` entry. Independently authorized direct
-  content-name results MAY coexist as core Section 7.2 specifies. A family
-  without `notDelivered` remains under the core's ordinary per-coordinate
-  delivery and error rules;
-- the client accepts the member and admits each entry against the presented set
-  of the associated request;
-- the deployment settles the selection before the client interprets a response,
-  in the same configuration that names the issuer endpoint and its other
-  profiles; and
-- neither role reads the presence of the member in a response as the selection
-  signal.
+The optional [HTML carrier profile](spec-profile--html-carrier.md) depends on
+`dca-profile-baseline` and selects HTML extraction for publisher and client.
+Its feature document defines carrier selection and compatibility duties.
+Issuer unlock behavior is unchanged.
 
-The profile composes with the baseline direct-content-key path, with the exact
-period-key results of Section 5 and with a period-chain result. Under each of
-them the response delivers no key for a not-delivered family, and the report states
-the issuer's policy outcome for that family. The profile changes no
-authorization reach, adds no request member and delivers no key material. An
-issuer that does not select it reaches the same policy outcome by omitting the
-family from the result and saying nothing about why it is absent.
+<a id="10-dca-profile-html-content-map-profile"></a>
+## 10. Candidate HTML content-map profile
 
-The profile discloses one policy fact per presented family to the caller: that
-the issuer did not deliver it, and one of the two defined `reason` strings. The deployment that
-selects the profile accepts that disclosure to the reader's browser. Under
-[spec--security-model.md](spec--security-model.md#error-response-information-leakage),
-the issuer MUST keep `message` coarse and disclose no key identifier, available-
-period detail, entitlement detail or other caller-specific state beyond the
-selected `reason`.
+The [protected-HTML content-map proposal](spec-proposal--html-content-map.md)
+explores an optional reconstruction profile. It is not selected by this
+catalogue, and `dca-profile-html-content-map` is not yet a DCA v1 conformance
+claim. The prototype and its tests evaluate the proposal only.
 
-An admitted non-delivery is terminal for that issuer attempt. The client MUST NOT
-use it to authorize a request to another configured issuer for the same
-unresolved family.
-[guide--unlock-fallback.md](guide--unlock-fallback.md#when-the-client-may-advance)
-describes where that outcome sits in a deployment's route walk.
-
-A client that has not selected this profile reads no non-delivery outcome from
-the member. It handles the member as an unsupported section under
-[spec--response-binding.md](spec--response-binding.md#3-inputs-and-common-response-form),
-and that handling alone decides what its route walk does next.
-
-## 9. Composition rules
+<a id="11-composition-rules"></a>
+## 11. Composition rules
 
 Profiles compose only when every affected role implements and selects their
-combined requirements. The rows below enumerate combinations of result kinds
-and profile duties. A response-representation layer such as a client-bound
+combined requirements. The rows below list the combinations that a rule
+requires or forbids. A response-representation layer such as a client-bound
 method composes independently except where a row states an exclusion.
 
 | Combination | Status |
 | --- | --- |
-| baseline + browser origin | Permitted; adds Origin/CORS boundary |
-| baseline + exact period | Permitted; direct and exact routes may coexist |
-| exact period + `dca-period-chain-v1` profile | Permitted; the chain specification owns its canonical construction and role mechanisms, while this profile governs a selected publisher-to-issuer chain path and the additional chain-response path described in Section 5 |
-| browser origin + either client-bound method | Permitted; browser request binding and response custody remain separate layers |
-| exact period + either client-bound method | Permitted for exact period-key and direct content-key results; resulting keys are non-extractable handles |
-| content representations + baseline, browser origin or exact period | Permitted; representation processing does not alter access authority or key delivery |
+| recipient grant + browser origin | Required for a browser grant caller; explicit Authorization and exact-Origin admission both apply |
+| recipient grant + period or chain capability in one selected attempt | Forbidden; the client omits the members that [recipient-grant Section 3](spec-profile--recipient-grant-unlock.md#3-presentation) lists, even when empty; the issuer refuses a request that carries any of them, and the client refuses a period or chain result (recipient-grant Sections 4 and 5) |
 | both client-bound methods in one response | Forbidden; one offered and selected method applies to the response |
-| direct and client-bound leaves in one response | Forbidden |
-| client-bound method + direct chain-state result | Unsupported in v1 |
+| direct-mode and client-bound key entries in one response | Forbidden |
 | unknown marked wrap or transform + base interpretation | Forbidden fallback |
-| not-delivered result + baseline, exact period or period-chain result | Permitted; Section 8 states what each combination reports |
 
-A profile not listed here is not automatically forbidden. An implementation
-MUST NOT claim interoperability for it until the profile defines:
+The table is not a pairwise allowlist for the named profiles above. An
+unlisted combination of named profiles may compose when every affected role
+implements and selects the combined duties and no applicable rule excludes the
+combination. This does not waive interaction evidence for a conformance claim.
+
+Compact ECDH composes with the other named profiles under its own selector rules:
+
+- Recipient grant + compact ECDH composes. The recipient-grant issuer opens a compact-selected item envelope when
+  trusted configuration lists both the ordinary procedure and `compact-ecdh` for that keypair
+  ([compact ECDH Section 2](spec-profile--compact-ecdh.md#2-roles-and-selection)). The result still holds item
+  content keys only.
+- A compact-selected issuer block carries an extension-defined sealed field only when the owning mechanism defines
+  the payload width and binding that
+  [compact ECDH Section 3.1](spec-profile--compact-ecdh.md#31-publisher-delivery) requires. Another issuer block
+  in the same delivery may use the ordinary procedure.
+
+Proposal guidance for content groups follows. The
+[content groups profile](spec-profile--content-groups.md) is a Proposal, so these lines describe its draft and the
+reference code; they add no composition rule to this catalogue and no conformance claim.
+
+- Recipient grant + content groups does not compose. A content-groups request carries `periodGeometry`, one of
+  the members recipient-grant Section 3 forbids, so the table's period-or-chain row applies: the recipient-grant
+  issuer refuses the request and the recipient client refuses the result. The reference recipient-grant issuer
+  also refuses the content-groups issuer contribution when it is built.
+- Content-group seeds use the ordinary `ecdh-p256` envelope, and the proposal defines no compact width or binding
+  for a seed. The reference publisher refuses seeds in a compact-selected issuer block. An ordinary issuer block
+  may carry seeds in a delivery whose other issuer block selects compact ECDH.
+
+A new profile not named in this specification is not automatically forbidden.
+An implementation MUST NOT claim interoperability for it until the profile
+defines:
 
 - its identifier, baseline relationship and dependency closure;
 - every affected role and its implementation-support duties;
@@ -534,17 +447,65 @@ MUST NOT claim interoperability for it until the profile defines:
   selection;
 - the representation used at every changed role boundary;
 - acceptance, unsupported and refusal behavior;
-- whether omission removes a fallback or leaves another complete route;
+- whether omission removes a fallback or leaves another complete item-opening alternative;
 - interactions and exclusions with other profiles; and
 - the scope reported by its conformance claim.
 
-## 10. Conformance claims
+### 11.1. Profile validity
+
+A profile has exactly one identifier. This document defines no alias: a
+resolver MUST reject an identifier it does not know and MUST NOT map another
+spelling to a known profile.
+
+An optional profile MUST do at least one of the following:
+
+- assign at least one substantive requirement of its own to a role; or
+- compose at least two effective direct dependencies.
+
+A direct dependency is effective unless it repeats another direct dependency
+or another direct dependency already requires it. A narrower permitted
+algorithm, transport or acceptance condition is a substantive requirement. A
+restatement of a dependency's requirement is not, and neither is a
+placeholder duty. A profile with no requirement of its own and one effective
+dependency is a second name for that dependency and is invalid. Two
+dependencies that state the same requirements do not make a composition,
+even when neither requires the other.
+
+Profile dependencies MUST form an acyclic graph in which every optional
+profile requires the baseline. A profile MUST NOT depend on itself. A
+dependency that several requested profiles share resolves once. The
+requirements of a profile and its dependencies MUST be satisfiable together.
+
+The baseline is exempt from the composition test: it is the root that every
+other profile requires.
+
+A catalogue check can establish the graph conditions: known identifiers, no
+cycle, no repeated edge, and at least one assigned duty or two effective
+direct dependencies. Whether a requirement is substantive, whether two
+dependencies differ in substance and whether their requirements hold
+together are editorial judgments made when the profile is defined.
+
+A rule that must hold whenever two profiles are both selected belongs to one
+of those profiles, so that a deployment listing both by hand cannot bypass
+it.
+
+### 11.2. Candidate browser-integration profile
+
+The [browser-integration proposal](spec-proposal--browser-integration.md) explores
+`dca-profile-browser-integration`, a client-side decoded-content handoff with
+optional coordination interfaces. It is not selected by this specification and
+is not a current DCA v1 conformance profile. Its prototype and tests evaluate the
+proposal only. The candidate depends on baseline, changes no wire field, key
+authority or cryptographic construction, and adds no duties to baseline-only
+clients, publishers or issuers.
+
+## 12. Conformance claims
 
 A conformance claim names:
 
 - the DCA version;
 - each role implemented;
-- the baseline carrier and envelope algorithms implemented;
+- the envelope algorithms implemented;
 - every named content transform implemented, and the profile or external
   specification that defines it;
 - every optional profile implemented;
@@ -553,13 +514,31 @@ A conformance claim names:
 
 The claim also records the requested profile leaves, their resolved dependency
 closure and the selection scope for any duties that change which cross-role
-path ran. For the period-chain profile this includes publisher-to-issuer supply
+path ran. For the chain-key profile this includes publisher-to-issuer supply
 mode and issuer-to-client response form; naming the profile alone does not claim
 that every permitted form ran.
+For recipient-grant unlock the claim carries the evidence of
+[recipient-grant Section 6](spec-profile--recipient-grant-unlock.md#6-conformance-boundary).
+
+A role's conformance claim requires its applicable baseline duties and the
+duties and dependencies of every optional profile it claims. Selecting an
+optional profile does not invalidate baseline conformance or remove those
+duties. Consuming a publication using that profile requires a client
+implementing its applicable consumer duties, in addition to the other
+requirements of the publication. Two implementations can satisfy their
+respective conformance claims without interoperating on a publication
+requiring a profile one does not implement.
+
+[Deployment guidance](guide--deployment-patterns.md#describing-support-and-compatibility)
+explains how to distinguish these claims when describing an implementation
+or a service. This distinction defines no capability-advertisement or
+negotiation mechanism.
 
 An implementation MUST NOT claim an optional profile merely because it ignores
 the profile's fields or relays them opaquely. A relay may claim only its relay
-duty when the profile assigns it no interpretation work.
+duty when the profile assigns it no interpretation work. A chain-key profile
+relay client accepting projected period keys also claims their
+request-associated admission duty, without claiming chain derivation.
 
 Passing one vector or using the reference source is not complete conformance.
 Each claim requires the positive, negative, ordering and composition evidence
@@ -570,20 +549,13 @@ shows where the current primitive, vector, fixture, implementation and
 composition evidence lives, which commands execute it and which named-profile
 claim aggregation is not yet implemented.
 
-## 11. Security considerations
+## 13. Security considerations
 
-Security depends on the distinctions defined above: implementation does not
-imply enablement or selection; optional mechanisms supply their stated
-guarantee only in a complete selected composition; browser-origin admission
-does not authenticate the caller; and client-bound custody neither replaces
-issuer authentication nor prevents authorized use. A selected profile retains
-the security and failure boundaries of each mechanism it composes.
-
-Section 5.2 explains why fixed-width v1 symmetric capabilities are not a
-post-quantum claim. The [mandatory threat model](spec--security-model.md)
+A selected profile retains the security and failure boundaries of each
+mechanism it composes. The [mandatory security model](spec--security-model.md)
 defines the attacker and trust boundaries used to evaluate every profile.
 
-## 12. Normative References
+## 14. Normative References
 
 - [BCP 14: RFC 2119 and RFC 8174](https://www.rfc-editor.org/info/bcp14)
 - [DCA core protocol](spec--core-protocol.md)
@@ -591,13 +563,15 @@ defines the attacker and trust boundaries used to evaluate every profile.
 - [DCA content protection](spec--content-protection.md)
 - [DCA publisher-to-issuer sealed-key envelopes](spec--sealed-key-envelopes.md)
 - [DCA issuer-response binding](spec--response-binding.md)
-- [DCA browser and HTTP binding](spec--browser-http-binding.md)
-- [DCA exact period-key capabilities](spec--period-keys.md)
-- [DCA period-chain construction and delegation](spec--period-key-chains.md)
+- [DCA HTTP binding](spec--http-binding.md)
+- [DCA browser-origin profile](spec-profile--browser-origin.md)
+- [DCA HTML carrier profile](spec-profile--html-carrier.md)
+- [DCA recipient-grant unlock profile](spec-profile--recipient-grant-unlock.md)
+- [DCA period-key profile](spec-profile--period-keys.md)
+- [DCA chain-key profile](spec-profile--chain-keys.md)
 - [DCA security model](spec--security-model.md)
 
-## 13. Informative References
+## 15. Informative References
 
-- [NIST post-quantum cryptography evaluation criteria](https://csrc.nist.gov/projects/post-quantum-cryptography/post-quantum-cryptography-standardization/evaluation-criteria/security-%28evaluation-criteria%29)
-- [NIST post-quantum cryptography FAQ](https://csrc.nist.gov/Projects/Post-Quantum-Cryptography/faqs)
-- [DCA unlock routing and fallback](guide--unlock-fallback.md)
+- [DCA deployment patterns](guide--deployment-patterns.md)
+- [DCA profile catalogue](../verification/profile-catalogue/README.md)

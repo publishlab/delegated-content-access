@@ -1,0 +1,18 @@
+{
+    "script": "jvm/jca-jackson/v1/Bridge.java",
+    "command": "jvm/jca-jackson/bridge",
+    "prepare": { "command": "jvm/jca-jackson/bridge", "args": ["--prepare"] },
+    "members": {
+        "jca": "the JDK's JCA providers, javax.crypto and java.security",
+        "lane": "code written in this lane"
+    },
+    "operations": {
+        "decode-base64url": "lane",
+        "hkdf-sha256": "lane",
+        "open-aes-gcm": "jca",
+        "seal-aes-gcm": "jca",
+        "ecdh-p256": "jca",
+        "p256-point": "lane",
+        "open-rsa-oaep": "jca"
+    }
+}

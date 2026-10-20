@@ -1,0 +1,25 @@
+{
+  "root": "js",
+  "role": "issuer",
+  "layers": {
+    "core": {
+      "paths": [
+        "core-shared/*.js",
+        "core-shared--client-issuer/*.js",
+        "core-shared--publisher-issuer/*.js",
+        "core-issuer/*.js"
+      ]
+    },
+    "adapters": {
+      "paths": [
+        "adapter-issuer/*.js"
+      ]
+    },
+    "integration": {
+      "paths": [
+        "ports/*.js",
+        "integration-issuer/*.js"
+      ]
+    }
+  }
+}

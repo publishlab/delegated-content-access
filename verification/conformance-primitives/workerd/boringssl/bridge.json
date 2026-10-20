@@ -1,0 +1,18 @@
+{
+    "script": "workerd/boringssl/worker.mjs",
+    "command": "workerd/boringssl/bridge",
+    "prepare": { "command": "workerd/boringssl/bridge", "args": ["--prepare"] },
+    "members": {
+        "boringssl": "the BoringSSL built into the pinned workerd, reached through WebCrypto's globalThis.crypto.subtle",
+        "lane": "the shared JavaScript answer source in _source/js/v1, decoding through workerd's Buffer compat code (nodejs_compat)"
+    },
+    "operations": {
+        "decode-base64url": "lane",
+        "hkdf-sha256": "boringssl",
+        "open-aes-gcm": "boringssl",
+        "seal-aes-gcm": "boringssl",
+        "ecdh-p256": "boringssl",
+        "p256-point": "boringssl",
+        "open-rsa-oaep": "boringssl"
+    }
+}

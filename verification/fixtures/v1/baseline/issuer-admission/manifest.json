@@ -1,0 +1,127 @@
+{
+  "schema": "dca-protocol-fixture-manifest/v1",
+  "protocol": "dca",
+  "version": "1",
+  "stability": "draft",
+  "files": [
+    {
+      "path": "reject-alg-substituted-hs256.json",
+      "vectorFormat": "2",
+      "consumers": [
+        "base-contract"
+      ]
+    },
+    {
+      "path": "reject-alg-substituted.json",
+      "vectorFormat": "2",
+      "consumers": [
+        "base-contract"
+      ]
+    },
+    {
+      "path": "reject-data-not-object.json",
+      "vectorFormat": "2",
+      "consumers": [
+        "base-contract"
+      ]
+    },
+    {
+      "path": "reject-delimiter-contentname.json",
+      "vectorFormat": "2",
+      "consumers": [
+        "base-contract"
+      ]
+    },
+    {
+      "path": "reject-delimiter-sealed-contentname.json",
+      "vectorFormat": "2",
+      "consumers": [
+        "base-contract"
+      ]
+    },
+    {
+      "path": "reject-forged-resourcejwt.json",
+      "vectorFormat": "2",
+      "consumers": [
+        "base-contract"
+      ]
+    },
+    {
+      "path": "reject-identifier-contentname-65-chars.json",
+      "vectorFormat": "2",
+      "consumers": [
+        "base-contract"
+      ]
+    },
+    {
+      "path": "reject-identifier-contentname-final-lf.json",
+      "vectorFormat": "2",
+      "consumers": [
+        "base-contract"
+      ]
+    },
+    {
+      "path": "reject-identifier-contentname.json",
+      "vectorFormat": "2",
+      "consumers": [
+        "base-contract"
+      ]
+    },
+    {
+      "path": "reject-issuedat-malformed.json",
+      "vectorFormat": "2",
+      "consumers": [
+        "base-contract"
+      ]
+    },
+    {
+      "path": "reject-no-coordinate.json",
+      "vectorFormat": "2",
+      "consumers": [
+        "base-contract"
+      ]
+    },
+    {
+      "path": "reject-no-renderid.json",
+      "vectorFormat": "2",
+      "consumers": [
+        "base-contract"
+      ]
+    },
+    {
+      "path": "reject-renderid-noncanonical.json",
+      "vectorFormat": "2",
+      "consumers": [
+        "base-contract"
+      ]
+    },
+    {
+      "path": "reject-renderid-wrong-width.json",
+      "vectorFormat": "2",
+      "consumers": [
+        "base-contract"
+      ]
+    },
+    {
+      "path": "reject-resourceid-empty.json",
+      "vectorFormat": "2",
+      "consumers": [
+        "base-contract"
+      ]
+    },
+    {
+      "path": "reject-tampered-resourcejwt.json",
+      "vectorFormat": "2",
+      "consumers": [
+        "base-contract"
+      ]
+    },
+    {
+      "path": "reject-typ-substituted.json",
+      "vectorFormat": "2",
+      "consumers": [
+        "base-contract"
+      ]
+    }
+  ]
+}

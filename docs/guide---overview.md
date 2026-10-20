@@ -30,7 +30,7 @@ The publisher needs issuer public opening keys but never issuer private keys.
 Issuers do not share secrets or coordinate with one another. Mutually untrusted
 publishers use separate registrations and opening-key namespaces at an issuer.
 The complete attacker and browser-origin boundaries are in
-[the threat model](spec--security-model.md).
+[the security model](spec--security-model.md).
 
 ## One render, several routes
 
@@ -38,14 +38,17 @@ A render contains independently protected items named by `contentName`. Every
 item has a fresh random `contentKey`. The same item may offer several
 alternative routes:
 
-- a direct issuer envelope carrying that item's `contentKey`; and
-- one or more content-key wraps under exact period keys for named
+- an issuer envelope carrying that item's `contentKey`; and
+- one or more content-key wraps under period keys for named
   `accessGroup` families.
 
 Those routes are OR alternatives. The client opens the item through any one route; several
-groups do not imply conjunction, a threshold, or a hierarchy. An item may be
-direct-only. A protected item must have at least one issuer that can supply a
-direct key or a declared group route.
+groups do not imply conjunction, a threshold, or a hierarchy. An item may rely
+only on its item-specific content key. Every protected item needs a complete
+issuer-mediated opening route
+([core Section 9](spec--core-protocol.md#9-delegation-completeness)): an issuer
+that can supply its content key, or the period key for one of its declared
+group wraps.
 
 The three useful key roles are:
 
@@ -55,7 +58,7 @@ through the key on the right."
 ```text
 protected item
   <- contentKey                  one item in one render
-     <- exact periodKey          one publisher/group/period coordinate
+     <- periodKey                one publisher/group/period coordinate
 
 contentKey or period capability
   <- issuer public opening key   one issuer delegation route
@@ -78,7 +81,7 @@ wraps use the family; the issuer decides whether the reader receives capability
 for it.
 
 Readable names and request fields do not grant access. The unsigned
-`unlockUrl`, `issuerName`, `keyId`, request maps, and readable resource mirror
+`issuerName`, `keyId`, request maps, and readable resource mirror
 only select or describe work; the issuer still makes the access decision.
 
 The compact period label remains `t` because it is an established coordinate
@@ -93,8 +96,10 @@ cryptographic API.
 
 ## Publisher delivery
 
-The publisher's markup always carries one inert JSON metadata carrier and may
-carry a second for inline ciphertext:
+The baseline publisher delivery is one serialized UTF-8 JSON document containing
+the metadata and optional `sealedContent` ciphertext map. Under the optional
+`dca-profile-html-carrier` profile, publisher markup carries one inert JSON
+metadata carrier and may carry a second for inline ciphertext:
 
 - `dca-data` contains signed resource context, issuer routes, item metadata,
   and key envelopes or wraps; and
@@ -108,8 +113,8 @@ before encrypting when the selected profile uses compression.
 
 The host uses `contentType` when placing plaintext. It is not authorization or
 authenticated page placement. The issuer decides embargo under its policy.
-Deferred delivery must return the ciphertext produced for the existing item
-tuple; silently resealing it is a different render/item contract.
+Deferred delivery returns the ciphertext of the existing item
+([content protection Section 7](spec--content-protection.md#7-deferred-ciphertext-and-content-handling)).
 
 The shared encrypted render may enter a public cache. Personalized plaintext
 must not. A decrypting edge or service must finish authorization and
@@ -138,14 +143,14 @@ expiry time.
 
 ## Publisher-to-issuer envelopes and BIND
 
-An issuer envelope carries one key or positioned chain state. The selected v1
+An issuer envelope carries one key or positioned chain key. The selected v1
 algorithms are:
 
 - P-256 ECDH with a fresh ephemeral key, using the raw 32-byte shared
   x-coordinate directly as the AES-256-GCM key; and
 - RSA-OAEP with SHA-256.
 
-Public-key envelopes avoid a pre-established publisher–issuer shared secret:
+Public-key envelopes avoid a pre-established publisher-issuer shared secret:
 the publisher receives only public opening material, while the issuer retains
 opening authority. A shared secret would add secret distribution and storage
 at the publisher and couple the parties' rotation and trust domains.
@@ -156,7 +161,7 @@ authenticate a publisher; the verified registration and signed assertion do.
 
 V1 needs no speculative hybrid carrier: its bounded BIND plus 16-octet key fits
 native RSA-OAEP at the minimum RSA-2048/SHA-256 profile, with the largest base
-plaintext using 129 of the available 190 octets. That is a measured v1
+plaintext using 139 of the available 190 octets. That is a measured v1
 property, not a general RSA limit. A future wider BIND needs a new grammar
 identifier and its own capacity proof; a new envelope algorithm must likewise
 be identified explicitly rather than introduced as a local option.
@@ -169,91 +174,101 @@ distinct interoperable identifier rather than a local option.
 BIND is the authenticated string that names an issuer envelope's key kind and
 coordinate. It commits each envelope to its render and content, period, or
 chain coordinate. The publisher constructs it where the envelope is placed;
-the issuer reconstructs it from verified render context and the coordinate its
-policy is processing. The client never supplies authoritative BIND bytes.
+the issuer reconstructs it from verified render context and the envelope's own
+kind and coordinate, not a policy-selected result coordinate. The client never supplies authoritative BIND bytes.
 
 When one envelope fails, the issuer fails that coordinate only. At the
 issuer-facing boundary, the issuer returns one generic opening result for
 malformed encoding, authentication, BIND, and payload-width failures. Internal
 diagnostics may remain specific.
 
+The publisher puts BIND in the OAEP plaintext, not the OAEP label, so platforms
+whose OAEP APIs expose no label can implement the same format. The one generic
+answer also covers an RSA-OAEP padding failure: an answer that told padding,
+width and BIND failures apart would give a caller the query a padding-oracle
+attack needs. That is why the envelope specification asks an issuer to decode
+through its runtime's own OAEP implementation and to compare BIND in constant
+time where the runtime offers it.
+
 ## Content protection
 
-The publisher encrypts each item with AES-128-GCM under its fresh content key.
-V1 uses the one `content-aad-v1` transcript owned by
-[the content-protection specification](spec--content-protection.md). The authors
-rejected publisher-defined AAD because it creates unversioned, non-interoperable
-transcripts without adding publisher authentication; the signed assertion and
-BIND already authenticate the publisher and coordinate.
+The publisher encrypts each item once with AES-128-GCM under a fresh
+independent 16-octet content key and exactly twelve zero nonce octets. The
+publisher and client build AAD as `LP(renderId) || LP(contentName)`, where LP
+is a four-octet big-endian UTF-8 octet length followed by the string's UTF-8.
+[Content protection Section 3.2](spec--content-protection.md#32-content-aad)
+defines admission and exact bytes. Items carry neither nonce nor AAD; a client
+ignores either member if present and never selects a legacy retry from it.
 
-Fixing that transcript does not make page context a second source for its
-bytes. The publisher constructs the per-item string and carries it as the AEAD
-input; the client uses that admitted spelling unchanged instead of rebuilding
-it from optional `resource` metadata, `resourceJWT`, or local page state. A
-client that rebuilt the string would fail when readable metadata is absent and could silently
-replace a disagreeing carried value with a different transcript. Richer
-context therefore needs a separately identified future transcript, not local
-inference or fallback.
+Moving a whole item record and ciphertext to another name or render fails
+local authentication even when a cached period key recovers its content key.
+The tag does not bind type, encodings or other JWT claims: an admitted change
+can alter host handling or decoding without failing authentication. Clients
+still capture and validate handling metadata before asynchronous opening, and
+authenticate before decoding. A client decodes the token's render ID for this
+binding; that establishes no identity or authorization. The issuer verifies
+the signature and authorizes every unlock request. A cached opening need not
+contact it. A holder of a content key can create another valid tuple; source
+retrieval and placement remain host responsibilities.
 
-An exact period key wraps content keys for one publisher, access group, and
+The fixed content nonce depends on one encryption per fresh independent key.
+It changes no wrap or envelope nonce. This procedure is mandatory baseline
+publisher/client behavior and adds no issuer nonce duty or runtime toggle.
+Readers and deliveries using random content nonces need a separately selected
+old reader; no fallback is selected here.
+
+A period key wraps content keys for one publisher, access group, and
 period. The wrap has no additional data: its authenticated ciphertext and the
-exact key coordinate determine whether it opens. The client must not invent or
-rebuild a carried wrap AAD.
+period key's coordinate determine whether it opens. The client does not invent
+wrap AAD from the entry coordinate.
 
 Random 96-bit nonces make collisions improbable, not impossible. A reused
-exact period key accumulates its AES-GCM invocation count across every render,
+period key accumulates its AES-GCM invocation count across every render,
 node, restart, and backfill that uses those bytes. The publisher's key supplier
 and operations must enforce the selected profile's bound.
 
-Rejected content-key supply alternatives include a shared exact-key bundle,
-an issuer-specific transport seed, a preconfigured publisher/issuer shared
-secret, and a render-scoped derivation root. They either widen one compromise,
-reintroduce runtime coordination, or create a second derivation authority.
+Rejected content-key supply alternatives include a shared bundle of item
+content keys, an issuer-specific transport seed, a preconfigured
+publisher/issuer shared secret, and a render-scoped derivation root. They
+either widen one compromise, reintroduce runtime coordination, or create a
+second derivation authority.
 V1 instead keeps fresh item keys, independently routed issuer envelopes, and
-the optional canonical period-chain construction.
+the optional canonical chain-key construction.
 
 ## Period capability
 
-Base exact-period processing consumes opaque `periodKey` values. It defines no
-publisher `periodSecret` and no derivation from one period to another. A
-publisher may generate exact keys independently or select the canonical
-period-chain construction. Issuers and clients that implement exact processing
-see the resulting leaf as ordinary key material.
+Base period-key processing treats a `periodKey` as opaque key material; it
+defines no `periodSecret` and no derivation between periods. The optional
+chain-key profile lets an issuer or client derive period keys from a bounded
+positioned chain key. See [period keys](guide--period-keys.md#period-keys-are-opaque)
+and the [chain companion](guide--chain-keys.md#reach).
 
-Under the optional period-chain profile, the issuer or client derives exact
-leaves from bounded positioned chain state. From a returned cutoff the client
-reaches only earlier positions in that stationary window, never later positions
-or another independently rooted window. Exact and chain capability use distinct response and cache
-representations because their authority differs. See
-[period keys](guide--period-keys.md) and the
-[chain companion](guide--period-key-chains.md).
-
-Neither a period boundary nor cache eviction revokes delivered material. An
-exact key continues to open retained ciphertext at its coordinate; chain state
+Neither a period boundary nor cache eviction revokes delivered material. A
+period key continues to open retained ciphertext at its coordinate; a chain key
 continues to derive its bounded prefix. Newer renders move to newer
 coordinates, and later acquisitions still require current issuer approval.
 
 ## Issuer processing and policy effects
 
-The browser controls the unsigned request. The browser names coordinates; only
+The client controls the unsigned request. The client names coordinates; only
 the issuer decides grants. The issuer verifies
 the signed publisher context, enforces the selected request binding, obtains an
 authenticated or explicitly anonymous principal, applies policy, and only then
 opens or derives selected capability.
 
-DCA cannot join an external policy commit atomically to later key opening,
-response construction, and network delivery. Deployments
-should use idempotent decisions, or reserve and commit only after local response
-construction succeeds, when their policy service supports it. Exact-once
-charging or grant consumption is not a DCA wire guarantee; a disconnected
-caller may still miss a response after an external commit.
+DCA cannot join an external policy commit atomically to key opening, response
+construction and delivery; exact-once charging is not a wire guarantee. The
+[metering guide](guide--integration--metering.md#commit-only-for-a-deliverable-key-result)
+shows where an issuer commits.
 
 ## Issuer-to-client delivery
 
 Under direct delivery the issuer returns admitted key bytes. Under a
-client-bound profile the issuer seals each leaf for the selected client public
-key and asks the honest client to retain a non-extractable, usage-limited
-handle. A copied leaf cannot be opened without the corresponding private key.
+client-bound profile the issuer seals each delivered key for the selected client
+public key. Item content keys and period keys open to non-extractable,
+usage-limited handles; chain keys remain usable bytes for derivation and carry
+no non-extractability guarantee. A copied sealed key cannot be opened without
+the corresponding private key.
 This is key custody, not issuer authentication, authorization, or proof that
 the key belongs to a user, account, device, or registered client; the issuer
 also receives no proof that the response was opened or the content consumed.
@@ -264,19 +279,20 @@ principal binding. In the common browser realization, client-bound delivery
 also does not attest a reader-controlled browser, stop page script from using
 an exposed handle, or prevent plaintext sharing.
 
-Direct content-key delivery provides one-item reach and requires the issuer for
+Item content-key delivery provides one-item reach and requires the issuer for
 each unresolved item. Cached period capability reduces issuer traffic and
 availability dependence at the cost of reusable group reach. The publisher
 chooses what reusable material exists; the issuer chooses what it grants.
 
 ## Multi-issuer operation
 
-Several issuer blocks may coexist in one render. Each issuer has independent
-opening keys and policy. A client addresses one issuer block per request. A
-deployment-configured route may advance after a retryable transport or endpoint
-failure. A policy denial, withholding result, or partial grant is definitive;
-the client does not shop unresolved coordinates to a more permissive issuer.
+Several issuer blocks may coexist in one render; each issuer has independent
+opening keys and policy, and a client addresses one issuer block per request.
 Sibling issuer blocks do not override one another's decisions.
+[Core Section 5.3](spec--core-protocol.md#53-multiple-issuers) owns which
+outcomes let a configured route advance to another issuer;
+[unlock routing and fallback](guide--unlock-fallback.md#when-the-client-may-advance)
+walks through them.
 
 Migration can temporarily seal for old and new issuers. Availability fallback
 is a deployment policy and transport concern, not authority inferred from the
@@ -285,15 +301,5 @@ behavior; deployment route policy defines which endpoint failures may retry.
 
 ## Authority map
 
-| Subject | Current owner |
-| --- | --- |
-| Document and object structure | [spec--data-format.md](spec--data-format.md) |
-| Publisher assertion, request, issuer decision | [spec--core-protocol.md](spec--core-protocol.md) |
-| Content encryption and exact wraps | [spec--content-protection.md](spec--content-protection.md) |
-| Exact period capability | [spec--period-keys.md](spec--period-keys.md) |
-| Optional period-chain construction | [spec--period-key-chains.md](spec--period-key-chains.md) |
-| Publisher-to-issuer envelopes and BIND | [spec--sealed-key-envelopes.md](spec--sealed-key-envelopes.md) |
-| Issuer-to-client response binding | [spec--response-binding.md](spec--response-binding.md) |
-| Browser HTTP origin boundary | [spec--browser-http-binding.md](spec--browser-http-binding.md) |
-| Profiles and composition | [spec--profiles.md](spec--profiles.md) and [spec---overview.md](spec---overview.md) |
-| Security boundary and accepted residuals | [spec--security-model.md](spec--security-model.md) |
+The [specification overview's document map](spec---overview.md#document-map)
+names the owner of each subject.

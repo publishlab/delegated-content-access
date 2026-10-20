@@ -1,0 +1,18 @@
+{
+    "script": "dotnet/bcl/v1/bridge/Bridge.cs",
+    "command": "dotnet/bcl/v1/bridge/start",
+    "prepare": { "command": "dotnet/bcl/v1/bridge/prepare" },
+    "members": {
+        "bcl": "System.Security.Cryptography in the .NET base class library",
+        "lane": "code written in this lane"
+    },
+    "operations": {
+        "decode-base64url": "lane",
+        "hkdf-sha256": "bcl",
+        "open-aes-gcm": "bcl",
+        "seal-aes-gcm": "bcl",
+        "ecdh-p256": "bcl",
+        "p256-point": "lane",
+        "open-rsa-oaep": "bcl"
+    }
+}

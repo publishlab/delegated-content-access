@@ -1,0 +1,162 @@
+{
+  "name": "dca-construction-chain-keys canonical primitive observations",
+  "vectorFormat": "chain-key-primitives-v1",
+  "source": "spec-profile--chain-keys.md section 6.4 lays out the context octets each row records as info; literals independently cross-checked against the direct WebCrypto canonical-vector generator",
+  "driver": {
+    "labels": [
+      "a Root for the premium fifteen-minute family",
+      "a Root for a longer access-group and five-minute geometry",
+      "a Root at a different window and one-chain geometry",
+      "a Root under a distinct secret",
+      "one Step into position zero",
+      "one Step whose supplied chain key is position ten",
+      "one Step from the root chain key",
+      "a Leaf at position zero",
+      "a Leaf at an interior fifteen-minute position",
+      "a Leaf at a five-minute terminal position",
+      "a Leaf at a 288-position terminal"
+    ],
+    "rationales": [
+      "32-octet ikm and a 49-octet info carrying 0x00 and octets above 0x7f; an implementation that routes info through a text string answers other bytes, and one that returns the whole 32-octet block instead of 16 octets fails here",
+      "a 53-octet info, longer than every other row; an implementation that reads info out of a fixed-width buffer or truncates it to 49 octets answers other bytes",
+      "the same octet widths as the first row over other octets; it adds no byte-level distinction and stays as a recorded known answer of the construction",
+      "the first row's info octets with different key material; an implementation that passes ikm as the salt, or derives from info alone, answers the two rows alike",
+      "16-octet ikm, half the width the four rows above supply; an implementation that accepts one fixed key width, or pads a short ikm to 32 octets, answers other bytes",
+      "a second row at the 16-octet ikm width; it adds no byte-level distinction and stays as a recorded known answer of the construction",
+      "a third row at the 16-octet ikm width, its ikm the first row's output; it adds no byte-level distinction and stays as a recorded known answer of the construction",
+      "the info of the fifth row under one other leading octet, at the same widths; it adds no byte-level distinction and stays as a recorded known answer of the construction",
+      "a 49-octet info and a 16-octet ikm once more; it adds no byte-level distinction and stays as a recorded known answer of the construction",
+      "a second 53-octet info, the width the second row already covers; it adds no byte-level distinction and stays as a recorded known answer of the construction",
+      "the one-chain geometry's 49-octet info at the widths above; it adds no byte-level distinction and stays as a recorded known answer of the construction"
+    ]
+  },
+  "input": {
+    "operations": [
+      {
+        "op": "hkdf-sha256",
+        "input": {
+          "ikmBase64url": "BwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwc",
+          "infoBase64url": "AQAbZGNhLWNvbnN0cnVjdGlvbi1jaGFpbi1rZXlzAAdwcmVtaXVtAAIADwG_5tAALw",
+          "length": 16
+        }
+      },
+      {
+        "op": "hkdf-sha256",
+        "input": {
+          "ikmBase64url": "BwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwc",
+          "infoBase64url": "AQAbZGNhLWNvbnN0cnVjdGlvbi1jaGFpbi1rZXlzAAtsb2NrZWQtZGF0YQAEAAUBv-bQAEc",
+          "length": 16
+        }
+      },
+      {
+        "op": "hkdf-sha256",
+        "input": {
+          "ikmBase64url": "BwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwc",
+          "infoBase64url": "AQAbZGNhLWNvbnN0cnVjdGlvbi1jaGFpbi1rZXlzAAdwcmVtaXVtAAEABQG_5AABHw",
+          "length": 16
+        }
+      },
+      {
+        "op": "hkdf-sha256",
+        "input": {
+          "ikmBase64url": "CAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAg",
+          "infoBase64url": "AQAbZGNhLWNvbnN0cnVjdGlvbi1jaGFpbi1rZXlzAAdwcmVtaXVtAAIADwG_5tAALw",
+          "length": 16
+        }
+      },
+      {
+        "op": "hkdf-sha256",
+        "input": {
+          "ikmBase64url": "5tlFdSVq9n2ZC7rFeJhOJg",
+          "infoBase64url": "AgAbZGNhLWNvbnN0cnVjdGlvbi1jaGFpbi1rZXlzAAdwcmVtaXVtAAIADwG_5tAAAA",
+          "length": 16
+        }
+      },
+      {
+        "op": "hkdf-sha256",
+        "input": {
+          "ikmBase64url": "_6OKrWHFQdXjXsmvfGwKdQ",
+          "infoBase64url": "AgAbZGNhLWNvbnN0cnVjdGlvbi1jaGFpbi1rZXlzAAdwcmVtaXVtAAIADwG_5tAACQ",
+          "length": 16
+        }
+      },
+      {
+        "op": "hkdf-sha256",
+        "input": {
+          "ikmBase64url": "oJGkdMpHYsnyw30G1oCXLg",
+          "infoBase64url": "AgAbZGNhLWNvbnN0cnVjdGlvbi1jaGFpbi1rZXlzAAdwcmVtaXVtAAIADwG_5tAALg",
+          "length": 16
+        }
+      },
+      {
+        "op": "hkdf-sha256",
+        "input": {
+          "ikmBase64url": "_RxOm0pQFljnlzQmXfGcoA",
+          "infoBase64url": "AwAbZGNhLWNvbnN0cnVjdGlvbi1jaGFpbi1rZXlzAAdwcmVtaXVtAAIADwG_5tAAAA",
+          "length": 16
+        }
+      },
+      {
+        "op": "hkdf-sha256",
+        "input": {
+          "ikmBase64url": "vXxg30CDnydA4eLhmNIkmQ",
+          "infoBase64url": "AwAbZGNhLWNvbnN0cnVjdGlvbi1jaGFpbi1rZXlzAAdwcmVtaXVtAAIADwG_5tAACQ",
+          "length": 16
+        }
+      },
+      {
+        "op": "hkdf-sha256",
+        "input": {
+          "ikmBase64url": "NkD7TRlqClvgT8UN3OZSIA",
+          "infoBase64url": "AwAbZGNhLWNvbnN0cnVjdGlvbi1jaGFpbi1rZXlzAAtsb2NrZWQtZGF0YQAEAAUBv-bQAEc",
+          "length": 16
+        }
+      },
+      {
+        "op": "hkdf-sha256",
+        "input": {
+          "ikmBase64url": "dkaNj8VS3UJOcNlc2gNRvw",
+          "infoBase64url": "AwAbZGNhLWNvbnN0cnVjdGlvbi1jaGFpbi1rZXlzAAdwcmVtaXVtAAEABQG_5AABHw",
+          "length": 16
+        }
+      }
+    ]
+  },
+  "expected": {
+    "observations": [
+      {
+        "okmBase64url": "oJGkdMpHYsnyw30G1oCXLg"
+      },
+      {
+        "okmBase64url": "NkD7TRlqClvgT8UN3OZSIA"
+      },
+      {
+        "okmBase64url": "dkaNj8VS3UJOcNlc2gNRvw"
+      },
+      {
+        "okmBase64url": "4KlHqaBPVtmJAFO1loitzw"
+      },
+      {
+        "okmBase64url": "_RxOm0pQFljnlzQmXfGcoA"
+      },
+      {
+        "okmBase64url": "vXxg30CDnydA4eLhmNIkmQ"
+      },
+      {
+        "okmBase64url": "eMeGDmjqjoCYVKCrmyUsuw"
+      },
+      {
+        "okmBase64url": "9TMIihEly6CTzKcfqoaQMA"
+      },
+      {
+        "okmBase64url": "OImo-foIFr7u0tKSTYgkRg"
+      },
+      {
+        "okmBase64url": "GpdpS711JeYufWBtdvGmYA"
+      },
+      {
+        "okmBase64url": "3kLj8nhVyChF-11fFYji-A"
+      }
+    ]
+  }
+}

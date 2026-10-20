@@ -1,11 +1,14 @@
-# Where a lane's toolchain and build output live. Sourced by every lane that
-# installs one, so they all answer these the same way.
+# Where a lane's toolchain and build output live, and which runtime version it
+# installs. Sourced by every lane that installs one, so they all answer these
+# the same way.
 #
 #     . "$HERE/../_shared/cache.sh"
 #     resolve_cache_dir jvm
 #     # sets DCA_CACHE_DIR
 #     resolve_absolute_path ../elsewhere
 #     # sets DCA_ABSOLUTE_PATH
+#     resolve_version_pin "$HERE/versions" 24
+#     # sets DCA_VERSION_TOKEN and DCA_VERSION_RELEASE (runtime versions, below)
 
 # The cache dir for one lane. There is one cache root for this project and the
 # lanes are leaves under it, so the argument is the leaf name and nothing else:
@@ -122,4 +125,115 @@ resolve_build_dir() {
     _rbd_root="$1/build/$2"
     mkdir -p "$_rbd_root" || exit 2
     DCA_BUILD_DIR="$(mktemp -d "$_rbd_root/run.XXXXXXXX")" || exit 2
+}
+
+# ---- runtime versions --------------------------------------------------------
+#
+# Each runtime lists the versions it runs in `<runtime>/versions`, beside its
+# installer, one token per line:
+#
+#     24 24.21.0 default
+#     22 22.23.3 default
+#
+# The first field is the token an operator types (`--version 24`), the second
+# the release the installer pins for it, and the third says whether a run with
+# no version input runs it (`default`) or only a run that names it or asks for
+# `all` (`listed`). A line starting with `#` is a comment. The installer keeps
+# the download and the checksum for each token; this file says which tokens
+# exist, so adding a version is one line here and one pin there, and retiring
+# one is deleting both.
+#
+# A token is also a file-name part (`<record>.<token>`) and a label
+# (`node/openssl@24`), so it holds only letters, digits, `.`, `_` and `-`, and
+# `default` and `all` are the two selector words rather than tokens.
+
+# The list, validated, one `<token> <release> <state>` line per entry in file
+# order, on stdout. Returns 2 after naming every problem on stderr.
+read_version_list() {
+    if [ ! -f "$1" ] || [ ! -r "$1" ]; then
+        echo "no readable version list at $1, so no runtime version can be named." >&2
+        return 2
+    fi
+    awk -v file="$1" '
+        /^[ \t]*(#|$)/ { next }
+        {
+            if (NF != 3) { printf "%s:%d: \"%s\" is not <token> <release> <default|listed>.\n", file, NR, $0 > "/dev/stderr"; bad = 1; next }
+            if ($1 !~ /^[0-9A-Za-z][0-9A-Za-z._-]*$/ || $1 == "default" || $1 == "all") {
+                printf "%s:%d: \"%s\" is not a token; a token is letters, digits, dot, underscore and dash, and not default or all.\n", file, NR, $1 > "/dev/stderr"; bad = 1; next
+            }
+            if ($3 != "default" && $3 != "listed") {
+                printf "%s:%d: token %s is \"%s\", and a token is default or listed.\n", file, NR, $1, $3 > "/dev/stderr"; bad = 1; next
+            }
+            if ($1 in seen) { printf "%s:%d: token %s is listed twice.\n", file, NR, $1 > "/dev/stderr"; bad = 1; next }
+            seen[$1] = 1
+            lines[++n] = $1 " " $2 " " $3
+        }
+        END {
+            if (bad) exit 2
+            if (n == 0) { printf "%s lists no version.\n", file > "/dev/stderr"; exit 2 }
+            for (i = 1; i <= n; i++) print lines[i]
+        }
+    ' "$1"
+}
+
+# Which tokens one version input selects, in list order.
+#
+#     resolve_version_selection <runtime>/versions default|all|<token>
+#     # sets DCA_VERSION_TOKENS, space separated
+#
+# `default` selects every default token, `all` every token, and a token itself.
+# Returns 3, with nothing printed, when the list does not name that token, so a
+# suite can report the lane as not selected and a lane check can refuse; 2
+# after a message when the list or the input cannot be read.
+resolve_version_selection() {
+    DCA_VERSION_TOKENS=""
+    _rvs_lines=$(read_version_list "$1") || return 2
+    case "$2" in
+        default) DCA_VERSION_TOKENS=$(printf '%s\n' "$_rvs_lines" | awk '$3 == "default" { printf "%s%s", sep, $1; sep = " " }') ;;
+        all)     DCA_VERSION_TOKENS=$(printf '%s\n' "$_rvs_lines" | awk '{ printf "%s%s", sep, $1; sep = " " }') ;;
+        "")
+            echo "the version input is empty; give default, all or a token from $1." >&2
+            return 2 ;;
+        *)
+            DCA_VERSION_TOKENS=$(printf '%s\n' "$_rvs_lines" | awk -v want="$2" '$1 == want { print $1 }')
+            [ -n "$DCA_VERSION_TOKENS" ] || return 3 ;;
+    esac
+    return 0
+}
+
+# The one pin an installer, or a single-run entry point, installs or answers.
+#
+#     resolve_version_pin <runtime>/versions default|<token>
+#     # sets DCA_VERSION_TOKEN and DCA_VERSION_RELEASE
+#
+# `default` takes the first default line, which is the newest by the order the
+# lists are kept in. `all` is refused, because one install is one version. A
+# token the list does not name is refused by name with the tokens it does.
+resolve_version_pin() {
+    DCA_VERSION_TOKEN=""
+    DCA_VERSION_RELEASE=""
+    _rvp_lines=$(read_version_list "$1") || return 2
+    case "$2" in
+        all)
+            echo "one install or run takes one version, and all names every token in $1." >&2
+            echo "A lane check runs each of them: <lane>/check --version all." >&2
+            return 2 ;;
+        default|"")
+            _rvp_line=$(printf '%s\n' "$_rvp_lines" | awk '$3 == "default" { print; exit }')
+            if [ -z "$_rvp_line" ]; then
+                echo "$1 marks no token default, so default names no version." >&2
+                return 2
+            fi ;;
+        *)
+            _rvp_line=$(printf '%s\n' "$_rvp_lines" | awk -v want="$2" '$1 == want { print; exit }')
+            if [ -z "$_rvp_line" ]; then
+                echo "version $2 is not listed in $1, which lists: $(printf '%s\n' "$_rvp_lines" | awk '{ printf "%s%s", sep, $1; sep = " " }')." >&2
+                echo "A version runs only once its runtime lists it with a pin. Refused; nothing was installed or run." >&2
+                return 2
+            fi ;;
+    esac
+    DCA_VERSION_TOKEN=${_rvp_line%% *}
+    _rvp_rest=${_rvp_line#* }
+    DCA_VERSION_RELEASE=${_rvp_rest%% *}
+    return 0
 }

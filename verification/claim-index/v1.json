@@ -1,0 +1,1236 @@
+{
+  "schema": "dca-scoped-profile-evidence/v1",
+  "catalogue": "verification/profile-catalogue/v1.json",
+  "subject": {
+    "id": "js-v1-reference",
+    "roles": ["publisher", "issuer", "client"]
+  },
+  "support": [
+    {
+      "id": "dca-profile-baseline/client",
+      "profile": "dca-profile-baseline",
+      "role": "client",
+      "status": "supported",
+      "duties": [
+        "dca-profile-baseline/client/direct-admission",
+        "dca-profile-baseline/client/representation-processing",
+        "dca-profile-baseline/client/json-delivery"
+      ],
+      "alternatives": {},
+      "compatibleSelections": []
+    },
+    {
+      "id": "dca-profile-baseline/issuer",
+      "profile": "dca-profile-baseline",
+      "role": "issuer",
+      "status": "supported",
+      "duties": ["dca-profile-baseline/issuer/direct-result"],
+      "alternatives": {
+        "envelopeAlgorithm": ["ecdh-p256"]
+      },
+      "compatibleSelections": []
+    },
+    {
+      "id": "dca-profile-baseline/publisher",
+      "profile": "dca-profile-baseline",
+      "role": "publisher",
+      "status": "supported",
+      "duties": [
+        "dca-profile-baseline/publisher/content-key-envelope",
+        "dca-profile-baseline/publisher/representation-declaration",
+        "dca-profile-baseline/publisher/json-delivery"
+      ],
+      "alternatives": {
+        "envelopeAlgorithm": ["ecdh-p256"]
+      },
+      "compatibleSelections": []
+    },
+    {
+      "id": "dca-profile-chain-keys/client",
+      "profile": "dca-profile-chain-keys",
+      "role": "client",
+      "status": "supported",
+      "duties": [
+        "dca-profile-chain-keys/client/chain-relay",
+        "dca-profile-chain-keys/client/projected-period-key-admission",
+        "dca-profile-chain-keys/client/chain-derivation"
+      ],
+      "alternatives": {
+        "selectedInput": ["chain-keys"],
+        "relay": [true],
+        "projectedPeriodKeyAdmission": [false, true],
+        "clientDerivation": [false, true],
+        "responseForm": ["direct"]
+      },
+      "compatibleSelections": [
+        {
+          "selectedInput": "chain-keys",
+          "relay": true,
+          "projectedPeriodKeyAdmission": true,
+          "clientDerivation": false,
+          "responseForm": "direct"
+        },
+        {
+          "selectedInput": "chain-keys",
+          "relay": true,
+          "projectedPeriodKeyAdmission": false,
+          "clientDerivation": true,
+          "responseForm": "direct"
+        }
+      ]
+    },
+    {
+      "id": "dca-profile-chain-keys/issuer",
+      "profile": "dca-profile-chain-keys",
+      "role": "issuer",
+      "status": "supported",
+      "duties": [
+        "dca-profile-chain-keys/issuer/chain-input",
+        "dca-profile-chain-keys/issuer/chain-output"
+      ],
+      "alternatives": {
+        "selectedInput": ["chain-keys"],
+        "issuerInput": [true],
+        "issuerOutput": ["chain-keys", "period-keys"],
+        "responseForm": ["direct"]
+      },
+      "compatibleSelections": [
+        {
+          "selectedInput": "chain-keys",
+          "issuerInput": true,
+          "issuerOutput": "period-keys",
+          "responseForm": "direct"
+        },
+        {
+          "selectedInput": "chain-keys",
+          "issuerInput": true,
+          "issuerOutput": "chain-keys",
+          "responseForm": "direct"
+        }
+      ]
+    },
+    {
+      "id": "dca-profile-chain-keys/publisher",
+      "profile": "dca-profile-chain-keys",
+      "role": "publisher",
+      "status": "supported",
+      "duties": ["dca-profile-chain-keys/publisher/chain-supply"],
+      "alternatives": {
+        "supply": ["chain-keys"]
+      },
+      "compatibleSelections": [
+        {
+          "supply": "chain-keys"
+        }
+      ]
+    },
+    {
+      "id": "dca-profile-client-bound-ecdh-p256/client",
+      "profile": "dca-profile-client-bound-ecdh-p256",
+      "role": "client",
+      "status": "supported",
+      "duties": ["dca-profile-client-bound-ecdh-p256/client/offer-and-admit"],
+      "alternatives": {
+        "endpointMode": ["required"],
+        "directFallbackAccepted": [false]
+      },
+      "compatibleSelections": [
+        {
+          "endpointMode": "required",
+          "directFallbackAccepted": false
+        }
+      ]
+    },
+    {
+      "id": "dca-profile-client-bound-ecdh-p256/issuer",
+      "profile": "dca-profile-client-bound-ecdh-p256",
+      "role": "issuer",
+      "status": "supported",
+      "duties": ["dca-profile-client-bound-ecdh-p256/issuer/wrapped-result"],
+      "alternatives": {
+        "endpointMode": ["required"],
+        "directFallbackAccepted": [false]
+      },
+      "compatibleSelections": [
+        {
+          "endpointMode": "required",
+          "directFallbackAccepted": false
+        }
+      ]
+    },
+    {
+      "id": "dca-profile-client-bound-rsa-oaep/client",
+      "profile": "dca-profile-client-bound-rsa-oaep",
+      "role": "client",
+      "status": "supported",
+      "duties": ["dca-profile-client-bound-rsa-oaep/client/offer-and-admit"],
+      "alternatives": {
+        "endpointMode": ["required"],
+        "directFallbackAccepted": [false]
+      },
+      "compatibleSelections": [
+        {
+          "endpointMode": "required",
+          "directFallbackAccepted": false
+        }
+      ]
+    },
+    {
+      "id": "dca-profile-client-bound-rsa-oaep/issuer",
+      "profile": "dca-profile-client-bound-rsa-oaep",
+      "role": "issuer",
+      "status": "supported",
+      "duties": ["dca-profile-client-bound-rsa-oaep/issuer/wrapped-result"],
+      "alternatives": {
+        "endpointMode": ["required"],
+        "directFallbackAccepted": [false]
+      },
+      "compatibleSelections": [
+        {
+          "endpointMode": "required",
+          "directFallbackAccepted": false
+        }
+      ]
+    },
+    {
+      "id": "dca-profile-content-compression/client",
+      "profile": "dca-profile-content-compression",
+      "role": "client",
+      "status": "supported",
+      "duties": ["dca-profile-content-compression/client/gzip-decompression"],
+      "alternatives": {
+        "itemRepresentation": ["gzip"]
+      },
+      "compatibleSelections": [
+        {
+          "itemRepresentation": "gzip"
+        }
+      ]
+    },
+    {
+      "id": "dca-profile-content-compression/publisher",
+      "profile": "dca-profile-content-compression",
+      "role": "publisher",
+      "status": "supported",
+      "duties": ["dca-profile-content-compression/publisher/gzip-compression"],
+      "alternatives": {
+        "itemRepresentation": ["gzip"]
+      },
+      "compatibleSelections": [
+        {
+          "itemRepresentation": "gzip"
+        }
+      ]
+    },
+    {
+      "id": "dca-profile-html-carrier/client",
+      "profile": "dca-profile-html-carrier",
+      "role": "client",
+      "status": "supported",
+      "duties": ["dca-profile-html-carrier/client/markup-extraction"],
+      "alternatives": {
+        "deliveryCarrier": ["html"]
+      },
+      "compatibleSelections": [
+        {
+          "deliveryCarrier": "html"
+        }
+      ]
+    },
+    {
+      "id": "dca-profile-html-carrier/publisher",
+      "profile": "dca-profile-html-carrier",
+      "role": "publisher",
+      "status": "supported",
+      "duties": ["dca-profile-html-carrier/publisher/markup-emission"],
+      "alternatives": {
+        "deliveryCarrier": ["html"]
+      },
+      "compatibleSelections": [
+        {
+          "deliveryCarrier": "html"
+        }
+      ]
+    },
+    {
+      "id": "dca-profile-period-keys/client",
+      "profile": "dca-profile-period-keys",
+      "role": "client",
+      "status": "supported",
+      "duties": ["dca-profile-period-keys/client/period-key-admission"],
+      "alternatives": {
+        "periodSupply": ["period-keys"]
+      },
+      "compatibleSelections": [
+        {
+          "periodSupply": "period-keys"
+        }
+      ]
+    },
+    {
+      "id": "dca-profile-period-keys/issuer",
+      "profile": "dca-profile-period-keys",
+      "role": "issuer",
+      "status": "supported",
+      "duties": ["dca-profile-period-keys/issuer/period-key-result"],
+      "alternatives": {
+        "periodSupply": ["period-keys"]
+      },
+      "compatibleSelections": [
+        {
+          "periodSupply": "period-keys"
+        }
+      ]
+    },
+    {
+      "id": "dca-profile-period-keys/publisher",
+      "profile": "dca-profile-period-keys",
+      "role": "publisher",
+      "status": "supported",
+      "duties": ["dca-profile-period-keys/publisher/period-key-supply"],
+      "alternatives": {
+        "periodSupply": ["period-keys"],
+        "itemContentKeyAlternative": ["omitted"]
+      },
+      "compatibleSelections": [
+        {
+          "periodSupply": "period-keys",
+          "itemContentKeyAlternative": "omitted"
+        }
+      ]
+    }
+  ],
+  "deploymentEnablement": null,
+  "scenarios": [
+    {
+      "id": "baseline-json-direct",
+      "requestedProfiles": ["dca-profile-baseline"],
+      "roles": ["publisher", "issuer", "client"],
+      "selections": {},
+      "requiredDuties": [
+        "dca-profile-baseline/publisher/content-key-envelope",
+        "dca-profile-baseline/publisher/representation-declaration",
+        "dca-profile-baseline/publisher/json-delivery",
+        "dca-profile-baseline/issuer/direct-result",
+        "dca-profile-baseline/client/direct-admission",
+        "dca-profile-baseline/client/representation-processing",
+        "dca-profile-baseline/client/json-delivery"
+      ],
+      "unresolvedApplicability": [],
+      "recordedPackages": ["vectors/v1/baseline/ecdh-p256-envelope-open"],
+      "legacy": {
+        "id": "baseline-js-pilot",
+        "declaredDuties": [
+          "dca-profile-baseline/publisher/content-key-envelope",
+          "dca-profile-baseline/publisher/representation-declaration",
+          "dca-profile-baseline/publisher/json-delivery",
+          "dca-profile-baseline/issuer/direct-result",
+          "dca-profile-baseline/client/direct-admission",
+          "dca-profile-baseline/client/representation-processing",
+          "dca-profile-baseline/client/json-delivery"
+        ],
+        "algorithms": ["ecdh-p256"],
+        "gaps": [
+          {
+            "text": "baseline ECDH package proves envelope opening only",
+            "category": "recorded-envelope-package-scope",
+            "status": "not-rechecked"
+          },
+          {
+            "text": "the JSON delivery duties are observed in the JavaScript reference only, and no recorded package carries a serialized delivery",
+            "category": "serialized-delivery-evidence",
+            "status": "not-rechecked"
+          },
+          {
+            "text": "the representation duties are observed only in tests that do not cross the serialized JSON document",
+            "category": "representation-evidence-scope",
+            "status": "not-rechecked"
+          },
+          {
+            "text": "the publisher representation declaration is tagged only on a gzip composition; omission and multi-layer declarations carry no tag",
+            "category": "representation-evidence-scope",
+            "status": "not-rechecked"
+          },
+          {
+            "text": "the reference path enforces no generic layer-count, name-size, decoded-output or decoding-work limit",
+            "category": "resource-limits",
+            "status": "not-rechecked"
+          },
+          {
+            "text": "only pilot JS duties are tagged",
+            "category": "tag-coverage",
+            "status": "not-rechecked"
+          }
+        ]
+      },
+      "compositionEvidence": {
+        "test": {
+          "file": "test-profiles/dca-profile-baseline.test.js",
+          "name": "the serialized JSON document opens to the original item through the real issuer"
+        },
+        "roles": ["publisher", "issuer", "client"],
+        "requestedProfiles": ["dca-profile-baseline"]
+      },
+      "evidence": [
+        {
+          "test": {
+            "file": "test-profiles/dca-profile-baseline.test.js",
+            "name": "the serialized JSON document opens to the original item through the real issuer"
+          },
+          "roles": ["publisher", "issuer", "client"],
+          "duties": [
+            "dca-profile-baseline/publisher/content-key-envelope",
+            "dca-profile-baseline/publisher/json-delivery",
+            "dca-profile-baseline/issuer/direct-result",
+            "dca-profile-baseline/client/direct-admission",
+            "dca-profile-baseline/client/json-delivery"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "period-keys-with-simulated-html-carrier",
+      "requestedProfiles": ["dca-profile-period-keys", "dca-profile-html-carrier"],
+      "roles": ["publisher", "issuer", "client"],
+      "selections": {
+        "dca-profile-period-keys": {
+          "periodSupply": "period-keys",
+          "itemContentKeyAlternative": "omitted"
+        },
+        "dca-profile-html-carrier": {
+          "deliveryCarrier": "html"
+        }
+      },
+      "requiredDuties": [
+        "dca-profile-baseline/publisher/content-key-envelope",
+        "dca-profile-baseline/publisher/representation-declaration",
+        "dca-profile-baseline/publisher/json-delivery",
+        "dca-profile-baseline/issuer/direct-result",
+        "dca-profile-baseline/client/direct-admission",
+        "dca-profile-baseline/client/representation-processing",
+        "dca-profile-baseline/client/json-delivery"
+      ],
+      "unresolvedApplicability": [
+        "dca-profile-period-keys/publisher/period-key-supply",
+        "dca-profile-period-keys/issuer/period-key-result",
+        "dca-profile-period-keys/client/period-key-admission",
+        "dca-profile-html-carrier/publisher/markup-emission",
+        "dca-profile-html-carrier/client/markup-extraction"
+      ],
+      "recordedPackages": [
+        "vectors/v1/baseline/ecdh-p256-envelope-open",
+        "fixtures/v1/profiles/dca-profile-period-keys/issuer-client-composition"
+      ],
+      "legacy": {
+        "id": "period-keys-js-pilot",
+        "declaredDuties": [
+          "dca-profile-baseline/publisher/content-key-envelope",
+          "dca-profile-baseline/issuer/direct-result",
+          "dca-profile-baseline/client/direct-admission",
+          "dca-profile-period-keys/publisher/period-key-supply",
+          "dca-profile-period-keys/issuer/period-key-result",
+          "dca-profile-period-keys/client/period-key-admission"
+        ],
+        "algorithms": ["ecdh-p256"],
+        "gaps": [
+          {
+            "text": "baseline ECDH package proves envelope opening only",
+            "category": "recorded-envelope-package-scope",
+            "status": "not-rechecked"
+          },
+          {
+            "text": "recorded period-key fixture proves one period-key-only issuer/client trace; publisher sealing is not replayed",
+            "category": "recorded-composition-scope",
+            "status": "not-rechecked"
+          },
+          {
+            "text": "only pilot JS duties are tagged",
+            "category": "tag-coverage",
+            "status": "not-rechecked"
+          }
+        ]
+      },
+      "compositionEvidence": {
+        "test": {
+          "file": "test-profiles/dca-profile-period-keys.test.js",
+          "name": "selected period-key delivery opens once and reuses the retained period key"
+        },
+        "roles": ["publisher", "issuer", "client"],
+        "requestedProfiles": ["dca-profile-period-keys", "dca-profile-html-carrier"]
+      },
+      "evidence": [
+        {
+          "test": {
+            "file": "test-profiles/dca-profile-period-keys.test.js",
+            "name": "selected period-key delivery opens once and reuses the retained period key"
+          },
+          "roles": ["publisher", "issuer", "client"],
+          "duties": [
+            "dca-profile-period-keys/publisher/period-key-supply",
+            "dca-profile-period-keys/issuer/period-key-result",
+            "dca-profile-period-keys/client/period-key-admission"
+          ]
+        },
+        {
+          "test": {
+            "file": "test-vectors/period-key-composition.test.js",
+            "name": "the recorded composition replays: a partial grant, the kept period key reused, the ungranted period refused"
+          },
+          "roles": ["issuer", "client"],
+          "duties": [
+            "dca-profile-period-keys/issuer/period-key-result",
+            "dca-profile-period-keys/client/period-key-admission"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "gzip-period-keys-with-simulated-html-carrier",
+      "requestedProfiles": [
+        "dca-profile-content-compression",
+        "dca-profile-period-keys",
+        "dca-profile-html-carrier"
+      ],
+      "roles": ["publisher", "issuer", "client"],
+      "selections": {
+        "dca-profile-content-compression": {
+          "itemRepresentation": "gzip"
+        },
+        "dca-profile-period-keys": {
+          "periodSupply": "period-keys",
+          "itemContentKeyAlternative": "omitted"
+        },
+        "dca-profile-html-carrier": {
+          "deliveryCarrier": "html"
+        }
+      },
+      "requiredDuties": [
+        "dca-profile-baseline/publisher/content-key-envelope",
+        "dca-profile-baseline/publisher/representation-declaration",
+        "dca-profile-baseline/publisher/json-delivery",
+        "dca-profile-baseline/issuer/direct-result",
+        "dca-profile-baseline/client/direct-admission",
+        "dca-profile-baseline/client/representation-processing",
+        "dca-profile-baseline/client/json-delivery"
+      ],
+      "unresolvedApplicability": [
+        "dca-profile-period-keys/publisher/period-key-supply",
+        "dca-profile-period-keys/issuer/period-key-result",
+        "dca-profile-period-keys/client/period-key-admission",
+        "dca-profile-content-compression/publisher/gzip-compression",
+        "dca-profile-content-compression/client/gzip-decompression",
+        "dca-profile-html-carrier/publisher/markup-emission",
+        "dca-profile-html-carrier/client/markup-extraction"
+      ],
+      "recordedPackages": [
+        "vectors/v1/baseline/ecdh-p256-envelope-open",
+        "fixtures/v1/profiles/dca-profile-period-keys/issuer-client-composition"
+      ],
+      "legacy": {
+        "id": "content-compression-period-keys-js-pilot",
+        "declaredDuties": [
+          "dca-profile-baseline/publisher/content-key-envelope",
+          "dca-profile-baseline/publisher/representation-declaration",
+          "dca-profile-baseline/issuer/direct-result",
+          "dca-profile-baseline/client/direct-admission",
+          "dca-profile-baseline/client/representation-processing",
+          "dca-profile-period-keys/publisher/period-key-supply",
+          "dca-profile-period-keys/issuer/period-key-result",
+          "dca-profile-period-keys/client/period-key-admission",
+          "dca-profile-content-compression/publisher/gzip-compression",
+          "dca-profile-content-compression/client/gzip-decompression"
+        ],
+        "algorithms": ["ecdh-p256"],
+        "gaps": [
+          {
+            "text": "baseline ECDH package proves envelope opening only",
+            "category": "recorded-envelope-package-scope",
+            "status": "not-rechecked"
+          },
+          {
+            "text": "no dedicated recorded gzip composition package",
+            "category": "recorded-package-scope",
+            "status": "not-rechecked"
+          },
+          {
+            "text": "recorded period-key dependency fixture proves one issuer/client trace, not the gzip composition or publisher sealing",
+            "category": "recorded-composition-scope",
+            "status": "not-rechecked"
+          },
+          {
+            "text": "the reference path enforces no generic layer-count, name-size, decoded-output or decoding-work limit",
+            "category": "resource-limits",
+            "status": "not-rechecked"
+          },
+          {
+            "text": "the prototype gzip paths do not establish the strict one-member contract: the native Web Streams path accepts concatenated members",
+            "category": "compression-contract",
+            "status": "not-rechecked"
+          },
+          {
+            "text": "the prototype gzip paths enforce no hard resource bounds on decoding",
+            "category": "resource-limits",
+            "status": "not-rechecked"
+          },
+          {
+            "text": "no tagged test proves strict gzip stream behavior; the selected gzip tests decode well-formed single members only",
+            "category": "compression-contract",
+            "status": "not-rechecked"
+          },
+          {
+            "text": "only pilot JS duties are tagged",
+            "category": "tag-coverage",
+            "status": "not-rechecked"
+          }
+        ]
+      },
+      "compositionEvidence": {
+        "test": {
+          "file": "test-profiles/dca-profile-content-compression.test.js",
+          "name": "gzip opens through a returned period key and reuses it for the next article"
+        },
+        "roles": ["publisher", "issuer", "client"],
+        "requestedProfiles": [
+          "dca-profile-content-compression",
+          "dca-profile-period-keys",
+          "dca-profile-html-carrier"
+        ]
+      },
+      "evidence": [
+        {
+          "test": {
+            "file": "test-profiles/dca-profile-content-compression.test.js",
+            "name": "gzip opens through a returned period key and reuses it for the next article"
+          },
+          "roles": ["publisher", "issuer", "client"],
+          "duties": [
+            "dca-profile-baseline/publisher/representation-declaration",
+            "dca-profile-content-compression/publisher/gzip-compression",
+            "dca-profile-content-compression/client/gzip-decompression",
+            "dca-profile-period-keys/publisher/period-key-supply",
+            "dca-profile-period-keys/issuer/period-key-result",
+            "dca-profile-period-keys/client/period-key-admission"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "chain-period-projection-with-simulated-html-carrier",
+      "requestedProfiles": ["dca-profile-chain-keys", "dca-profile-html-carrier"],
+      "roles": ["publisher", "issuer", "client"],
+      "selections": {
+        "dca-profile-chain-keys": {
+          "supply": "chain-keys",
+          "selectedInput": "chain-keys",
+          "issuerInput": true,
+          "relay": true,
+          "issuerOutput": "period-keys",
+          "projectedPeriodKeyAdmission": true,
+          "clientDerivation": false,
+          "responseForm": "direct"
+        },
+        "dca-profile-html-carrier": {
+          "deliveryCarrier": "html"
+        }
+      },
+      "requiredDuties": [
+        "dca-profile-baseline/publisher/content-key-envelope",
+        "dca-profile-baseline/publisher/representation-declaration",
+        "dca-profile-baseline/publisher/json-delivery",
+        "dca-profile-baseline/issuer/direct-result",
+        "dca-profile-baseline/client/direct-admission",
+        "dca-profile-baseline/client/representation-processing",
+        "dca-profile-baseline/client/json-delivery"
+      ],
+      "unresolvedApplicability": [
+        "dca-profile-period-keys/publisher/period-key-supply",
+        "dca-profile-period-keys/issuer/period-key-result",
+        "dca-profile-period-keys/client/period-key-admission",
+        "dca-profile-chain-keys/publisher/chain-supply",
+        "dca-profile-chain-keys/client/chain-relay",
+        "dca-profile-chain-keys/issuer/chain-input",
+        "dca-profile-chain-keys/issuer/chain-output",
+        "dca-profile-chain-keys/client/projected-period-key-admission",
+        "dca-profile-chain-keys/client/chain-derivation",
+        "dca-profile-html-carrier/publisher/markup-emission",
+        "dca-profile-html-carrier/client/markup-extraction"
+      ],
+      "recordedPackages": [
+        "vectors/v1/baseline/ecdh-p256-envelope-open",
+        "fixtures/v1/profiles/dca-profile-period-keys/issuer-client-composition"
+      ],
+      "legacy": {
+        "id": "chain-keys-projected-period-key-js-pilot",
+        "declaredDuties": [
+          "dca-profile-baseline/publisher/content-key-envelope",
+          "dca-profile-baseline/issuer/direct-result",
+          "dca-profile-baseline/client/direct-admission",
+          "dca-profile-period-keys/publisher/period-key-supply",
+          "dca-profile-period-keys/issuer/period-key-result",
+          "dca-profile-period-keys/client/period-key-admission",
+          "dca-profile-chain-keys/publisher/chain-supply",
+          "dca-profile-chain-keys/client/chain-relay",
+          "dca-profile-chain-keys/issuer/chain-input",
+          "dca-profile-chain-keys/client/projected-period-key-admission"
+        ],
+        "algorithms": ["ecdh-p256"],
+        "gaps": [
+          {
+            "text": "baseline ECDH package proves envelope opening only",
+            "category": "recorded-envelope-package-scope",
+            "status": "not-rechecked"
+          },
+          {
+            "text": "recorded chain construction package remains unmapped",
+            "category": "recorded-package-scope",
+            "status": "not-rechecked"
+          },
+          {
+            "text": "recorded period-key dependency fixture proves one issuer/client trace, not chain supply/output or publisher sealing",
+            "category": "recorded-composition-scope",
+            "status": "not-rechecked"
+          },
+          {
+            "text": "selected path projects period keys; chain output and client chain derivation are outside this claim",
+            "category": "selection-scope",
+            "status": "not-rechecked"
+          },
+          {
+            "text": "only pilot JS duties are tagged",
+            "category": "tag-coverage",
+            "status": "not-rechecked"
+          }
+        ]
+      },
+      "compositionEvidence": {
+        "test": {
+          "file": "test-profiles/dca-profile-chain-keys.test.js",
+          "name": "chain-key-only publisher supply projects a period key for a relay-only client"
+        },
+        "roles": ["publisher", "issuer", "client"],
+        "requestedProfiles": ["dca-profile-chain-keys", "dca-profile-html-carrier"]
+      },
+      "evidence": [
+        {
+          "test": {
+            "file": "test-profiles/dca-profile-chain-keys.test.js",
+            "name": "chain-key-only publisher supply projects a period key for a relay-only client"
+          },
+          "roles": ["publisher", "issuer", "client"],
+          "duties": [
+            "dca-profile-chain-keys/publisher/chain-supply",
+            "dca-profile-chain-keys/client/chain-relay",
+            "dca-profile-chain-keys/issuer/chain-input",
+            "dca-profile-chain-keys/issuer/chain-output",
+            "dca-profile-chain-keys/client/projected-period-key-admission"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "chain-output-with-simulated-html-carrier",
+      "requestedProfiles": ["dca-profile-chain-keys", "dca-profile-html-carrier"],
+      "roles": ["publisher", "issuer", "client"],
+      "selections": {
+        "dca-profile-chain-keys": {
+          "supply": "chain-keys",
+          "selectedInput": "chain-keys",
+          "issuerInput": true,
+          "relay": true,
+          "issuerOutput": "chain-keys",
+          "projectedPeriodKeyAdmission": false,
+          "clientDerivation": true,
+          "responseForm": "direct"
+        },
+        "dca-profile-html-carrier": {
+          "deliveryCarrier": "html"
+        }
+      },
+      "requiredDuties": [
+        "dca-profile-baseline/publisher/content-key-envelope",
+        "dca-profile-baseline/publisher/representation-declaration",
+        "dca-profile-baseline/publisher/json-delivery",
+        "dca-profile-baseline/issuer/direct-result",
+        "dca-profile-baseline/client/direct-admission",
+        "dca-profile-baseline/client/representation-processing",
+        "dca-profile-baseline/client/json-delivery"
+      ],
+      "unresolvedApplicability": [
+        "dca-profile-period-keys/publisher/period-key-supply",
+        "dca-profile-period-keys/issuer/period-key-result",
+        "dca-profile-period-keys/client/period-key-admission",
+        "dca-profile-chain-keys/publisher/chain-supply",
+        "dca-profile-chain-keys/client/chain-relay",
+        "dca-profile-chain-keys/issuer/chain-input",
+        "dca-profile-chain-keys/issuer/chain-output",
+        "dca-profile-chain-keys/client/projected-period-key-admission",
+        "dca-profile-chain-keys/client/chain-derivation",
+        "dca-profile-html-carrier/publisher/markup-emission",
+        "dca-profile-html-carrier/client/markup-extraction"
+      ],
+      "recordedPackages": [
+        "vectors/v1/baseline/ecdh-p256-envelope-open",
+        "fixtures/v1/profiles/dca-profile-period-keys/issuer-client-composition",
+        "fixtures/v1/profiles/dca-profile-chain-keys/issuer-client-prefix"
+      ],
+      "legacy": {
+        "id": "chain-keys-output-js-pilot",
+        "declaredDuties": [
+          "dca-profile-baseline/publisher/content-key-envelope",
+          "dca-profile-baseline/issuer/direct-result",
+          "dca-profile-baseline/client/direct-admission",
+          "dca-profile-period-keys/publisher/period-key-supply",
+          "dca-profile-period-keys/issuer/period-key-result",
+          "dca-profile-period-keys/client/period-key-admission",
+          "dca-profile-chain-keys/publisher/chain-supply",
+          "dca-profile-chain-keys/client/chain-relay",
+          "dca-profile-chain-keys/issuer/chain-input",
+          "dca-profile-chain-keys/issuer/chain-output",
+          "dca-profile-chain-keys/client/chain-derivation"
+        ],
+        "algorithms": ["ecdh-p256"],
+        "gaps": [
+          {
+            "text": "baseline ECDH package proves envelope opening only",
+            "category": "recorded-envelope-package-scope",
+            "status": "not-rechecked"
+          },
+          {
+            "text": "recorded chain construction package remains unmapped",
+            "category": "recorded-package-scope",
+            "status": "not-rechecked"
+          },
+          {
+            "text": "recorded period-key dependency fixture proves one issuer/client trace, not chain supply/output or publisher sealing",
+            "category": "recorded-composition-scope",
+            "status": "not-rechecked"
+          },
+          {
+            "text": "selected path returns a chain key; window-start-through-cutoff reach and later and adjacent-window refusal are shown for one geometry, one window and one cutoff only",
+            "category": "bounded-reach-evidence",
+            "status": "not-rechecked"
+          },
+          {
+            "text": "recorded chain prefix fixture is JS regression and provenance evidence: it replays issuer and client from recorded renders, not publisher sealing, and is no independent conformance",
+            "category": "recorded-composition-scope",
+            "status": "not-rechecked"
+          },
+          {
+            "text": "only pilot JS duties are tagged",
+            "category": "tag-coverage",
+            "status": "not-rechecked"
+          }
+        ]
+      },
+      "compositionEvidence": {
+        "test": {
+          "file": "test-profiles/dca-profile-chain-keys.test.js",
+          "name": "chain-key-only publisher supply returns a positioned chain key for a chain-aware client"
+        },
+        "roles": ["publisher", "issuer", "client"],
+        "requestedProfiles": ["dca-profile-chain-keys", "dca-profile-html-carrier"]
+      },
+      "evidence": [
+        {
+          "test": {
+            "file": "test-profiles/dca-profile-chain-keys.test.js",
+            "name": "chain-key-only publisher supply returns a positioned chain key for a chain-aware client"
+          },
+          "roles": ["publisher", "issuer", "client"],
+          "duties": [
+            "dca-profile-chain-keys/publisher/chain-supply",
+            "dca-profile-chain-keys/client/chain-relay",
+            "dca-profile-chain-keys/issuer/chain-input",
+            "dca-profile-chain-keys/issuer/chain-output",
+            "dca-profile-chain-keys/client/chain-derivation"
+          ]
+        },
+        {
+          "test": {
+            "file": "test-vectors/chain-keys-prefix.test.js",
+            "name": "the recorded prefix replays: one cutoff key opens the window start through the cutoff and nothing beyond"
+          },
+          "roles": ["issuer", "client"],
+          "duties": [
+            "dca-profile-chain-keys/client/chain-relay",
+            "dca-profile-chain-keys/issuer/chain-input",
+            "dca-profile-chain-keys/issuer/chain-output",
+            "dca-profile-chain-keys/client/chain-derivation"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "client-bound-ecdh-with-period-and-html-client-composition",
+      "requestedProfiles": [
+        "dca-profile-client-bound-ecdh-p256",
+        "dca-profile-period-keys",
+        "dca-profile-html-carrier"
+      ],
+      "roles": ["issuer", "client"],
+      "selections": {
+        "dca-profile-client-bound-ecdh-p256": {
+          "endpointMode": "required",
+          "directFallbackAccepted": false
+        },
+        "dca-profile-period-keys": {
+          "periodSupply": "period-keys",
+          "itemContentKeyAlternative": "retained"
+        },
+        "dca-profile-html-carrier": {
+          "deliveryCarrier": "html"
+        }
+      },
+      "requiredDuties": [
+        "dca-profile-baseline/client/direct-admission",
+        "dca-profile-baseline/client/json-delivery",
+        "dca-profile-baseline/client/representation-processing",
+        "dca-profile-baseline/issuer/direct-result",
+        "dca-profile-html-carrier/client/markup-extraction",
+        "dca-profile-period-keys/client/period-key-admission",
+        "dca-profile-period-keys/issuer/period-key-result"
+      ],
+      "unresolvedApplicability": [
+        "dca-profile-client-bound-ecdh-p256/issuer/wrapped-result",
+        "dca-profile-client-bound-ecdh-p256/client/offer-and-admit"
+      ],
+      "recordedPackages": [
+        "vectors/v1/baseline/ecdh-p256-envelope-open",
+        "vectors/v1/profiles/dca-profile-client-bound-ecdh-p256"
+      ],
+      "legacy": {
+        "id": "client-bound-ecdh-js-pilot",
+        "declaredDuties": [
+          "dca-profile-baseline/issuer/direct-result",
+          "dca-profile-baseline/client/direct-admission",
+          "dca-profile-client-bound-ecdh-p256/issuer/wrapped-result",
+          "dca-profile-client-bound-ecdh-p256/client/offer-and-admit"
+        ],
+        "algorithms": ["ecdh-p256", "client-bound-ecdh-p256"],
+        "gaps": [
+          {
+            "text": "inherited baseline ECDH package proves envelope opening only",
+            "category": "recorded-envelope-package-scope",
+            "status": "not-rechecked"
+          },
+          {
+            "text": "only pilot JS duties are tagged",
+            "category": "tag-coverage",
+            "status": "not-rechecked"
+          }
+        ]
+      },
+      "compositionEvidence": {
+        "test": {
+          "file": "extensions/client-bound-transport/test/client-bound.test.js",
+          "name": "a client-bound unlock hands over handles, and the article opens"
+        },
+        "roles": ["issuer", "client"],
+        "requestedProfiles": [
+          "dca-profile-client-bound-ecdh-p256",
+          "dca-profile-period-keys",
+          "dca-profile-html-carrier"
+        ]
+      },
+      "evidence": [
+        {
+          "test": {
+            "file": "extensions/client-bound-transport/test/client-bound.test.js",
+            "name": "a client-bound unlock hands over handles, and the article opens"
+          },
+          "roles": ["issuer"],
+          "duties": ["dca-profile-client-bound-ecdh-p256/issuer/wrapped-result"]
+        },
+        {
+          "test": {
+            "file": "test-vectors/client-bound-vectors.test.js",
+            "name": "client-bound ECDH-P256 profile re-seals the wire and opens it"
+          },
+          "roles": ["client"],
+          "duties": ["dca-profile-client-bound-ecdh-p256/client/offer-and-admit"]
+        }
+      ]
+    },
+    {
+      "id": "client-bound-rsa-with-period-and-html-client-composition",
+      "requestedProfiles": [
+        "dca-profile-client-bound-rsa-oaep",
+        "dca-profile-period-keys",
+        "dca-profile-html-carrier"
+      ],
+      "roles": ["issuer", "client"],
+      "selections": {
+        "dca-profile-client-bound-rsa-oaep": {
+          "endpointMode": "required",
+          "directFallbackAccepted": false
+        },
+        "dca-profile-period-keys": {
+          "periodSupply": "period-keys",
+          "itemContentKeyAlternative": "retained"
+        },
+        "dca-profile-html-carrier": {
+          "deliveryCarrier": "html"
+        }
+      },
+      "requiredDuties": [
+        "dca-profile-baseline/client/direct-admission",
+        "dca-profile-baseline/client/json-delivery",
+        "dca-profile-baseline/client/representation-processing",
+        "dca-profile-baseline/issuer/direct-result",
+        "dca-profile-html-carrier/client/markup-extraction",
+        "dca-profile-period-keys/client/period-key-admission",
+        "dca-profile-period-keys/issuer/period-key-result"
+      ],
+      "unresolvedApplicability": [
+        "dca-profile-client-bound-rsa-oaep/issuer/wrapped-result",
+        "dca-profile-client-bound-rsa-oaep/client/offer-and-admit"
+      ],
+      "recordedPackages": [
+        "vectors/v1/baseline/ecdh-p256-envelope-open",
+        "vectors/v1/profiles/dca-profile-client-bound-rsa-oaep"
+      ],
+      "legacy": {
+        "id": "client-bound-rsa-oaep-js-pilot",
+        "declaredDuties": [
+          "dca-profile-baseline/issuer/direct-result",
+          "dca-profile-baseline/client/direct-admission",
+          "dca-profile-client-bound-rsa-oaep/issuer/wrapped-result",
+          "dca-profile-client-bound-rsa-oaep/client/offer-and-admit"
+        ],
+        "algorithms": ["ecdh-p256", "client-bound-rsa-oaep"],
+        "gaps": [
+          {
+            "text": "inherited baseline ECDH package proves envelope opening only",
+            "category": "recorded-envelope-package-scope",
+            "status": "not-rechecked"
+          },
+          {
+            "text": "RSA vector proves client opening, not issuer method selection or wrapping",
+            "category": "issuer-method-evidence",
+            "status": "not-rechecked"
+          },
+          {
+            "text": "only pilot JS duties are tagged",
+            "category": "tag-coverage",
+            "status": "not-rechecked"
+          }
+        ]
+      },
+      "compositionEvidence": {
+        "test": {
+          "file": "extensions/client-bound-transport/test/client-bound.test.js",
+          "name": "the RSA-OAEP method wraps under the client key alone, and the article opens"
+        },
+        "roles": ["issuer", "client"],
+        "requestedProfiles": [
+          "dca-profile-client-bound-rsa-oaep",
+          "dca-profile-period-keys",
+          "dca-profile-html-carrier"
+        ]
+      },
+      "evidence": [
+        {
+          "test": {
+            "file": "extensions/client-bound-transport/test/client-bound.test.js",
+            "name": "the RSA-OAEP method wraps under the client key alone, and the article opens"
+          },
+          "roles": ["issuer"],
+          "duties": ["dca-profile-client-bound-rsa-oaep/issuer/wrapped-result"]
+        },
+        {
+          "test": {
+            "file": "test-vectors/client-bound-vectors.test.js",
+            "name": "client-bound RSA-OAEP profile opens its recorded wire without claiming a repeatable seal"
+          },
+          "roles": ["client"],
+          "duties": ["dca-profile-client-bound-rsa-oaep/client/offer-and-admit"]
+        }
+      ]
+    },
+    {
+      "id": "html-carrier-in-simulated-dom",
+      "requestedProfiles": ["dca-profile-html-carrier"],
+      "roles": ["publisher", "issuer", "client"],
+      "selections": {
+        "dca-profile-html-carrier": {
+          "deliveryCarrier": "html"
+        }
+      },
+      "requiredDuties": [
+        "dca-profile-baseline/publisher/content-key-envelope",
+        "dca-profile-baseline/publisher/representation-declaration",
+        "dca-profile-baseline/publisher/json-delivery",
+        "dca-profile-baseline/issuer/direct-result",
+        "dca-profile-baseline/client/direct-admission",
+        "dca-profile-baseline/client/representation-processing",
+        "dca-profile-baseline/client/json-delivery"
+      ],
+      "unresolvedApplicability": [
+        "dca-profile-html-carrier/publisher/markup-emission",
+        "dca-profile-html-carrier/client/markup-extraction"
+      ],
+      "recordedPackages": ["vectors/v1/baseline/ecdh-p256-envelope-open"],
+      "legacy": {
+        "id": "html-carrier-js-pilot",
+        "declaredDuties": [
+          "dca-profile-baseline/publisher/content-key-envelope",
+          "dca-profile-baseline/issuer/direct-result",
+          "dca-profile-baseline/client/direct-admission",
+          "dca-profile-html-carrier/publisher/markup-emission",
+          "dca-profile-html-carrier/client/markup-extraction"
+        ],
+        "algorithms": ["ecdh-p256"],
+        "gaps": [
+          {
+            "text": "inherited baseline ECDH package proves envelope opening only",
+            "category": "recorded-envelope-package-scope",
+            "status": "not-rechecked"
+          },
+          {
+            "text": "no recorded package carries an HTML delivery",
+            "category": "recorded-package-scope",
+            "status": "not-rechecked"
+          },
+          {
+            "text": "markup evidence comes from the JavaScript reference only: the client reads a simulated root, a regex scan that fabricates elements from the markup string",
+            "category": "simulated-carrier-evidence",
+            "status": "not-rechecked"
+          },
+          {
+            "text": "the base suite runs no real HTML parser or browser",
+            "category": "browser-evidence",
+            "status": "not-rechecked"
+          },
+          {
+            "text": "only pilot JS duties are tagged",
+            "category": "tag-coverage",
+            "status": "not-rechecked"
+          }
+        ]
+      },
+      "compositionEvidence": {
+        "test": {
+          "file": "test-profiles/dca-profile-html-carrier.test.js",
+          "name": "the markup delivery opens to the original item through the real issuer"
+        },
+        "roles": ["publisher", "issuer", "client"],
+        "requestedProfiles": ["dca-profile-html-carrier"]
+      },
+      "evidence": [
+        {
+          "test": {
+            "file": "test-profiles/dca-profile-html-carrier.test.js",
+            "name": "the markup delivery opens to the original item through the real issuer"
+          },
+          "roles": ["publisher", "issuer", "client"],
+          "duties": [
+            "dca-profile-html-carrier/publisher/markup-emission",
+            "dca-profile-html-carrier/client/markup-extraction",
+            "dca-profile-baseline/publisher/content-key-envelope",
+            "dca-profile-baseline/issuer/direct-result",
+            "dca-profile-baseline/client/direct-admission"
+          ]
+        }
+      ]
+    }
+  ],
+  "recordedPackages": [
+    {
+      "id": "vectors/v1/baseline/ecdh-p256-envelope-open",
+      "path": "verification/vectors/v1/baseline/ecdh-p256-envelope-open",
+      "profile": "dca-profile-baseline",
+      "associatedDuties": [],
+      "status": "claim"
+    },
+    {
+      "id": "vectors/v1/baseline/rsa-oaep-envelope-open",
+      "path": "verification/vectors/v1/baseline/rsa-oaep-envelope-open",
+      "profile": "dca-profile-baseline",
+      "associatedDuties": [],
+      "status": "unmapped"
+    },
+    {
+      "id": "vectors/v1/experiments/bind-on-renderId-and-slot",
+      "path": "verification/vectors/v1/experiments/bind-on-renderId-and-slot",
+      "profile": null,
+      "associatedDuties": [],
+      "status": "experiment"
+    },
+    {
+      "id": "vectors/v1/profiles/dca-profile-client-bound-ecdh-p256",
+      "path": "verification/vectors/v1/profiles/dca-profile-client-bound-ecdh-p256",
+      "profile": "dca-profile-client-bound-ecdh-p256",
+      "associatedDuties": [
+        "dca-profile-client-bound-ecdh-p256/issuer/wrapped-result",
+        "dca-profile-client-bound-ecdh-p256/client/offer-and-admit"
+      ],
+      "status": "claim"
+    },
+    {
+      "id": "vectors/v1/profiles/dca-profile-client-bound-rsa-oaep",
+      "path": "verification/vectors/v1/profiles/dca-profile-client-bound-rsa-oaep",
+      "profile": "dca-profile-client-bound-rsa-oaep",
+      "associatedDuties": [
+        "dca-profile-client-bound-rsa-oaep/client/offer-and-admit"
+      ],
+      "status": "claim"
+    },
+    {
+      "id": "vectors/v1/profiles/dca-profile-chain-keys",
+      "path": "verification/vectors/v1/profiles/dca-profile-chain-keys",
+      "profile": "dca-profile-chain-keys",
+      "associatedDuties": [],
+      "status": "unmapped"
+    },
+    {
+      "id": "fixtures/v1/baseline/issuer-admission",
+      "path": "verification/fixtures/v1/baseline/issuer-admission",
+      "profile": "dca-profile-baseline",
+      "associatedDuties": [],
+      "status": "unmapped"
+    },
+    {
+      "id": "fixtures/v1/profiles/dca-profile-period-keys/issuer-admission",
+      "path": "verification/fixtures/v1/profiles/dca-profile-period-keys/issuer-admission",
+      "profile": "dca-profile-period-keys",
+      "associatedDuties": [],
+      "status": "unmapped"
+    },
+    {
+      "id": "fixtures/v1/profiles/dca-profile-period-keys/issuer-client-composition",
+      "path": "verification/fixtures/v1/profiles/dca-profile-period-keys/issuer-client-composition",
+      "profile": "dca-profile-period-keys",
+      "associatedDuties": [
+        "dca-profile-period-keys/issuer/period-key-result",
+        "dca-profile-period-keys/client/period-key-admission"
+      ],
+      "status": "claim"
+    },
+    {
+      "id": "fixtures/v1/profiles/dca-profile-chain-keys/geometry-admission",
+      "path": "verification/fixtures/v1/profiles/dca-profile-chain-keys/geometry-admission",
+      "profile": "dca-profile-chain-keys",
+      "associatedDuties": [],
+      "status": "unmapped"
+    },
+    {
+      "id": "fixtures/v1/profiles/dca-profile-chain-keys/issuer-client-prefix",
+      "path": "verification/fixtures/v1/profiles/dca-profile-chain-keys/issuer-client-prefix",
+      "profile": "dca-profile-chain-keys",
+      "associatedDuties": [
+        "dca-profile-chain-keys/client/chain-relay",
+        "dca-profile-chain-keys/issuer/chain-input",
+        "dca-profile-chain-keys/issuer/chain-output",
+        "dca-profile-chain-keys/client/chain-derivation"
+      ],
+      "status": "claim"
+    },
+    {
+      "id": "fixtures/v1/reference/protocol-regressions",
+      "path": "verification/fixtures/v1/reference/protocol-regressions",
+      "profile": null,
+      "associatedDuties": [],
+      "status": "unmapped"
+    }
+  ]
+}

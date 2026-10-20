@@ -1,0 +1,61 @@
+{
+  "name": "reject-foreign-render",
+  "vectorFormat": "2",
+  "derivedFrom": "seal-ecdh",
+  "description": "An unlock request an issuer must not answer as asked: a sealed blob lifted out of a different render of the same article. THE ATTACK. sealed.contentKeys.bodytext carries the bodytext blob from a SECOND render of this page - same publisher, same issuer, same contentName, same article, different render. Its renderId is xjQpMTTEbjdebsO8YXQwFw and this request's is the one in its resourceJWT. Everything else in the body is this render's. Reloading an article is all it takes to hold two renders at once, so an attacker who can open one blob under one render would otherwise be able to reuse it against every later one. WHY IT DOES NOT OPEN, and this vector is built so that the binding is the only thing standing there. The two renders were sealed with the same ephemeral keypair fixture, so the issuer derives the same AES-256-GCM key from the blob's own ephemeral point, and the nonce is carried in the blob. The one difference between opening it and not is the additionalData: renderId sits inside \"dca-bind-key-envelope|c|\" + renderId + \"|\" + contentName, the issuer builds it from the renderId in the verified resourceJWT, and it does not match the one this blob was sealed under. Tag failure. In a real pair of renders the ephemeral keypairs differ too; that would hide the point this vector is making. WHY THE RENDERID IS 16 BYTES. It is the only field in the value an attacker cannot choose and cannot reuse, so guessing a renderId is what a cross-render substitution costs. Freshness per render is the other half of it and no code can check that one: the issuer has never seen the render before. A CONFORMANT ISSUER answers 200 with an error at bodytext, the locked-data contentKey it did ask for honestly, and the untouched periodKeys section. REPLAY. Post `rawBody` VERBATIM - the string as it sits in this file, never a re-serialization of it - to the unlock endpoint, with `issuer` as the key material the issuer holds for its own name and keyId, and `publisher.signingKeys` as the public verification halves, read straight from this file rather than resolved by a deployment lookup. A pass is: expected.code where there is one; key material back for exactly the coordinates in expected.keys and no others; and an error back for exactly the coordinates in expected.errors, under the codes recorded there. No publisher private key is in this file, on purpose: an issuer never holds one, so everything a reject vector asks for is checkable with what a real issuer has. HOW FAR THE REFUSAL REACHES IS PART OF WHAT IS PINNED, and expected.privateKeyReached says which side of the line this body lands on. A request that fails integrity - a signature that does not verify, a signed resource with no renderId to bind to - has asked nothing that could be answered, so it is refused whole and before the key store is consulted at all. A blob presented at a coordinate it was not sealed at is one bad blob in an ordinary request: the only way to find out is to try it, so the key store is reached, the blob comes back as an error, and everything else the request carried is answered beside it. The untouched coordinates were never the attack, and a page has to keep working around one bad blob, so they are answered. Everything in the body but the attack is the render this vector was cut from - the envelope, the periodKeys section and the untouched blobs are what the publisher emitted. An unchanged regeneration retains the valid resourceJWT signature segment inside rawBody, so the body is byte-stable with seal-ecdh.json. A fresh seal still draws a new k, which is why a replayer verifies the segment rather than comparing it. The token is the one in the base vector from the same run, byte for byte, except in reject-no-renderid, reject-renderid-noncanonical and reject-renderid-wrong-width, whose envelopes are second tokens signed over resources with the renderId removed, given a noncanonical spelling, or resized, which is each vector's whole subject; in reject-forged-resourcejwt, whose signature segment was drawn by a key the publisher does not hold; in reject-tampered-resourcejwt, which carries the seal-ecdh token's own signature segment under a payload edited after signing; and in the two reject-alg-substituted arms, which carry that token's payload segment under a header rewritten to name another algorithm, with a third segment that is empty or a MAC - neither of which moves between runs.",
+  "issuer": {
+    "issuerName": "paywall_subscription_service",
+    "keyId": "2025-10",
+    "algorithm": "ecdh-p256",
+    "publicKeyJwk": {
+      "kty": "EC",
+      "crv": "P-256",
+      "x": "KnsL031lVTbNxwtMq3OQmFq-fyPVh3k1__Adl4ieLXw",
+      "y": "-aNkTV8wd6O2rTWc2jkpJgez4Cuvas4J8_Styi-cdsE"
+    },
+    "privateKeyJwk": {
+      "kty": "EC",
+      "crv": "P-256",
+      "x": "KnsL031lVTbNxwtMq3OQmFq-fyPVh3k1__Adl4ieLXw",
+      "y": "-aNkTV8wd6O2rTWc2jkpJgez4Cuvas4J8_Styi-cdsE",
+      "d": "iWEhz6AHq-n4l_YzhTZcyQH7O9B1A1AKl4maOJh3z5g"
+    }
+  },
+  "publisher": {
+    "origin": "https://www.news-site.example",
+    "signingKeys": [
+      {
+        "kid": "sign-2025-10",
+        "publicKeyJwk": {
+          "kty": "EC",
+          "crv": "P-256",
+          "x": "wjapTnuqn7FYYz7TbSiG283dToV0I1zpHoiVpbYGUYU",
+          "y": "9vgUr7XBOhco_Pf-7CczUPW8tmscQKhkiK0zybXWVCI"
+        }
+      }
+    ]
+  },
+  "rawBody": "{\n  \"version\": \"1\",\n  \"issuerName\": \"paywall_subscription_service\",\n  \"resourceJWT\": \"eyJhbGciOiJFUzI1NiIsInR5cCI6IkpXVCIsImtpZCI6InNpZ24tMjAyNS0xMCJ9.eyJyZW5kZXJJZCI6InVVVDU3Nk8zNEJvR0twZ1hwZE11Y3ciLCJvcmlnaW4iOiJodHRwczovL3d3dy5uZXdzLXNpdGUuZXhhbXBsZSIsImlzc3VlZEF0IjoiMjAyNS0xMC0yM1QxNDowMDowMC4wMDBaIiwicmVzb3VyY2VJZCI6IjEyMzQ1NiIsImRhdGEiOnsiZGF0ZS5wdWJsaXNoZWQiOiIyMDI1LTEwLTIwVDEwOjMwOjAwWiIsInNlY3Rpb24iOiJwb2xpdGljcyIsInRhZ3MiOlsiYnJlYWtpbmciLCJlbGVjdGlvbnMiXX19.J2wve9h-80DsFuL9VHtY8X5jYpTDierdPyigKhQFaocp-EnSJlRNTPs5yNmSVF_HrinwqfN84rzalG5l0osBFQ\",\n  \"keyId\": \"2025-10\",\n  \"sealed\": {\n    \"contentKeys\": {\n      \"bodytext\": \"BP_rrpHAnCFcf8NeehDgUG3w9ktUCbb_1LNPIX5pT8u7s5xZErWJNnNAJfmyMYNXO4LYDDMaasFJMMGHk63FqhpFRu6Q0JVDDIN3JAPuxZFPlTYGXpeVHBu76ZqUZM0L_LyIzDvR9lJiXhOP4A\",\n      \"locked-data\": \"BFO_DIR8YvBF7KDC6csLOOywgRvvgkrXGZhgvX-4UEbpjbcExTFUDum7lWRXU21llsS3dQpzLxiJJptmVbY-4g9bAr-k7mM8ltrpiAp74cmqwlkSLtHWnLAjCXiJfID525xaAnkLSSwCCazoUg\"\n    },\n    \"periodKeys\": {\n      \"premium\": {\n        \"251023T1400\": \"BINGkYo6rqhgWBVVdJiM0QiLh0sl7PRADoj1sUywh1VY30j8-6vfS2mXZ0KkOXUnF29fVZLF1YKUUPyeUhpwI44saqe6Y6UyHEziB6sk9ByFJkxFl7TYIEMbD4e4TSsFiaAG8Cpf5bFfNWsULQ\",\n        \"251023T1500\": \"BAWaMLaWFTKu1iD55oppbs7SCejlyxIOREMmS7otAOx3ZIAWv7cpyI0pH_U12MO4MTIUaBhuLkF0EVTFuneETtoqfRNQEv0AcNYEiG3xTNfDp4zKSvzt2C266vaU00lMk5gxfa9BUEC4W70KMw\"\n      },\n      \"locked-data\": {\n        \"251023T1400\": \"BCU1ON5iY7-eabveiBcgWpJrWzc_5vWApm2kotjEBkVPXEeyvi2q1CZQgghDAdZds0Le4a0zopxM_a0OZrDEUJR9IIsktg7TzyWqZE8JzzbzDAtAmz8RWWtJ7tlw3Xsa2IZY8vHgjD9qbeC1Fw\",\n        \"251023T1500\": \"BM-G5T29LnZ14YBqxm6SAMCbKHcwdX5wv_iLL0FEb_D0C-MPak9ZNDvcMsAOHjaiKcg9spCJnuVa-PDS7RcExw6TGmtnzfyKr7dq6DfWQRzkZsRJrcMnVlzKRoJ10SEd1TaWzVoyUdxjZViNsA\"\n      }\n    }\n  }\n}",
+  "expected": {
+    "code": null,
+    "keys": {
+      "contentKeys": [
+        "locked-data"
+      ],
+      "periodKeys": {
+        "premium": [
+          "251023T1400",
+          "251023T1500"
+        ],
+        "locked-data": [
+          "251023T1400",
+          "251023T1500"
+        ]
+      }
+    },
+    "errors": {
+      "bodytext": "unseal_failed"
+    },
+    "privateKeyReached": true
+  }
+}

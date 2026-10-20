@@ -1,0 +1,78 @@
+#!/usr/bin/env bash
+# The PHP operation bridge, in the two shapes the runner starts it in.
+#
+#   ./bridge --prepare   # install the pinned php-cli if absent, run one empty batch
+#   ./bridge             # read one batch on stdin, write one on stdout
+#
+# The runner installs first and answers later. `bridge.json` names both forms:
+# `--prepare` runs first, outside the batch's 10 second budget, and the runner
+# then starts the second form as a program that is already runnable. The pinned
+# static php-cli download is the only slow step here, and it says nothing about
+# the bytes this lane produces.
+#
+# The PHP wrapper does not know the protocol, the operations or what an
+# observation says. It resolves a php binary and hands stdin and stdout to
+# `v1/bridge.php`. The bridge answers on stdout, so nothing here may write
+# there: every line below goes to stderr, where the runner reprints it beside a
+# failure.
+#
+# The bridge downloads nothing while answering. `--prepare` calls
+# install-toolchain with the selected version, which installs the pinned build when it is
+# absent, and the answering form asks `--print-bin`, which is a query that
+# installs nothing. A run that reaches the second form with no php says so and
+# exits nonzero rather than fetching 30 MB while a batch waits on stdin.
+set -euo pipefail
+
+HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# The version this run selected: the lane check sets DCA_VERSION to one token of
+# ../versions per run, and both forms below hand it to the installer, so the
+# php that answers is that version's pin and never a php on PATH.
+VERSION="${DCA_VERSION:-default}"
+
+mode=answer
+case "${1:-}" in
+  --prepare) mode=prepare; shift ;;
+  --help|-h) awk 'NR>1 && /^#/ { sub(/^# ?/, ""); print; next } NR>1 { exit }' "${BASH_SOURCE[0]}"; exit 0 ;;
+esac
+if [ $# -gt 0 ]; then
+  echo "bridge takes --prepare or nothing, got: $1" >&2
+  exit 2
+fi
+
+if [ "$mode" = prepare ]; then
+  [ -f "$HERE/v1/bridge.php" ] || { echo "no $HERE/v1/bridge.php; the PHP bridge has not landed yet" >&2; exit 2; }
+
+  if ! BASE="$("$HERE/../install-toolchain" --version "$VERSION")"; then
+    echo "no PHP toolchain for version $VERSION, so the bridge was not prepared." >&2
+    exit 2
+  fi
+  BIN="$BASE/php"
+  if [ ! -x "$BIN" ]; then
+    echo "install-toolchain named $BASE, which holds no executable php binary." >&2
+    exit 2
+  fi
+
+  echo "== $("$BIN" -v | head -1) ==" >&2
+
+  # Sending one empty batch through the installed binary warms it up and proves that
+  # this binary starts and answers. A batch of no requests is
+  # answered with no results; the runner refuses an empty selection long before
+  # a bridge is started, so the only caller that ever sends one is this line.
+  empty='{"protocol":"dca-operation-bridge-v1","requests":[]}'
+  if ! printf '%s\n' "$empty" | "$BIN" "$HERE/v1/bridge.php" >/dev/null; then
+    echo "the bridge installed and did not answer an empty batch." >&2
+    exit 2
+  fi
+  exit 0
+fi
+
+if ! BIN="$("$HERE/../install-toolchain" --version "$VERSION" --print-bin)"; then
+  echo "bridge: no PHP toolchain path could be resolved." >&2
+  exit 1
+fi
+if [ ! -x "$BIN" ]; then
+  echo "bridge: no php at $BIN. Run ./bridge --prepare, or install-toolchain." >&2
+  exit 1
+fi
+
+exec "$BIN" "$HERE/v1/bridge.php"

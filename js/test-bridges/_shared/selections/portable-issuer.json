@@ -1,0 +1,24 @@
+{
+  "version": 1,
+  "testCount": 13,
+  "tests": [{ "file": "test-reference/core-issuer/request-checks.test.js" }],
+  "required": [
+    { "module": "core-issuer/IssuerEngine.js", "exports": ["checkVersion", "checkEnvelopes"] }
+  ],
+  "inputs": [
+    {
+      "module": "core-issuer/IssuerEngine.js",
+      "export": "checkVersion",
+      "argument": 0,
+      "class": { "module": "core-shared--client-issuer/DcaRequest.js", "export": "DcaRequest" },
+      "data": "toObject"
+    },
+    {
+      "module": "core-issuer/IssuerEngine.js",
+      "export": "checkEnvelopes",
+      "argument": 0,
+      "class": { "module": "core-shared--client-issuer/DcaRequest.js", "export": "DcaRequest" },
+      "data": "toObject"
+    }
+  ]
+}

@@ -1,0 +1,8 @@
+{
+  "version": 1,
+  "testCount": 7,
+  "tests": [{ "file": "test-reference/core-shared/keySealing.test.js" }],
+  "required": [
+    { "module": "core-shared--publisher-issuer/keySealing.js", "exports": ["seal", "open"] }
+  ]
+}

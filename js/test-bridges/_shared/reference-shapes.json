@@ -1,0 +1,1246 @@
+{
+  "version": 1,
+  "modules": {
+    "adapter-client/PeriodKeyCache.js": { "keyByIssuer": "string" },
+    "adapter-client/routeAttempts.js": {
+      "retryableUnavailableFamilies": { "list": "string" },
+      "routeIdentities": {
+        "record": {
+          "accessGroups": { "list": "string" },
+          "contentNames": { "list": "string" },
+          "routes": { "anyOf": ["undefined", { "list": "string" }] }
+        }
+      },
+      "settleRouteProjection": {
+        "record": { "members": { "list": "string" }, "sealedMembers": { "list": "string" } }
+      }
+    },
+    "adapter-issuer/parseBearerAuthorization.js": {
+      "parseBearerAuthorization": { "anyOf": ["null", "string"] }
+    },
+    "adapter-publisher/writeJsonDelivery.js": { "writeJsonDelivery": "Uint8Array" },
+    "adapter-publisher/writeMarkupDelivery.js": {
+      "inertJsonScript": "string",
+      "writeMarkupDelivery": "string"
+    },
+    "core-client/contentEncodings.js": {
+      "capturedContentEncodings": { "list": "string" },
+      "contentEncodingsFrom": { "list": "string" }
+    },
+    "core-client/contentKeyWrapAttempt.js": {
+      "attemptContentKeyWrap": { "anyOf": ["Uint8Array", "null", "value"] }
+    },
+    "core-client/openContent.js": { "openContent": "Uint8Array" },
+    "core-client/periodKeyCandidateSource.js": {
+      "observePeriodFilingOrder": "undefined",
+      "periodKeyCandidateSource": { "record": {} },
+      "triedPeriodKeys": { "list": { "anyOf": ["Uint8Array", "value"] } }
+    },
+    "core-client/responseSectionEntries.js": {
+      "composedSectionEntries": {
+        "record": { "entries": { "list": { "record": { "path": { "list": "string" } } } } }
+      },
+      "composedSectionErrors": {
+        "record": { "entries": { "list": { "record": { "path": { "list": "string" } } } } }
+      },
+      "responseSectionEntries": {
+        "record": { "entries": { "list": { "record": { "path": { "list": "string" } } } } }
+      }
+    },
+    "core-issuer/IssuerEngine.js": {
+      "checkEnvelopes": { "record": {} },
+      "checkVersion": "undefined",
+      "publisherFor": {
+        "record": {
+          "kid": "string",
+          "openingKeys": { "record": {} },
+          "origins": { "anyOf": ["undefined", { "list": "string" }] }
+        }
+      }
+    },
+    "core-publisher/contentKeyWrap.js": {
+      "checkedContentKeyWrap": { "record": { "strategy": { "record": {} } } }
+    },
+    "core-publisher/contentRepresentation.js": {
+      "normalizeContentRepresentation": {
+        "record": {
+          "bytes": "Uint8Array",
+          "contentEncodings": { "list": "string" },
+          "contentType": "string"
+        }
+      }
+    },
+    "core-publisher/issuerSupplyPlan.js": {
+      "assertCompleteIssuerRoutes": "undefined",
+      "normalizedIssuerSupplyPlan": {
+        "record": {
+          "contentKeyNames": { "list": "string" },
+          "issuerMembers": { "record": {}, "values": "any" },
+          "issuerName": "string",
+          "periodKeyDelivery": { "record": {}, "values": { "list": "string" } },
+          "periodKeySourceTs": { "record": {}, "values": { "list": "string" } },
+          "reachableContentNames": { "list": "string" },
+          "suppliedAccessGroups": { "list": "string" }
+        }
+      },
+      "wholeRenderIssuerSupplyPlan": {
+        "record": {
+          "contentKeyNames": { "list": "string" },
+          "suppliedAccessGroups": { "list": "string" }
+        }
+      }
+    },
+    "core-publisher/publisherComposition.js": {
+      "composePublisherConfig": {
+        "record": {
+          "config": { "record": {}, "values": "any" },
+          "owners": {
+            "record": {
+              "contentKeyWrapStrategy": { "anyOf": ["null", "string"] },
+              "keySealing": { "anyOf": ["null", "string"] },
+              "periodKeySupply": { "anyOf": ["null", "string"] }
+            }
+          },
+          "plannerOrder": { "list": "string" }
+        }
+      }
+    },
+    "core-publisher/siteResourcePlan.js": {
+      "planSiteResources": {
+        "record": {
+          "kind": "string",
+          "localLimits": {
+            "record": {
+              "chainMembersPerFamily": { "anyOf": ["undefined", "value"] },
+              "chainMembersPerMessage": { "anyOf": ["undefined", "value"] },
+              "periodKeysPerFamily": { "anyOf": ["undefined", "value"] },
+              "periodKeysPerResponse": { "anyOf": ["undefined", "value"] },
+              "positionsPerWindow": { "anyOf": ["undefined", "value"] }
+            }
+          },
+          "profile": {
+            "record": {
+              "periodKeys": { "record": { "name": "string", "wrapAlgorithm": "string" } }
+            }
+          },
+          "renders": {
+            "list": {
+              "record": {
+                "accessGroups": {
+                  "list": { "record": { "counts": { "record": {} }, "name": "string" } }
+                },
+                "certainty": "string",
+                "counts": { "record": {} },
+                "firstBindingDimension": {
+                  "anyOf": [
+                    "null",
+                    {
+                      "record": {
+                        "dimension": "string",
+                        "limitingSource": "string",
+                        "scope": "string"
+                      }
+                    }
+                  ]
+                },
+                "issuers": {
+                  "list": {
+                    "record": {
+                      "certainty": "string",
+                      "counts": { "record": {} },
+                      "issuerName": "string",
+                      "method": "string",
+                      "response": { "record": {} }
+                    }
+                  }
+                },
+                "items": {
+                  "list": {
+                    "record": {
+                      "accessGroups": { "list": "string" },
+                      "counts": { "record": {} },
+                      "name": "string"
+                    }
+                  }
+                },
+                "limits": {
+                  "list": {
+                    "record": {
+                      "dimension": "string",
+                      "limitingSource": "string",
+                      "localLimit": { "anyOf": ["null", "value"] },
+                      "scope": "string"
+                    }
+                  }
+                },
+                "name": "string"
+              }
+            }
+          },
+          "site": {
+            "record": {
+              "byIssuerMethod": {
+                "list": {
+                  "record": {
+                    "counts": { "record": {} },
+                    "issuerName": "string",
+                    "method": "string"
+                  }
+                }
+              },
+              "counts": { "record": {} }
+            }
+          }
+        }
+      }
+    },
+    "core-publisher/testing/fixedPeriodKeySupply.js": { "fixedPeriodKeySupply": { "record": {} } },
+    "core-shared--client-issuer/responseKeys.js": {
+      "settleComposedSections": {
+        "list": {
+          "record": {
+            "errorPath": { "anyOf": ["undefined", { "list": "string" }] },
+            "keyKind": "string",
+            "leafKey": { "anyOf": ["string", "undefined"] },
+            "path": { "list": "string" }
+          }
+        }
+      }
+    },
+    "core-shared--client-publisher/contentAad.js": {
+      "contentAad": { "anyOf": ["Uint8Array", "null"] }
+    },
+    "core-shared--client-publisher/names.js": { "validateResourceId": "string" },
+    "core-shared--publisher-issuer/bind.js": {
+      "bindFields": { "list": "string" },
+      "bindValue": "string",
+      "validateRenderId": "string"
+    },
+    "core-shared--publisher-issuer/jwt.js": {
+      "admitHeader": "string",
+      "decodeHeader": {
+        "record": {
+          "alg": { "anyOf": ["string", "undefined"] },
+          "kid": { "anyOf": ["string", "undefined"] },
+          "typ": { "anyOf": ["string", "undefined"] }
+        }
+      },
+      "proofHash": "string",
+      "sign": "string"
+    },
+    "core-shared--publisher-issuer/keySealing.js": { "open": "Uint8Array", "seal": "string" },
+    "core-shared--publisher-issuer/periodKeys.js": {
+      "currentT": { "anyOf": ["null", "string"] },
+      "formatT": "string",
+      "periodsFor": { "list": "string" },
+      "settledPeriod": { "record": {} }
+    },
+    "core-shared/aead.js": { "decrypt": "Uint8Array", "encrypt": "Uint8Array" },
+    "core-shared/binaryStrings.js": { "binaryStringBytes": { "anyOf": ["Uint8Array", "null"] } },
+    "core-shared/codec.js": {
+      "base64urlDecode": "Uint8Array",
+      "base64urlEncode": "string",
+      "utf8Decode": "string",
+      "utf8Encode": "Uint8Array"
+    },
+    "core-shared/compactJwt.js": {
+      "decodeCompactJwt": { "record": { "parts": { "tuple": ["string", "string", "string"] } } }
+    },
+    "core-shared/geometryBounds.js": {
+      "inspectPeriodGeometryBounds": { "record": { "kind": "string" } }
+    },
+    "core-shared/names.js": {
+      "validateAccessGroup": "string",
+      "validateContentName": "string",
+      "validateIssuerName": "string"
+    },
+    "core-shared/periodKeyProfiles.js": {
+      "periodKeyProfile": { "record": { "name": "string", "wrapAlgorithm": "string" } }
+    },
+    "core-shared/periodLabels.js": { "formatT": "string" },
+    "core-shared/publisherOrigin.js": {
+      "normalizePublisherOrigin": { "anyOf": ["null", "string"] },
+      "signableOrigin": { "anyOf": ["null", "string"] }
+    },
+    "core-shared/requestLimits.js": {
+      "requestEntryCounts": { "record": {} },
+      "requestLimits": { "record": {} }
+    },
+    "extensions/chain-keys/core-client/chainKeyClientProfile.js": {
+      "chainKeyClientProfileFor": {
+        "record": {
+          "constructionProfile": { "record": { "constructionId": "string", "name": "string" } }
+        }
+      }
+    },
+    "extensions/chain-keys/core-client/chainKeyResponseInput.js": {
+      "chainKeyResponseInput": { "record": { "presented": { "list": "string" } } }
+    },
+    "extensions/chain-keys/core-client/periodKeyResponseCoordinate.js": {
+      "requestCarrierOf": { "record": { "presented": { "list": "string" } } }
+    },
+    "extensions/chain-keys/core-issuer/chainKeyCapabilitySource.js": {
+      "chainKeyCapabilitySource": { "record": { "presented": { "anyOf": ["undefined", "value"] } } }
+    },
+    "extensions/chain-keys/core-issuer/chainKeyIssuerEngine.js": {
+      "requireChainRepresentation": {
+        "record": { "presented": { "anyOf": ["undefined", "value"] } }
+      }
+    },
+    "extensions/chain-keys/core-issuer/chainKeyRequestInput.js": {
+      "chainKeyRequestInput": { "record": { "presented": { "list": "string" } } }
+    },
+    "extensions/chain-keys/core-publisher/periodFamilySupply.js": {
+      "periodFamilyContribution": {
+        "record": { "name": "string", "periodKeySupply": { "record": {} } }
+      },
+      "periodFamilySupply": { "record": {} }
+    },
+    "extensions/chain-keys/core-publisher/periodKeySupplyFor.js": {
+      "periodKeySupplyFor": { "record": {} }
+    },
+    "extensions/chain-keys/core-shared--client-issuer/chainKeyCarrierReader.js": {
+      "chainKeyCarrierReader": { "record": { "presented": { "list": "string" } } }
+    },
+    "extensions/chain-keys/core-shared--client-issuer/requestedPeriodKeys.js": {
+      "normalizeRequestedPeriodKeys": { "record": {}, "values": { "list": "string" } }
+    },
+    "extensions/chain-keys/core-shared/chainKeyConstruction.js": {
+      "chainKeyConstructionProfile": { "record": { "constructionId": "string", "name": "string" } },
+      "chainKeyCoordinate": {
+        "record": { "startT": "string", "t": "string", "terminalT": "string" }
+      },
+      "periodKeysFromChainKey": { "list": { "record": { "key": "Uint8Array", "t": "string" } } },
+      "resolveChainGeometry": { "anyOf": ["null", { "record": {} }] },
+      "settleChainGeometry": { "record": {} }
+    },
+    "extensions/chain-keys/referenceProfile.js": {
+      "chainKeyClientProfileFor": {
+        "record": {
+          "constructionProfile": { "record": { "constructionId": "string", "name": "string" } }
+        }
+      },
+      "referenceChainKeyProfileFor": {
+        "record": {
+          "constructionProfile": { "record": { "constructionId": "string", "name": "string" } }
+        }
+      }
+    },
+    "extensions/client-bound-transport/core-client/clientBoundKeyCapability.js": {
+      "clientBoundKeyCapability": { "record": {} }
+    },
+    "extensions/client-bound-transport/core-issuer/ecdhP256.js": {
+      "seal": { "record": { "transport": { "record": {} } } }
+    },
+    "extensions/client-bound-transport/core-issuer/rsaOaep.js": {
+      "seal": { "record": { "transport": { "record": {} } } }
+    },
+    "extensions/client-bound-transport/core-shared--client-issuer/ecdhP256.js": {
+      "assertCanOpenChainKeys": "undefined",
+      "assertCanOpenRawKeys": "undefined",
+      "open": { "record": {} }
+    },
+    "extensions/client-bound-transport/core-shared--client-issuer/keyKind.js": {
+      "keyKindContext": "Uint8Array",
+      "kindDescriptor": { "record": { "open": "string" } },
+      "settleKindDescriptors": { "record": {}, "values": { "record": { "open": "string" } } }
+    },
+    "extensions/client-bound-transport/core-shared--client-issuer/rsaOaep.js": {
+      "assertCanOpenChainKeys": "undefined",
+      "assertCanOpenRawKeys": "undefined",
+      "open": { "record": {} }
+    },
+    "extensions/client-bound-transport/ecdhP256.js": {
+      "assertCanOpenChainKeys": "undefined",
+      "assertCanOpenRawKeys": "undefined",
+      "open": { "record": {} },
+      "seal": { "record": { "transport": { "record": {} } } },
+      "settleKindDescriptors": { "record": {}, "values": { "record": { "open": "string" } } }
+    },
+    "extensions/client-bound-transport/rsaOaep.js": {
+      "assertCanOpenChainKeys": "undefined",
+      "assertCanOpenRawKeys": "undefined",
+      "open": { "record": {} },
+      "seal": { "record": { "transport": { "record": {} } } },
+      "settleKindDescriptors": { "record": {}, "values": { "record": { "open": "string" } } }
+    },
+    "extensions/compact-ecdh/core-issuer/procedure.js": { "openCompactEcdh": "Uint8Array" },
+    "extensions/compact-ecdh/core-publisher/keySealing.js": {
+      "compactEcdhPublisherContribution": {
+        "record": {
+          "contentKeyWrapStrategy": { "anyOf": ["undefined", { "record": {} }] },
+          "issuerConfigMembers": { "anyOf": ["undefined", { "list": "string" }] },
+          "issuerSupplyPlanWrapper": { "anyOf": ["undefined", "value"] },
+          "itemOptionMembers": { "anyOf": ["undefined", { "list": "string" }] },
+          "itemPreparation": {
+            "anyOf": [
+              "undefined",
+              {
+                "record": {
+                  "envelopes": { "anyOf": ["undefined", { "list": "string" }] },
+                  "requestRelay": { "anyOf": ["undefined", "value"] }
+                }
+              }
+            ]
+          },
+          "keySealing": { "anyOf": ["undefined", { "record": {} }] },
+          "name": "string",
+          "periodKeySupply": {
+            "anyOf": [
+              "undefined",
+              { "record": { "familyPlan": { "anyOf": ["undefined", "value"] } } }
+            ]
+          },
+          "requiredSeams": { "anyOf": ["undefined", { "list": "string" }] }
+        }
+      }
+    },
+    "extensions/compact-ecdh/core-shared--publisher-issuer/envelope.js": {
+      "open": "Uint8Array",
+      "seal": "Uint8Array"
+    },
+    "extensions/compact-ecdh/core-shared--publisher-issuer/hpke.js": {
+      "labeledExpand": "Uint8Array",
+      "labeledExtract": "Uint8Array",
+      "open": "Uint8Array",
+      "openTranscript": {
+        "record": {
+          "baseNonce": "Uint8Array",
+          "dh": "Uint8Array",
+          "key": "Uint8Array",
+          "plaintext": "Uint8Array",
+          "sharedSecret": "Uint8Array"
+        }
+      },
+      "seal": { "record": { "ciphertext": "Uint8Array", "enc": "Uint8Array" } },
+      "sealTranscript": {
+        "record": {
+          "baseNonce": "Uint8Array",
+          "ciphertext": "Uint8Array",
+          "dh": "Uint8Array",
+          "enc": "Uint8Array",
+          "key": "Uint8Array",
+          "sharedSecret": "Uint8Array"
+        }
+      }
+    },
+    "extensions/compact-ecdh/core-shared--publisher-issuer/p256Point.js": {
+      "compressP256": "Uint8Array",
+      "decompressP256": { "anyOf": ["Uint8Array", "null"] }
+    },
+    "extensions/compact-ecdh/core-shared--publisher-issuer/selector.js": {
+      "readEnvelopeSelector": "string"
+    },
+    "extensions/compact-ecdh/core-shared--publisher-issuer/testing/deterministicHpke.js": {
+      "deriveKeyPair": { "record": { "pkBytes": "Uint8Array", "skBytes": "Uint8Array" } },
+      "keyPairFromScalar": { "record": { "pkBytes": "Uint8Array", "skBytes": "Uint8Array" } }
+    },
+    "extensions/content-description/core-client/contentDescriptionHandoff.js": {
+      "contentDescriptionHandoff": {
+        "record": {
+          "bytes": "Uint8Array",
+          "contentName": "string",
+          "contentType": "string",
+          "description": {
+            "record": {
+              "description": {
+                "anyOf": [
+                  "null",
+                  {
+                    "record": {
+                      "description": { "anyOf": ["string", "undefined"] },
+                      "schema": { "anyOf": ["string", "undefined"] },
+                      "version": "string"
+                    }
+                  }
+                ]
+              },
+              "state": "string"
+            }
+          }
+        }
+      },
+      "selectContentDescriptionHandler": {
+        "record": { "schema": { "anyOf": ["null", "string"] }, "state": "string" }
+      }
+    },
+    "extensions/content-description/core-publisher/withContentDescriptions.js": {
+      "withContentDescriptions": { "record": {}, "values": "any" }
+    },
+    "extensions/content-description/core-shared--client-publisher/contentDescription.js": {
+      "admitContentDescription": {
+        "record": {
+          "description": {
+            "anyOf": [
+              "null",
+              {
+                "record": {
+                  "description": { "anyOf": ["string", "undefined"] },
+                  "schema": { "anyOf": ["string", "undefined"] },
+                  "version": "string"
+                }
+              }
+            ]
+          },
+          "state": "string"
+        }
+      }
+    },
+    "extensions/content-groups/core-client/client.js": {
+      "createContentGroupClient": {
+        "record": {
+          "composeOptions": {
+            "record": {
+              "recoverySources": { "list": "any" },
+              "responseSections": { "list": "any" }
+            }
+          },
+          "keyKinds": {
+            "record": {
+              "contentGroupChainKey": { "record": { "open": "string" } },
+              "contentGroupPeriodKey": { "record": { "open": "string" } }
+            }
+          },
+          "limits": { "record": {} },
+          "recoverySource": {
+            "record": {
+              "attempted": { "anyOf": ["undefined", "value"] },
+              "clearReaderContext": { "anyOf": ["undefined", "value"] },
+              "promote": { "anyOf": ["undefined", "value"] }
+            }
+          },
+          "responseInput": {
+            "record": {
+              "attempted": { "anyOf": ["undefined", "value"] },
+              "clearReaderContext": { "anyOf": ["undefined", "value"] },
+              "name": "string",
+              "promote": { "anyOf": ["undefined", "value"] }
+            }
+          }
+        }
+      }
+    },
+    "extensions/content-groups/core-client/contentGroupCandidateSource.js": {
+      "contentGroupCandidateSource": {
+        "record": {
+          "attempted": { "anyOf": ["undefined", "value"] },
+          "clearReaderContext": { "anyOf": ["undefined", "value"] },
+          "promote": { "anyOf": ["undefined", "value"] }
+        }
+      }
+    },
+    "extensions/content-groups/core-client/contentGroupResponseInput.js": {
+      "admitContentGroupResponse": {
+        "record": {
+          "chains": {
+            "list": {
+              "record": {
+                "contentName": "string",
+                "cutoffT": "string",
+                "group": "string",
+                "keyKind": "string",
+                "windowStart": "string"
+              }
+            }
+          },
+          "contentKeys": {
+            "list": {
+              "record": { "contentName": "string", "group": "string", "keyKind": "string" }
+            }
+          },
+          "errors": {
+            "list": {
+              "anyOf": [
+                {
+                  "record": {
+                    "contentName": "string",
+                    "error": "string",
+                    "group": "string",
+                    "section": "string",
+                    "t": "string",
+                    "windowStart": "string"
+                  }
+                },
+                {
+                  "record": {
+                    "contentName": "string",
+                    "error": "string",
+                    "group": "string",
+                    "section": "string"
+                  }
+                }
+              ]
+            }
+          },
+          "periodGeometry": { "record": {} },
+          "periods": {
+            "list": {
+              "record": {
+                "contentName": "string",
+                "group": "string",
+                "keyKind": "string",
+                "t": "string",
+                "windowStart": "string"
+              }
+            }
+          }
+        }
+      },
+      "contentGroupResponseInput": {
+        "record": {
+          "attempted": { "anyOf": ["undefined", "value"] },
+          "clearReaderContext": { "anyOf": ["undefined", "value"] },
+          "name": "string",
+          "promote": { "anyOf": ["undefined", "value"] }
+        }
+      }
+    },
+    "extensions/content-groups/core-issuer/unlock.js": {
+      "contentGroupsIssuerContribution": {
+        "record": {
+          "envelopeProcedures": {
+            "anyOf": [
+              "undefined",
+              {
+                "record": {},
+                "values": {
+                  "anyOf": ["value", { "record": { "keyAlgorithms": { "list": "string" } } }]
+                }
+              }
+            ]
+          },
+          "extensionCoordinate": { "anyOf": ["undefined", "value"] },
+          "name": "string",
+          "requestBounds": { "anyOf": ["undefined", { "list": "value" }] },
+          "responseSectionSource": {
+            "anyOf": [
+              "undefined",
+              {
+                "record": {
+                  "envelopeOpeners": {
+                    "anyOf": ["undefined", { "record": {}, "values": "value" }]
+                  },
+                  "members": { "list": "string" },
+                  "name": "string"
+                }
+              }
+            ]
+          },
+          "responseSections": {
+            "anyOf": [
+              "undefined",
+              {
+                "list": {
+                  "record": {
+                    "errorPath": { "anyOf": ["undefined", { "list": "string" }] },
+                    "keyKind": "string",
+                    "leafKey": { "anyOf": ["string", "undefined"] },
+                    "path": { "list": "string" }
+                  }
+                }
+              }
+            ]
+          }
+        }
+      }
+    },
+    "extensions/content-groups/core-publisher/publish.js": {
+      "contentGroupsPublisherContribution": {
+        "record": {
+          "itemOptionMembers": { "list": "string" },
+          "itemPreparation": {
+            "record": {
+              "envelopes": { "anyOf": ["undefined", { "list": "string" }] },
+              "requestRelay": { "anyOf": ["undefined", "value"] }
+            }
+          },
+          "name": "string"
+        }
+      }
+    },
+    "extensions/content-groups/core-shared--client-issuer/request.js": {
+      "readContentGroupRequest": {
+        "anyOf": [
+          "null",
+          {
+            "record": {
+              "contentGroups": {
+                "record": {},
+                "values": {
+                  "record": { "groups": { "list": "string" }, "windows": { "list": "string" } }
+                }
+              },
+              "contentKeys": {
+                "record": {},
+                "values": { "record": { "connector": "string", "group": "string" } }
+              },
+              "cutoffs": { "anyOf": ["undefined", { "record": {}, "values": "string" }] },
+              "renderPeriod": "string",
+              "seeds": { "record": {}, "values": { "record": {}, "values": "string" } }
+            }
+          }
+        ]
+      }
+    },
+    "extensions/content-groups/core-shared--client-publisher/requestProjection.js": {
+      "contentGroupRequestSelection": {
+        "anyOf": [
+          "null",
+          {
+            "record": {
+              "contentKeys": {
+                "record": {},
+                "values": { "record": { "connector": "string", "group": "string" } }
+              },
+              "cutoffs": { "anyOf": ["undefined", { "record": {}, "values": "string" }] },
+              "groups": { "record": {}, "values": { "list": "string" } },
+              "seeds": { "record": {}, "values": { "record": {}, "values": "string" } }
+            }
+          }
+        ]
+      }
+    },
+    "extensions/content-groups/core-shared--publisher-issuer/seedHandle.js": {
+      "seedHandle": { "record": { "windowStart": "string" } }
+    },
+    "extensions/content-groups/core-shared/construction.js": {
+      "checkedConnectors": { "list": { "record": { "connector": "string", "group": "string" } } },
+      "checkedContentRecords": {
+        "record": {},
+        "values": { "list": { "record": { "connector": "string", "group": "string" } } }
+      },
+      "contentNameSeed": "Uint8Array",
+      "contentNameSeedAad": "Uint8Array",
+      "settleLimits": { "record": {} }
+    },
+    "extensions/content-groups/core-shared/seed-envelope.js": {
+      "openSeed": "Uint8Array",
+      "sealSeed": "string"
+    },
+    "extensions/content-key-seal-omission/core-client/OmissionRequestBuilder.js": {
+      "omissionPresentedContentNames": { "list": "string" }
+    },
+    "extensions/content-key-seal-omission/core-client/omissionEntryInterpretation.js": {
+      "omissionEntryInterpretation": {
+        "anyOf": ["null", { "record": { "aad": { "anyOf": ["Uint8Array", "undefined"] } } }]
+      }
+    },
+    "extensions/content-key-seal-omission/core-publisher/omissionSealing.js": {
+      "omissionContribution": {
+        "record": {
+          "contentKeyWrapStrategy": { "anyOf": ["undefined", { "record": {} }] },
+          "issuerConfigMembers": { "anyOf": ["undefined", { "list": "string" }] },
+          "issuerSupplyPlanWrapper": { "anyOf": ["undefined", "value"] },
+          "itemOptionMembers": { "anyOf": ["undefined", { "list": "string" }] },
+          "itemPreparation": {
+            "anyOf": [
+              "undefined",
+              {
+                "record": {
+                  "envelopes": { "anyOf": ["undefined", { "list": "string" }] },
+                  "requestRelay": { "anyOf": ["undefined", "value"] }
+                }
+              }
+            ]
+          },
+          "keySealing": { "anyOf": ["undefined", { "record": {} }] },
+          "name": "string",
+          "periodKeySupply": {
+            "anyOf": [
+              "undefined",
+              { "record": { "familyPlan": { "anyOf": ["undefined", "value"] } } }
+            ]
+          },
+          "requiredSeams": { "anyOf": ["undefined", { "list": "string" }] }
+        }
+      },
+      "omissionSealing": {
+        "record": {
+          "contentKeyWrapStrategy": { "record": {} },
+          "issuers": { "list": "any" },
+          "itemPreparations": {
+            "list": {
+              "record": {
+                "envelopes": { "anyOf": ["undefined", { "list": "string" }] },
+                "requestRelay": { "anyOf": ["undefined", "value"] }
+              }
+            }
+          }
+        }
+      }
+    },
+    "extensions/content-key-seal-omission/core-shared--client-publisher/omissionCandidates.js": {
+      "omissionBoundCandidates": { "record": {}, "values": { "list": "any" } }
+    },
+    "extensions/content-key-seal-omission/core-shared/omissionBind.js": {
+      "omissionBindAad": "Uint8Array",
+      "omissionBindFields": { "list": "string" },
+      "omissionBindValue": "string",
+      "validateOmissionRenderId": "string"
+    },
+    "extensions/html-content-map/adapter-client/domTree.js": {
+      "domTree": { "record": {} },
+      "serializeDomDocument": "string"
+    },
+    "extensions/html-content-map/adapter-client/parse5Tree.js": {
+      "parseLockedDocument": { "record": {} }
+    },
+    "extensions/html-content-map/adapter-client/sourceFetch.js": {
+      "admitUtf8Charset": "undefined",
+      "admitUtf8ContentType": "undefined",
+      "fetchLockedDelivery": {
+        "record": { "bytes": "Uint8Array", "finalOrigin": "string", "finalUrl": "string" }
+      }
+    },
+    "extensions/html-content-map/adapter-publisher/parse5Tree.js": {
+      "deliveredFormDiffers": { "list": "value" },
+      "parseRenderedPage": { "record": {} }
+    },
+    "extensions/html-content-map/adapter-publisher/writeMappedDelivery.js": {
+      "writeMappedDelivery": "string"
+    },
+    "extensions/html-content-map/core-client/contentMapRun.js": {
+      "createContentMapSession": { "record": {} },
+      "mapDeliveryOf": { "record": {} },
+      "mapFailure": {
+        "anyOf": [
+          "null",
+          {
+            "record": {
+              "report": {
+                "anyOf": [
+                  {
+                    "record": {
+                      "failure": "string",
+                      "items": { "anyOf": ["undefined", { "record": {}, "values": "string" }] },
+                      "outcome": "string"
+                    }
+                  },
+                  {
+                    "record": { "items": { "record": {}, "values": "string" }, "outcome": "string" }
+                  }
+                ]
+              },
+              "targets": { "list": { "record": { "path": { "list": "value" } } } }
+            }
+          }
+        ]
+      },
+      "runContentMap": {
+        "record": {
+          "report": {
+            "anyOf": [
+              {
+                "record": {
+                  "failure": "string",
+                  "items": { "anyOf": ["undefined", { "record": {}, "values": "string" }] },
+                  "outcome": "string"
+                }
+              },
+              { "record": { "items": { "record": {}, "values": "string" }, "outcome": "string" } }
+            ]
+          },
+          "targets": { "list": { "record": { "path": { "list": "value" } } } }
+        }
+      },
+      "structuralFailure": {
+        "anyOf": [
+          "null",
+          {
+            "record": {
+              "report": {
+                "anyOf": [
+                  {
+                    "record": {
+                      "failure": "string",
+                      "items": { "anyOf": ["undefined", { "record": {}, "values": "string" }] },
+                      "outcome": "string"
+                    }
+                  },
+                  {
+                    "record": { "items": { "record": {}, "values": "string" }, "outcome": "string" }
+                  }
+                ]
+              },
+              "targets": { "list": { "record": { "path": { "list": "value" } } } }
+            }
+          }
+        ]
+      }
+    },
+    "extensions/html-content-map/core-client/mapItems.js": {
+      "decodeMapItemText": { "anyOf": ["null", "string"] },
+      "openMapItems": {
+        "record": {},
+        "values": {
+          "anyOf": [
+            { "record": { "contentType": "string", "state": "string", "text": "string" } },
+            { "record": { "state": "string", "text": "null" } }
+          ]
+        }
+      }
+    },
+    "extensions/html-content-map/core-client/sourceProvenance.js": {
+      "admitRedirectTarget": { "anyOf": ["null", "string"] },
+      "admitSourceUrl": { "anyOf": ["null", "string"] },
+      "sourceOrigin": "string",
+      "verifyResourceAssertion": { "record": { "registration": "string" } }
+    },
+    "extensions/html-content-map/core-client/treeDeliveryRoot.js": {
+      "treeDeliveryRoot": { "record": { "location": { "record": { "origin": "string" } } } }
+    },
+    "extensions/html-content-map/core-shared--client-publisher/contentMap.js": {
+      "admitMapItems": "undefined",
+      "mapCarrier": { "record": { "path": { "list": "value" } } },
+      "mapLimits": { "record": {} },
+      "parseContentMap": {
+        "record": {
+          "items": { "record": {}, "values": "string" },
+          "rules": {
+            "list": {
+              "record": {
+                "className": { "anyOf": ["null", "string"] },
+                "item": "string",
+                "op": "string",
+                "target": {
+                  "record": {
+                    "combinators": { "list": "string" },
+                    "compounds": {
+                      "list": {
+                        "record": {
+                          "qualifiers": {
+                            "list": {
+                              "discriminant": "kind",
+                              "cases": {
+                                "\"attribute\"": {
+                                  "record": {
+                                    "name": "string",
+                                    "value": { "anyOf": ["null", "string"] }
+                                  }
+                                },
+                                "\"class\"": { "record": { "name": "string" } },
+                                "\"id\"": { "record": { "name": "string" } }
+                              }
+                            }
+                          },
+                          "type": { "anyOf": ["null", "string"] }
+                        }
+                      }
+                    },
+                    "text": "string"
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "extensions/html-content-map/core-shared--client-publisher/selectors.js": {
+      "parseSelector": {
+        "record": {
+          "combinators": { "list": "string" },
+          "compounds": {
+            "list": {
+              "record": {
+                "qualifiers": {
+                  "list": {
+                    "discriminant": "kind",
+                    "cases": {
+                      "\"attribute\"": {
+                        "record": { "name": "string", "value": { "anyOf": ["null", "string"] } }
+                      },
+                      "\"class\"": { "record": { "name": "string" } },
+                      "\"id\"": { "record": { "name": "string" } }
+                    }
+                  }
+                },
+                "type": { "anyOf": ["null", "string"] }
+              }
+            }
+          },
+          "text": "string"
+        }
+      }
+    },
+    "extensions/html-content-map/core-shared--client-publisher/targets.js": {
+      "admitLockedDocument": "undefined",
+      "resolveTargets": {
+        "list": {
+          "record": {
+            "rule": {
+              "record": {
+                "className": { "anyOf": ["null", "string"] },
+                "item": "string",
+                "op": "string",
+                "target": {
+                  "record": {
+                    "combinators": { "list": "string" },
+                    "compounds": {
+                      "list": {
+                        "record": {
+                          "qualifiers": {
+                            "list": {
+                              "discriminant": "kind",
+                              "cases": {
+                                "\"attribute\"": {
+                                  "record": {
+                                    "name": "string",
+                                    "value": { "anyOf": ["null", "string"] }
+                                  }
+                                },
+                                "\"class\"": { "record": { "name": "string" } },
+                                "\"id\"": { "record": { "name": "string" } }
+                              }
+                            }
+                          },
+                          "type": { "anyOf": ["null", "string"] }
+                        }
+                      }
+                    },
+                    "text": "string"
+                  }
+                }
+              }
+            },
+            "target": { "record": { "path": { "list": "value" } } }
+          }
+        }
+      }
+    },
+    "extensions/html-content-map/core-shared--client-publisher/treePort.js": {
+      "classValueWithout": "string",
+      "orderedTokenSet": { "list": "string" },
+      "treeEntries": { "list": { "record": { "path": { "list": "value" } } } }
+    },
+    "extensions/html-content-map/integration-client/createHtmlGateway.js": {
+      "createHtmlGateway": { "record": {} }
+    },
+    "extensions/html-content-map/integration-client/reconstructBrowserPage.js": {
+      "createBrowserMapSession": { "record": {} },
+      "reconstructBrowserPage": {
+        "record": {
+          "report": {
+            "anyOf": [
+              {
+                "record": {
+                  "failure": "string",
+                  "items": { "anyOf": ["undefined", { "record": {}, "values": "string" }] },
+                  "outcome": "string"
+                }
+              },
+              { "record": { "items": { "record": {}, "values": "string" }, "outcome": "string" } }
+            ]
+          },
+          "targets": { "list": { "record": { "path": { "list": "value" } } } }
+        }
+      }
+    },
+    "extensions/recipient-grant/browserHost.js": {
+      "createRecipientGrantBrowserHost": { "record": {} }
+    },
+    "extensions/recipient-grant/client.js": {
+      "createRecipientGrantBrowserClient": {
+        "record": {
+          "denialCache": { "anyOf": ["null", { "record": {} }] },
+          "reader": { "record": { "publisherOrigin": "string" } }
+        }
+      }
+    },
+    "integration-client/browserCapabilities.js": {
+      "missingBrowserCapabilities": { "list": "string" },
+      "requireBrowserCapabilities": "undefined"
+    },
+    "integration-client/composeClient.js": { "composeClient": { "record": {} } },
+    "integration-client/createBrowserClient.js": {
+      "createBrowserClient": {
+        "record": {
+          "denialCache": { "anyOf": ["null", { "record": {} }] },
+          "reader": { "record": { "publisherOrigin": "string" } }
+        }
+      }
+    },
+    "integration-client/createDeliveryClient.js": {
+      "createDeliveryClient": {
+        "record": { "reader": { "record": { "publisherOrigin": "string" } } }
+      }
+    },
+    "integration-issuer/admitBrowserRequest.js": {
+      "admitBrowserRequest": {
+        "discriminant": "kind",
+        "cases": {
+          "\"admitted\"": {
+            "record": {
+              "claims": { "record": {} },
+              "registration": {
+                "record": {
+                  "kid": "string",
+                  "openingKeys": { "record": {} },
+                  "origins": { "anyOf": ["undefined", { "list": "string" }] }
+                }
+              }
+            }
+          },
+          "\"refused\"": {
+            "record": {
+              "code": "string",
+              "response": {
+                "anyOf": [
+                  "undefined",
+                  {
+                    "record": {
+                      "headers": { "anyOf": ["undefined", { "record": {}, "values": "string" }] }
+                    }
+                  }
+                ]
+              }
+            }
+          }
+        }
+      }
+    },
+    "integration-issuer/createIssuerCore.js": {
+      "admitBrowserRequest": {
+        "discriminant": "kind",
+        "cases": {
+          "\"admitted\"": {
+            "record": {
+              "claims": { "record": {} },
+              "registration": {
+                "record": {
+                  "kid": "string",
+                  "openingKeys": { "record": {} },
+                  "origins": { "anyOf": ["undefined", { "list": "string" }] }
+                }
+              }
+            }
+          },
+          "\"refused\"": {
+            "record": {
+              "code": "string",
+              "response": {
+                "anyOf": [
+                  "undefined",
+                  {
+                    "record": {
+                      "headers": { "anyOf": ["undefined", { "record": {}, "values": "string" }] }
+                    }
+                  }
+                ]
+              }
+            }
+          }
+        }
+      },
+      "createIssuerCore": {
+        "record": {
+          "engine": { "record": { "checkVersion": { "anyOf": ["undefined", "value"] } } },
+          "responseSections": {
+            "list": {
+              "record": {
+                "errorPath": { "anyOf": ["undefined", { "list": "string" }] },
+                "keyKind": "string",
+                "leafKey": { "anyOf": ["string", "undefined"] },
+                "path": { "list": "string" }
+              }
+            }
+          }
+        }
+      }
+    },
+    "integration-publisher/createPublisher.js": { "createPublisher": { "record": {} } },
+    "tools/profileCatalogue.js": {
+      "profileDutySummary": {
+        "record": {
+          "duties": { "list": "string" },
+          "requestedProfiles": { "list": "string" },
+          "resolvedProfiles": { "list": "string" },
+          "role": "string"
+        }
+      },
+      "resolveProfiles": {
+        "record": {
+          "requestedProfiles": { "list": "string" },
+          "resolvedProfiles": { "list": "string" }
+        }
+      },
+      "validateProfileCatalogue": {
+        "record": {
+          "authority": "string",
+          "baseline": "string",
+          "duties": {
+            "anyOf": [
+              "undefined",
+              {
+                "list": {
+                  "record": {
+                    "id": "string",
+                    "profile": "string",
+                    "ref": "string",
+                    "role": "string"
+                  }
+                }
+              }
+            ]
+          },
+          "profiles": {
+            "list": {
+              "record": {
+                "dependsOn": { "list": "string" },
+                "id": "string",
+                "ref": "string",
+                "roles": { "anyOf": ["undefined", { "list": "string" }] }
+              }
+            }
+          },
+          "selections": {
+            "anyOf": [
+              "undefined",
+              {
+                "list": {
+                  "record": {
+                    "choices": {
+                      "record": {},
+                      "values": { "anyOf": ["string", { "list": "string" }] }
+                    },
+                    "decider": "string",
+                    "profile": "string",
+                    "ref": "string",
+                    "requires": {
+                      "anyOf": [
+                        "undefined",
+                        {
+                          "list": {
+                            "record": {
+                              "if": { "record": {}, "values": { "anyOf": ["string", "value"] } },
+                              "then": { "record": {}, "values": { "anyOf": ["string", "value"] } }
+                            }
+                          }
+                        }
+                      ]
+                    },
+                    "requiresProfiles": {
+                      "anyOf": [
+                        "undefined",
+                        {
+                          "list": {
+                            "record": {
+                              "if": { "record": {}, "values": { "anyOf": ["string", "value"] } },
+                              "profiles": { "list": "string" }
+                            }
+                          }
+                        }
+                      ]
+                    },
+                    "scope": "string"
+                  }
+                }
+              }
+            ]
+          }
+        }
+      },
+      "validateSelection": { "record": {}, "values": "any" }
+    }
+  }
+}

@@ -23,7 +23,8 @@ fail() {
 
 # The stub every DCA_DRIVER_RUN override in this file points at. Asked for the
 # set selection it prints three sets, one of them outside the lane's declared
-# operations; asked to run a set it answers off STUB_EXIT, the way a bridge
+# operations, then the two operations the lane declares and the member that
+# answers each; asked to run a set it answers off STUB_EXIT, the way a bridge
 # process answers 0, 1 or 2 and nothing else about the batch matters here.
 stub="$scratch/stub-driver"
 {
@@ -31,6 +32,7 @@ stub="$scratch/stub-driver"
     echo 'case "$1" in'
     echo '  *select-sets.mjs)'
     echo "    printf '%s\\n' 'encoding supported' 'hkdf supported' 'rsa-oaep unsupported'"
+    echo "    printf '%s\\n' 'operation decode-base64url lane' 'operation hkdf-sha256 hash'"
     echo '    exit "${STUB_SELECT_EXIT:-0}" ;;'
     echo 'esac'
     echo 'exit "${STUB_EXIT:-0}"'
@@ -120,6 +122,20 @@ run_sets sets-crashed "$stub" 137
 [ "$(cat "$scratch/sets-crashed.status")" = 2 ] || fail "sets-crashed: an exit outside 0/1/2 must fold to incomplete"
 
 echo "  answer_corpus_sets: held, disagreed, incomplete, unsupported and a stray exit all read correctly"
+
+# The selector's operation lines become one operation= row each, in the order
+# it printed them, ahead of every set= row; the shell only renames the fields.
+cat > "$scratch/sets-held.rows-expected" <<'ROWS'
+operation=decode-base64url member=lane
+operation=hkdf-sha256 member=hash
+set=encoding status=held
+set=hkdf status=held
+set=rsa-oaep status=unsupported
+ROWS
+if ! diff -u "$scratch/sets-held.rows-expected" "$scratch/sets-held.rows"; then
+    fail "sets-held: the operation= rows did not come first, in selector order, ahead of the set= rows"
+fi
+echo "  answer_corpus_sets: one operation= row per declared operation, ahead of the set= rows"
 
 # An unsupported set never reaches the exit code: the lane holds over what it
 # was asked and says plainly what it was not.
@@ -271,5 +287,53 @@ if ! diff -u "$scratch/record-one-set.expected" "$scratch/record-one-set.record"
     fail "record-one-set: a record over one set still did not match"
 fi
 echo "  write_driver_record: a record over one set writes lane=/set=/exit= exactly"
+
+# ---- run_lane_versions: what a record carries, end to end ------------------
+
+# A run and a refusal from one lane check, through the same entry point every
+# lane check calls. The runtime is observed by a stub lane_runtime; version 7.3
+# is refused by lane_version_refusal. The answered record carries the operation
+# rows between the header and the set rows; the refused record carries none,
+# because nothing ran.
+printf '%s\n' '8.4 8.4.0 default' '7.3 7.3.0 default' > "$scratch/versions"
+(
+    . "$steps"
+    DCA_DRIVER_RUN=$stub
+    STUB_EXIT=0
+    export STUB_EXIT
+    DCA_LANE=stublane
+    DCA_RECORD="$scratch/versions-run.record"
+    DCA_VERSION_SELECTION=default
+    lane_runtime() { DCA_RUNTIME_OBSERVED="$1.0-observed"; }
+    lane_version_refusal() { [ "$1" != 7.3 ] || echo 'no ECDH in this build'; }
+    run_lane_versions "$scratch"
+    exit "$DCA_LANE_STATUS"
+) > "$scratch/versions-run.out" 2> "$scratch/versions-run.err" \
+    || { cat "$scratch/versions-run.err" >&2; fail "versions-run: run_lane_versions did not exit 0"; }
+cat > "$scratch/versions-run.expected-8.4" <<'RECORD'
+lane=stublane
+version=8.4
+runtime=8.4.0-observed
+operation=decode-base64url member=lane
+operation=hkdf-sha256 member=hash
+set=encoding status=held
+set=hkdf status=held
+set=rsa-oaep status=unsupported
+exit=0
+RECORD
+if ! diff -u "$scratch/versions-run.expected-8.4" "$scratch/versions-run.record.8.4"; then
+    fail "versions-run: the answered record does not carry the operation rows between the header and the set rows"
+fi
+cat > "$scratch/versions-run.expected-7.3" <<'RECORD'
+lane=stublane
+version=7.3
+status=refused
+reason=no ECDH in this build
+exit=0
+RECORD
+if ! diff -u "$scratch/versions-run.expected-7.3" "$scratch/versions-run.record.7.3"; then
+    fail "versions-run: the refused record carries rows a refusal denies"
+fi
+echo "  run_lane_versions: an answered record carries the operation rows; a refused one carries none"
 
 printf 'driver-steps fixtures: PASS\n'

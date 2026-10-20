@@ -1,0 +1,48 @@
+{
+  "name": "reject-delimiter-accessgroup",
+  "vectorFormat": "2",
+  "derivedFrom": "seal-ecdh",
+  "description": "An unlock request whose sealed.periodKeys carries an accessGroup with the binding delimiter inside it. THE ATTACK. sealed.periodKeys carries \"premium|sport\" beside premium and locked-data, holding the two genuine premium periodKey blobs of this render. The two honest families are untouched. \"premium:sport\" is a name the grammar allows, and this is the same name spelled with the one character the grammar reserves, which is what makes it the near miss rather than the obvious one. WHY IT DOES NOT OPEN, AND WHAT THE DELIMITER IS FOR. A period binding is five fields - \"dca-bind-key-envelope\", \"p\", the renderId, the accessGroup and t - joined on the delimiter. Two of those fields are the caller's, and an issuer never parses t: it takes the pair it was handed and joins. So with the delimiter allowed inside either field, the pair (\"premium\", \"sport|251023T1400\") and the pair (\"premium|sport\", \"251023T1400\") join to one string, and the value stops naming one coordinate. The ban is what keeps the join a boundary. Without one the encoding is concatenation, where \"premium1\" with t \"251023T1300\" and \"premium\" with t \"1251023T1300\" are also one string. The issuer builds no value out of a field carrying the separator, so neither blob under this family is opened. The issuer admits every request coordinate before policy, BIND construction or private-key work. A field carrying the delimiter cannot be represented in BIND or in an unambiguous error coordinate, so this is a whole-request binding_failed refusal. No honest sibling and no per-coordinate error is returned. NOT CONFORMANT: reaching the issuer private key, returning any key, or copying the malformed coordinate into the response. WHAT AN IMPLEMENTATION THAT SKIPS THE BAN HANDS THE ATTACKER: two coordinates that are one. No key falls out of THIS body - the publisher's own sealer bans the delimiter, so nothing of this render was sealed at a coordinate a re-split could reach - and the two readings above are two names a policy decides separately, so neither is a grant the other carries. What is handed over is the property every later argument rests on: the decision is made on one reading of the pair and the blob is opened under the other, with nothing on the wire to say which pair was asked for. An implementation that joins whatever it was handed keeps that open in every deployment where a name with the delimiter in it reaches the wire at all - a CMS that never ran the sealer's name check, a second implementation of the sealer, markup written by hand. WHAT THIS VECTOR DOES NOT PIN. It does not separate an issuer that runs the ban from one that does not. Both build no key here, both report the same two errors, and a tree with the ban deleted replays this body byte for byte the way a conformant one does. The separation needs a blob sealed at a coordinate the ban refuses, and this render has none. reject-delimiter-sealed-accessgroup presents such a blob at the pair its own coordinate re-splits into, which is the collision the paragraph above describes, and reject-delimiter-sealed-contentname does the same on the content grammar. REPLAY. Post `rawBody` VERBATIM - the string as it sits in this file, never a re-serialization of it - to the unlock endpoint, with `issuer` as the key material the issuer holds for its own name and keyId, and `publisher.signingKeys` as the public verification halves, read straight from this file rather than resolved by a deployment lookup. A pass is: expected.code where there is one; key material back for exactly the coordinates in expected.keys and no others; and an error back for exactly the coordinates in expected.errors, under the codes recorded there. No publisher private key is in this file, on purpose: an issuer never holds one, so everything a reject vector asks for is checkable with what a real issuer has. HOW FAR THE REFUSAL REACHES IS PART OF WHAT IS PINNED, and expected.privateKeyReached says which side of the line this body lands on. A request that fails integrity - a signature that does not verify, a signed resource with no renderId to bind to - has asked nothing that could be answered, so it is refused whole and before the key store is consulted at all. A blob presented at a coordinate it was not sealed at is one bad blob in an ordinary request: the only way to find out is to try it, so the key store is reached, the blob comes back as an error, and everything else the request carried is answered beside it. The untouched coordinates were never the attack, and a page has to keep working around one bad blob, so they are answered. Everything in the body but the attack is the render this vector was cut from - the envelope, the periodKeys section and the untouched blobs are what the publisher emitted. An unchanged regeneration retains the valid resourceJWT signature segment inside rawBody, so the body is byte-stable with seal-ecdh.json. A fresh seal still draws a new k, which is why a replayer verifies the segment rather than comparing it. The token is the one in the base vector from the same run, byte for byte, except in reject-no-renderid, reject-renderid-noncanonical and reject-renderid-wrong-width, whose envelopes are second tokens signed over resources with the renderId removed, given a noncanonical spelling, or resized, which is each vector's whole subject; in reject-forged-resourcejwt, whose signature segment was drawn by a key the publisher does not hold; in reject-tampered-resourcejwt, which carries the seal-ecdh token's own signature segment under a payload edited after signing; and in the two reject-alg-substituted arms, which carry that token's payload segment under a header rewritten to name another algorithm, with a third segment that is empty or a MAC - neither of which moves between runs.",
+  "issuer": {
+    "issuerName": "paywall_subscription_service",
+    "keyId": "2025-10",
+    "algorithm": "ecdh-p256",
+    "publicKeyJwk": {
+      "kty": "EC",
+      "crv": "P-256",
+      "x": "KnsL031lVTbNxwtMq3OQmFq-fyPVh3k1__Adl4ieLXw",
+      "y": "-aNkTV8wd6O2rTWc2jkpJgez4Cuvas4J8_Styi-cdsE"
+    },
+    "privateKeyJwk": {
+      "kty": "EC",
+      "crv": "P-256",
+      "x": "KnsL031lVTbNxwtMq3OQmFq-fyPVh3k1__Adl4ieLXw",
+      "y": "-aNkTV8wd6O2rTWc2jkpJgez4Cuvas4J8_Styi-cdsE",
+      "d": "iWEhz6AHq-n4l_YzhTZcyQH7O9B1A1AKl4maOJh3z5g"
+    }
+  },
+  "publisher": {
+    "origin": "https://www.news-site.example",
+    "signingKeys": [
+      {
+        "kid": "sign-2025-10",
+        "publicKeyJwk": {
+          "kty": "EC",
+          "crv": "P-256",
+          "x": "wjapTnuqn7FYYz7TbSiG283dToV0I1zpHoiVpbYGUYU",
+          "y": "9vgUr7XBOhco_Pf-7CczUPW8tmscQKhkiK0zybXWVCI"
+        }
+      }
+    ]
+  },
+  "rawBody": "{\n  \"version\": \"1\",\n  \"issuerName\": \"paywall_subscription_service\",\n  \"resourceJWT\": \"eyJhbGciOiJFUzI1NiIsInR5cCI6IkpXVCIsImtpZCI6InNpZ24tMjAyNS0xMCJ9.eyJyZW5kZXJJZCI6InVVVDU3Nk8zNEJvR0twZ1hwZE11Y3ciLCJvcmlnaW4iOiJodHRwczovL3d3dy5uZXdzLXNpdGUuZXhhbXBsZSIsImlzc3VlZEF0IjoiMjAyNS0xMC0yM1QxNDowMDowMC4wMDBaIiwicmVzb3VyY2VJZCI6IjEyMzQ1NiIsImRhdGEiOnsiZGF0ZS5wdWJsaXNoZWQiOiIyMDI1LTEwLTIwVDEwOjMwOjAwWiIsInNlY3Rpb24iOiJwb2xpdGljcyIsInRhZ3MiOlsiYnJlYWtpbmciLCJlbGVjdGlvbnMiXX19.J2wve9h-80DsFuL9VHtY8X5jYpTDierdPyigKhQFaocp-EnSJlRNTPs5yNmSVF_HrinwqfN84rzalG5l0osBFQ\",\n  \"keyId\": \"2025-10\",\n  \"sealed\": {\n    \"contentKeys\": {\n      \"bodytext\": \"BP_rrpHAnCFcf8NeehDgUG3w9ktUCbb_1LNPIX5pT8u7s5xZErWJNnNAJfmyMYNXO4LYDDMaasFJMMGHk63Fqhq7HFCl2Riv6VpJWXGn1bo7kpiOOOAZK60nnqSnp_4nz4lh24tpU4auZAgwkQ\",\n      \"locked-data\": \"BFO_DIR8YvBF7KDC6csLOOywgRvvgkrXGZhgvX-4UEbpjbcExTFUDum7lWRXU21llsS3dQpzLxiJJptmVbY-4g9bAr-k7mM8ltrpiAp74cmqwlkSLtHWnLAjCXiJfID525xaAnkLSSwCCazoUg\"\n    },\n    \"periodKeys\": {\n      \"premium\": {\n        \"251023T1400\": \"BINGkYo6rqhgWBVVdJiM0QiLh0sl7PRADoj1sUywh1VY30j8-6vfS2mXZ0KkOXUnF29fVZLF1YKUUPyeUhpwI44saqe6Y6UyHEziB6sk9ByFJkxFl7TYIEMbD4e4TSsFiaAG8Cpf5bFfNWsULQ\",\n        \"251023T1500\": \"BAWaMLaWFTKu1iD55oppbs7SCejlyxIOREMmS7otAOx3ZIAWv7cpyI0pH_U12MO4MTIUaBhuLkF0EVTFuneETtoqfRNQEv0AcNYEiG3xTNfDp4zKSvzt2C266vaU00lMk5gxfa9BUEC4W70KMw\"\n      },\n      \"locked-data\": {\n        \"251023T1400\": \"BCU1ON5iY7-eabveiBcgWpJrWzc_5vWApm2kotjEBkVPXEeyvi2q1CZQgghDAdZds0Le4a0zopxM_a0OZrDEUJR9IIsktg7TzyWqZE8JzzbzDAtAmz8RWWtJ7tlw3Xsa2IZY8vHgjD9qbeC1Fw\",\n        \"251023T1500\": \"BM-G5T29LnZ14YBqxm6SAMCbKHcwdX5wv_iLL0FEb_D0C-MPak9ZNDvcMsAOHjaiKcg9spCJnuVa-PDS7RcExw6TGmtnzfyKr7dq6DfWQRzkZsRJrcMnVlzKRoJ10SEd1TaWzVoyUdxjZViNsA\"\n      },\n      \"premium|sport\": {\n        \"251023T1400\": \"BINGkYo6rqhgWBVVdJiM0QiLh0sl7PRADoj1sUywh1VY30j8-6vfS2mXZ0KkOXUnF29fVZLF1YKUUPyeUhpwI44saqe6Y6UyHEziB6sk9ByFJkxFl7TYIEMbD4e4TSsFiaAG8Cpf5bFfNWsULQ\",\n        \"251023T1500\": \"BAWaMLaWFTKu1iD55oppbs7SCejlyxIOREMmS7otAOx3ZIAWv7cpyI0pH_U12MO4MTIUaBhuLkF0EVTFuneETtoqfRNQEv0AcNYEiG3xTNfDp4zKSvzt2C266vaU00lMk5gxfa9BUEC4W70KMw\"\n      }\n    }\n  }\n}",
+  "expected": {
+    "code": "binding_failed",
+    "keys": {
+      "contentKeys": [],
+      "periodKeys": {}
+    },
+    "errors": {},
+    "privateKeyReached": false
+  }
+}

@@ -1,0 +1,6 @@
+{
+    "script": "delta/bridge.mjs",
+    "command": "delta/run.sh",
+    "members": {},
+    "operations": {}
+}

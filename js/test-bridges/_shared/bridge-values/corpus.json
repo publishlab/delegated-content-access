@@ -1,0 +1,381 @@
+{
+  "version": 1,
+  "cases": [
+    { "type": "null", "name": "null", "value": null, "inspect": null, "transform": null },
+    { "type": "boolean", "name": "true", "value": true, "inspect": true, "transform": false },
+    { "type": "boolean", "name": "false", "value": false, "inspect": false, "transform": true },
+    {
+      "type": "string",
+      "name": "empty",
+      "value": "",
+      "inspect": { "octets": "" },
+      "transform": "é"
+    },
+    {
+      "type": "string",
+      "name": "ASCII",
+      "value": "plain text",
+      "inspect": { "octets": "706c61696e2074657874" },
+      "transform": "plain texté"
+    },
+    {
+      "type": "string",
+      "name": "two-octet character",
+      "value": "é",
+      "inspect": { "octets": "c3a9" },
+      "transform": "éé"
+    },
+    {
+      "type": "string",
+      "name": "astral character",
+      "value": "😀",
+      "inspect": { "octets": "f09f9880" },
+      "transform": "😀é"
+    },
+    {
+      "type": "string",
+      "name": "escapes and a NUL",
+      "value": "line\nbreak \"quoted\" \\ \u0000",
+      "inspect": { "octets": "6c696e650a627265616b202271756f74656422205c2000" },
+      "transform": "line\nbreak \"quoted\" \\ \u0000é"
+    },
+    { "type": "number", "name": "zero", "value": 0, "inspect": 0, "transform": 0 },
+    { "type": "number", "name": "one", "value": 1, "inspect": 1, "transform": -1 },
+    { "type": "number", "name": "negative", "value": -7, "inspect": -7, "transform": 7 },
+    { "type": "number", "name": "fraction", "value": 0.1, "inspect": 0.1, "transform": -0.1 },
+    {
+      "type": "number",
+      "name": "largest safe integer",
+      "value": 9007199254740991,
+      "inspect": 9007199254740991,
+      "transform": -9007199254740991
+    },
+    {
+      "type": "number",
+      "name": "smallest safe integer",
+      "value": -9007199254740991,
+      "inspect": -9007199254740991,
+      "transform": 9007199254740991
+    },
+    {
+      "type": "number",
+      "name": "large magnitude",
+      "value": 1e21,
+      "inspect": 1e21,
+      "transform": -1e21
+    },
+    {
+      "type": "number",
+      "name": "largest finite",
+      "value": 1.7976931348623157e308,
+      "inspect": 1.7976931348623157e308,
+      "transform": -1.7976931348623157e308
+    },
+    {
+      "type": "number",
+      "name": "smallest subnormal",
+      "value": 5e-324,
+      "inspect": 5e-324,
+      "transform": -5e-324
+    },
+    { "type": "record", "name": "empty", "value": {}, "inspect": {}, "transform": {} },
+    {
+      "type": "record",
+      "name": "scalar members",
+      "value": { "text": "a", "flag": true, "none": null, "count": 2 },
+      "inspect": { "text": { "octets": "61" }, "flag": true, "none": null, "count": 2 },
+      "transform": { "text": "aé", "flag": false, "none": null, "count": -2 }
+    },
+    {
+      "type": "record",
+      "name": "empty and non-ASCII member names",
+      "value": { "": 1, "nøkkel": "v" },
+      "inspect": { "": 1, "nøkkel": { "octets": "76" } },
+      "transform": { "": -1, "nøkkel": "vé" }
+    },
+    { "type": "list", "name": "empty", "value": [], "inspect": [], "transform": [] },
+    { "type": "list", "name": "one entry", "value": [3], "inspect": [3], "transform": [-3] },
+    {
+      "type": "list",
+      "name": "mixed scalars keep their order",
+      "value": [1, "b", null, true],
+      "inspect": [1, { "octets": "62" }, null, true],
+      "transform": [false, null, "bé", -1]
+    },
+    {
+      "type": "undefined",
+      "name": "top level",
+      "value": { "$type": "undefined" },
+      "inspect": { "undefined": true },
+      "transform": { "$type": "undefined" }
+    },
+    {
+      "type": "undefined",
+      "name": "list entry",
+      "value": [{ "$type": "undefined" }, 1],
+      "inspect": [{ "undefined": true }, 1],
+      "transform": [-1, { "$type": "undefined" }]
+    },
+    {
+      "type": "Uint8Array",
+      "name": "empty",
+      "value": { "$type": "Uint8Array", "base64url": "" },
+      "inspect": { "octets": "" },
+      "transform": { "$type": "Uint8Array", "base64url": "_w" }
+    },
+    {
+      "type": "Uint8Array",
+      "name": "one zero octet",
+      "value": { "$type": "Uint8Array", "base64url": "AA" },
+      "inspect": { "octets": "00" },
+      "transform": { "$type": "Uint8Array", "base64url": "AP8" }
+    },
+    {
+      "type": "Uint8Array",
+      "name": "every high bit",
+      "value": { "$type": "Uint8Array", "base64url": "AH-A_w" },
+      "inspect": { "octets": "007f80ff" },
+      "transform": { "$type": "Uint8Array", "base64url": "AH-A__8" }
+    },
+    {
+      "type": "Uint8Array",
+      "name": "octets that are valid UTF-8 text",
+      "value": { "$type": "Uint8Array", "base64url": "YWJj" },
+      "inspect": { "octets": "616263" },
+      "transform": { "$type": "Uint8Array", "base64url": "YWJj_w" }
+    },
+    {
+      "type": "Uint8Array",
+      "name": "octets that are not UTF-8",
+      "value": { "$type": "Uint8Array", "base64url": "__7D" },
+      "inspect": { "octets": "fffec3" },
+      "transform": { "$type": "Uint8Array", "base64url": "__7D_w" }
+    },
+    {
+      "type": "Date",
+      "name": "epoch",
+      "value": { "$type": "Date", "iso": "1970-01-01T00:00:00.000Z" },
+      "inspect": { "epochMilliseconds": 0 },
+      "transform": { "$type": "Date", "iso": "1970-01-01T00:00:00.001Z" }
+    },
+    {
+      "type": "Date",
+      "name": "milliseconds",
+      "value": { "$type": "Date", "iso": "2026-09-22T12:34:56.789Z" },
+      "inspect": { "epochMilliseconds": 1790080496789 },
+      "transform": { "$type": "Date", "iso": "2026-09-22T12:34:56.790Z" }
+    },
+    {
+      "type": "Date",
+      "name": "before the epoch",
+      "value": { "$type": "Date", "iso": "1969-12-31T23:59:59.998Z" },
+      "inspect": { "epochMilliseconds": -2 },
+      "transform": { "$type": "Date", "iso": "1969-12-31T23:59:59.999Z" }
+    },
+    {
+      "type": "Date",
+      "name": "one millisecond before the epoch",
+      "value": { "$type": "Date", "iso": "1969-12-31T23:59:59.999Z" },
+      "inspect": { "epochMilliseconds": -1 },
+      "transform": { "$type": "Date", "iso": "1970-01-01T00:00:00.000Z" }
+    },
+    {
+      "type": "Date",
+      "name": "year 9999",
+      "value": { "$type": "Date", "iso": "9999-12-31T23:59:59.998Z" },
+      "inspect": { "epochMilliseconds": 253402300799998 },
+      "transform": { "$type": "Date", "iso": "9999-12-31T23:59:59.999Z" }
+    },
+    {
+      "type": "record",
+      "name": "escaped $type member",
+      "value": { "$type": "Record", "value": { "$type": "caller-data", "answer": 42 } },
+      "inspect": {
+        "$type": "Record",
+        "value": { "$type": { "octets": "63616c6c65722d64617461" }, "answer": 42 }
+      },
+      "transform": { "$type": "Record", "value": { "$type": "caller-dataé", "answer": -42 } }
+    },
+    {
+      "type": "record",
+      "name": "escaped record shaped like a bytes tag",
+      "value": { "$type": "Record", "value": { "$type": "Uint8Array", "base64url": "AA" } },
+      "inspect": {
+        "$type": "Record",
+        "value": {
+          "$type": { "octets": "55696e74384172726179" },
+          "base64url": { "octets": "4141" }
+        }
+      },
+      "transform": { "$type": "Record", "value": { "$type": "Uint8Arrayé", "base64url": "AAé" } }
+    },
+    {
+      "type": "record",
+      "name": "escaped record shaped like an undefined tag",
+      "value": { "$type": "Record", "value": { "$type": "undefined" } },
+      "inspect": { "$type": "Record", "value": { "$type": { "octets": "756e646566696e6564" } } },
+      "transform": { "$type": "Record", "value": { "$type": "undefinedé" } }
+    },
+    {
+      "type": "record",
+      "name": "escaped record inside an escaped record",
+      "value": {
+        "$type": "Record",
+        "value": {
+          "$type": "outer",
+          "inner": { "$type": "Record", "value": { "$type": "inner", "n": 1 } }
+        }
+      },
+      "inspect": {
+        "$type": "Record",
+        "value": {
+          "$type": { "octets": "6f75746572" },
+          "inner": { "$type": "Record", "value": { "$type": { "octets": "696e6e6572" }, "n": 1 } }
+        }
+      },
+      "transform": {
+        "$type": "Record",
+        "value": {
+          "$type": "outeré",
+          "inner": { "$type": "Record", "value": { "$type": "inneré", "n": -1 } }
+        }
+      }
+    },
+    {
+      "type": "list",
+      "name": "nested lists and records",
+      "value": [[1, [2]], { "a": [{ "b": "c" }] }],
+      "inspect": [[1, [2]], { "a": [{ "b": { "octets": "63" } }] }],
+      "transform": [{ "a": [{ "b": "cé" }] }, [[-2], -1]]
+    },
+    {
+      "type": "record",
+      "name": "nested instants, undefined and escaped records",
+      "value": {
+        "when": { "$type": "Date", "iso": "2026-09-22T12:34:56.789Z" },
+        "absent": { "$type": "undefined" },
+        "list": [{ "$type": "Record", "value": { "$type": "x" } }, false]
+      },
+      "inspect": {
+        "when": { "epochMilliseconds": 1790080496789 },
+        "absent": { "undefined": true },
+        "list": [{ "$type": "Record", "value": { "$type": { "octets": "78" } } }, false]
+      },
+      "transform": {
+        "when": { "$type": "Date", "iso": "2026-09-22T12:34:56.790Z" },
+        "absent": { "$type": "undefined" },
+        "list": [true, { "$type": "Record", "value": { "$type": "xé" } }]
+      }
+    },
+    {
+      "type": "record",
+      "name": "nested bytes",
+      "value": {
+        "payload": { "$type": "Uint8Array", "base64url": "AQL_" },
+        "parts": [
+          { "$type": "Uint8Array", "base64url": "" },
+          { "$type": "Uint8Array", "base64url": "AA" }
+        ]
+      },
+      "inspect": {
+        "payload": { "octets": "0102ff" },
+        "parts": [{ "octets": "" }, { "octets": "00" }]
+      },
+      "transform": {
+        "payload": { "$type": "Uint8Array", "base64url": "AQL__w" },
+        "parts": [
+          { "$type": "Uint8Array", "base64url": "AP8" },
+          { "$type": "Uint8Array", "base64url": "_w" }
+        ]
+      }
+    },
+    {
+      "type": "CryptoKey",
+      "name": "a signature over the message verifies",
+      "value": {
+        "$type": "CryptoKey",
+        "keyType": "public",
+        "algorithm": { "name": "ECDSA", "namedCurve": "P-256" },
+        "extractable": true,
+        "usages": ["verify"],
+        "format": "jwk",
+        "value": {
+          "kty": "EC",
+          "crv": "P-256",
+          "x": "-IvyrmhMki9zDwXjs4oci0ZguScPlWJWRNGu_7JXV_c",
+          "y": "2h2Kqm-c2mbrY5vGMTDba5M3kdfp255duGHsMy9Prxo",
+          "key_ops": ["verify"],
+          "ext": true
+        }
+      },
+      "operands": [
+        { "$type": "Uint8Array", "base64url": "YnJpZGdlIHZhbHVlcyB2MQ" },
+        {
+          "$type": "Uint8Array",
+          "base64url": "uAcFsk7GP7lbDFvl9vUwHM0WJloJIH7cgnREVsJSlIgYAncJl_kOnI3iVQEL8a9sxcdbSKIxpsZSoxlH6dXG_g"
+        }
+      ],
+      "inspect": { "verifies": true },
+      "transform": {
+        "$type": "CryptoKey",
+        "keyType": "public",
+        "algorithm": { "name": "ECDSA", "namedCurve": "P-256" },
+        "extractable": true,
+        "usages": ["verify"],
+        "format": "jwk",
+        "value": {
+          "kty": "EC",
+          "crv": "P-256",
+          "x": "-IvyrmhMki9zDwXjs4oci0ZguScPlWJWRNGu_7JXV_c",
+          "y": "2h2Kqm-c2mbrY5vGMTDba5M3kdfp255duGHsMy9Prxo",
+          "key_ops": ["verify"],
+          "ext": true
+        }
+      }
+    },
+    {
+      "type": "CryptoKey",
+      "name": "a signature over a changed message does not verify",
+      "value": {
+        "$type": "CryptoKey",
+        "keyType": "public",
+        "algorithm": { "name": "ECDSA", "namedCurve": "P-256" },
+        "extractable": true,
+        "usages": ["verify"],
+        "format": "jwk",
+        "value": {
+          "kty": "EC",
+          "crv": "P-256",
+          "x": "-IvyrmhMki9zDwXjs4oci0ZguScPlWJWRNGu_7JXV_c",
+          "y": "2h2Kqm-c2mbrY5vGMTDba5M3kdfp255duGHsMy9Prxo",
+          "key_ops": ["verify"],
+          "ext": true
+        }
+      },
+      "operands": [
+        { "$type": "Uint8Array", "base64url": "Y3JpZGdlIHZhbHVlcyB2MQ" },
+        {
+          "$type": "Uint8Array",
+          "base64url": "uAcFsk7GP7lbDFvl9vUwHM0WJloJIH7cgnREVsJSlIgYAncJl_kOnI3iVQEL8a9sxcdbSKIxpsZSoxlH6dXG_g"
+        }
+      ],
+      "inspect": { "verifies": false },
+      "transform": {
+        "$type": "CryptoKey",
+        "keyType": "public",
+        "algorithm": { "name": "ECDSA", "namedCurve": "P-256" },
+        "extractable": true,
+        "usages": ["verify"],
+        "format": "jwk",
+        "value": {
+          "kty": "EC",
+          "crv": "P-256",
+          "x": "-IvyrmhMki9zDwXjs4oci0ZguScPlWJWRNGu_7JXV_c",
+          "y": "2h2Kqm-c2mbrY5vGMTDba5M3kdfp255duGHsMy9Prxo",
+          "key_ops": ["verify"],
+          "ext": true
+        }
+      }
+    }
+  ]
+}

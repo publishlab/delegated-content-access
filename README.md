@@ -12,8 +12,11 @@ is willing to grant.
 
 The publisher does not run issuer authentication flows, interpret
 issuer-specific entitlement tokens, or keep issuer reader state. It applies
-the content-access model and uses each issuer's configured opening material and
-route; identity, entitlement, and reader policy remain issuer-side.
+the content-access model and uses each issuer's configured opening material;
+identity, entitlement, and reader policy remain issuer-side.
+
+For the runnable reference, see [JavaScript](js/README.md). To verify this
+checkout, see [Running the JavaScript checks](#running-the-javascript-checks).
 
 ## How it works
 
@@ -42,6 +45,13 @@ content remains opaque until opened with a key. The reverse is
 **opening**. An **unlock** is the client-issuer exchange that applies access
 policy and returns granted key capability. Names such as `contentKey` and
 `periodKey` describe protocol roles, not cryptographic operations.
+
+A `periodKey` is a **period key**: it wraps and opens item content keys at one
+period coordinate.
+A positioned `chainKey` is a **chain key** that derives period
+keys back to the start of its bounded window. The Root operation's member at
+that window's last position is the **root chain key**, the first chain key
+derived for that window. There is no separate root key above it.
 
 ## Actors
 
@@ -110,10 +120,10 @@ offers a matching route. Reuse reduces unlock requests, but the same capability
 can open everything the publisher sealed under it. A key already delivered to
 a client cannot be revoked.
 
-An optional period-key chain can represent a bounded run of periods with one
-capability. From a granted position, the client can derive exact period keys
-back to the start of that fixed window, but not later positions or keys in
-another window. Issuers and clients may instead support exact period keys only.
+An optional chain key can represent a bounded run of periods. From a granted
+position, the client can derive period keys back to the start of that fixed
+window, but not later positions or keys in another window. Issuers and clients
+may instead support period keys only.
 
 The publisher chooses the period label when it renders the content. An issuer
 can open the capability carried for that label without recreating the label
@@ -139,13 +149,13 @@ from its own clock, although it may still consider time when applying policy.
 
 - Only the keys granted by the issuer's access decision.
 - Content keys for individual items, reusable period keys, or an optional
-  bounded period-chain capability.
+  bounded chain key.
 
 **Never exchanged:**
 
 - The issuer's private opening key stays with the issuer.
-- A publisher `keyDerivationSecret`, when a chain profile uses one, stays with
-  the publisher.
+- A publisher `keyDerivationSecret`, when the chain-key profile uses one, stays
+  with the publisher.
 
 **The publisher limits an issuer's grants by choosing which keys to seal.**
 Several issuers can receive authority over the same content. At unlock, the
@@ -159,7 +169,7 @@ The three key layers control content, reuse, and who decides:
 | Layer | Dimension | Controls |
 |-------|-----------|----------|
 | **`contentKey`** | What | One protected item in one render |
-| **Exact `periodKey`** | Reuse | Matching content across renders for one publisher, access group, and period |
+| **`periodKey`** | Reuse | Matching content across renders for one publisher, access group, and period |
 | **Issuer key pair** | Who decides | Selects the issuer that may decide access; `issuerPublicKey` seals and `issuerPrivateKey` opens |
 
 The public and private keys are two halves of one issuer opening key pair. The
@@ -170,10 +180,10 @@ period keys, or both.
 
 ### Layers of encapsulation
 
-#### Direct `contentKey` delivery
+#### Item `contentKey` delivery
 
-Direct: the issuer returns a content key for one item in one render. The client
-can open that item immediately.
+The issuer returns a content key for one item in one render. A client that
+supports the item's content representation opens that item with the key.
 
 <pre>
 <b>content</b>
@@ -195,7 +205,7 @@ Opening (client, at page load):
 
 #### Reusable `periodKey` delivery
 
-Reusable: the issuer returns an exact period key. The client uses it to open a
+Reusable: the issuer returns a period key. The client uses it to open a
 matching sealed content key, then opens the item. It can store the period key
 and use it again for matching content.
 
@@ -209,7 +219,7 @@ and use it again for matching content.
 Sealing (publisher, at render time):
 
 - Publisher seals the item with its content key.
-- Publisher seals the content key with an exact period key.
+- Publisher seals the content key with a period key.
 - Publisher seals period-key capability with `issuerPublicKey`.
 
 Opening (client, at page load):
@@ -220,42 +230,51 @@ Opening (client, at page load):
 - Client opens the sealed content key with the period key.
 - Client opens the item with the content key.
 
-An optional period-chain capability changes how exact period keys are obtained.
-It does not add another sealing layer or change what an exact period key opens.
+An optional chain key changes how period keys are obtained.
+It does not add another sealing layer or change what a period key opens.
 
-## Threat model
+## Security model
 
-**Design stance: Block CSS/JS-only bypasses without claiming copy prevention.**
-DCA suits paywalls intended to require payment, not prevent an authorized
-reader from copying decrypted content. It requires an issuer-approved key
-instead of shipping plaintext behind presentation logic, but it does not stop
-an authorized reader from copying that key or the content it opens. Other
-schemes can make copying harder, but at a steeper price in complexity and often
-server or cloud cost. For example, they may keep control online or tailor
-content delivery to each reader instead of sharing one cached render.
+DCA requires an issuer-approved key to read protected content. It suits
+paywalls intended to require payment. An authorized reader can still copy
+decrypted content. The publisher ships ciphertext instead of plaintext
+hidden by presentation logic. Removing CSS,
+editing markup or disabling a script reveals nothing, because the page holds
+ciphertext and no usable key. A script that can reach an authorized
+reader's key or opened content can read what that reader can. DCA does not stop an authorized reader from
+copying that key or the content it opens. Schemes that keep control online or tailor content delivery to each reader
+can make copying harder, with greater complexity and often higher server or
+cloud cost than sharing one cached render.
 
 ### Choosing the operating boundary
 
 | Approach | Publisher delivery | Issuer contact | Reach after delivery | Main trade-off |
 |----------|--------------------|----------------|----------------------|----------------|
 | DCA, reusable `periodKey` | Shared encrypted content | Once per matching period or cache miss | Matching content in the granted access group and period | Fewer issuer calls, broader reusable key |
-| DCA, direct `contentKey` | Shared encrypted content | Each unresolved render | One item in one render | Narrower key, more issuer traffic and availability dependence |
+| DCA, item `contentKey` | Shared encrypted content | Each unresolved render | One item in one render | Narrower key, more issuer traffic and availability dependence |
 | DCA, client role on a server or edge | Shared encrypted source; private authorized response | Each protected request, or a deployment-defined private cache | Only the authorized result released by the gate | Server-side paywall boundary with shared encrypted source and a separate issuer |
 | Server gating without DCA | Usually personalized plaintext | Each protected request | Server decides before each delivery | More origin or edge work and less shared caching |
 | DRM or attestation | Separate product architecture | Product-specific | Product-specific | Greater platform, operational, and user cost |
 
-DCA does not require the client role to run in the browser. A publisher backend,
-edge worker or paywall service can authenticate the reader, perform the DCA
-client work, and return an authorized result without delivering DCA keys to the
-browser. From the reader's side this is a conventional server-side paywall with
-the same pre-delivery access boundary; DCA continues behind it to keep the
-stored render encrypted and cacheable and to let a separate issuer decide
-access. See the
+The DCA client role can run in a browser or native application. A publisher
+backend, edge worker or paywall service can also authenticate the reader,
+perform the DCA client work, and return an authorized result without
+delivering DCA keys to the browser. The host running the client role holds the granted keys. From the
+reader's side a server client is a conventional server-side paywall with the
+same pre-delivery access boundary; DCA continues behind it to keep the stored
+render encrypted and cacheable and to keep the issuer separate from the
+publisher.
+
+Through the selected authentication binding, the issuer can decide for each
+reader or grant to the service. A service that receives the grant
+decides what to release to its own callers. See the
 [server-client deployment patterns](docs/guide--deployment-patterns.md#server-client).
 
-DCA can mix direct and reusable routes across content items. If the issuer must
-be consulted for every render, use direct content keys and avoid reusable
-period grants. Neither browser nor server placement prevents an authorized
+DCA can mix item content keys and reusable period keys across content items.
+To require issuer contact when acquiring a new render's key, have the issuer
+return item content keys and avoid reusable period grants. That narrows each grant to one item in
+one render. A client or service that keeps the key or the opened content can release
+that render again without another issuer decision. Neither browser nor server placement prevents an authorized
 reader from copying content after it is delivered.
 
 ### Trust boundaries
@@ -282,23 +301,30 @@ client opens the content, it has plaintext and can copy it.
   names or coordinates, relabeling or moving sealed keys, or replaying an
   exchange cannot expand access beyond what the publisher supplied and the
   issuer granted.
-- Collecting plaintext at scale without repeatedly passing issuer policy.
-  Authorized readers can still automate what they are granted, and reusable
-  keys deliberately reduce issuer calls.
+- Releasing a missing key without an issuer authorization decision. Authorized
+  readers can automate acquisitions and share or reuse the keys they receive;
+  a period-key grant can open every retained matching item without another
+  issuer call.
 
-These protections come from the signed publisher context, BIND on sealed keys,
-registration-scoped opening keys, and the issuer's own authentication and
-policy. See the
-[full threat model](docs/spec--security-model.md) for the exact boundaries and
+These protections come from the signed publisher context that the issuer
+verifies, BIND on publisher-sealed keys, registration-scoped opening keys,
+and the issuer's own authentication and policy. BIND checks the coordinate
+when the issuer opens a sealed key; the selected response binding protects
+the issuer's answer on its way to the client. See the
+[full security model](docs/spec--security-model.md) for the exact boundaries and
 failure cases.
+
+Opening an item verifies it against a key the client holds. Establishing publisher authorship or the source of a copy
+requires separate evidence; see [what opening proves](docs/spec--security-model.md#what-opening-proves).
 
 **What DCA does NOT protect against (not DRM):**
 
 - An authorized reader copying or sharing opened content.
-- A reader sharing returned keys or access. Client-bound delivery can make
-  passive response copying harder by delivering a non-extractable browser key.
-  That prevents straightforward key export, but a reader-controlled browser
-  can still use or relay the capability.
+- A reader sharing returned keys or access. Client-bound delivery encrypts
+  the answer for one recipient key that the client offered first, so a copied
+  answer alone is not usable. The reader who controls the client, whether a
+  browser, a native application or a server, can still use or relay the
+  capability, and needs no root access to do so.
 - Screen capture or copy and paste of rendered content.
 - Scripts or extensions reading plaintext after opening. Plaintext must reach
   the application or DOM to be used.
@@ -307,15 +333,20 @@ failure cases.
 
 The publisher uses an issuer's public key. The matching private key stays with
 the issuer. This separates their key custody, but each party still has its own
-trusted material:
+trusted material. Stealing that material compromises a trust root; an
+authorized reader reusing or sharing a granted capability acts within that
+capability's reach:
 
 - **Publisher breach:** The publisher already has the plaintext. Theft of its
   signing key can forge publisher information, but does not reveal an issuer's
-  private key or bypass issuer reader policy by itself. Theft of exact period
-  keys exposes their matching content; theft of an optional chain
-  `keyDerivationSecret` has the wider reach defined by that chain generation.
-  Issuers retire compromised publisher signing keys, and publishers rotate
-  affected key material for future renders.
+  private key or bypass issuer reader policy by itself. Theft of period keys
+  exposes their matching content; theft of an optional chain-key
+  `keyDerivationSecret` has the wider reach defined by that chain-key
+  generation.
+  Issuers retire compromised publisher signing keys, which stops new
+  approvals that rely on them, and publishers rotate affected key material
+  for future renders. Neither step retracts keys or plaintext already
+  delivered.
 - **Issuer breach:** Theft of an issuer private key exposes publisher material
   sealed under that opening key. Independently keyed issuers remain separate.
   Publishers that share one issuer opening key set are mutually trusted at
@@ -338,9 +369,10 @@ verification details are publisher deployment concerns, not DCA protocol
 behavior.
 
 **Issuer failover and load shedding:** A client can try another issuer route
-offered for the same content. An issuer can also activate a deliberately weaker
+offered for the same content; each issuer authorizes the request it receives
+independently. An issuer can also activate a deliberately weaker
 emergency policy to keep content available when its issuer service is
-overloaded or cannot reach its usual entitlement system. Direct content keys
+overloaded or cannot reach its usual entitlement system. Item content keys
 keep the content encrypted and limit each grant to one item and render. With
 direct response delivery, an answer can be reused only inside a safe
 authorization cache partition.
@@ -359,26 +391,51 @@ opened. The page may still show unprotected content or a publisher-provided
 fallback message. Unlike a soft paywall, the protected plaintext is not already
 present in the page for a CSS or DOM change to reveal.
 
+## Running the JavaScript checks
+
+Use Node 22.22.2 and pnpm 10.23.0, as pinned in `js/.node-version` and
+`js/package.json`, plus headless Chromium with its runtime libraries. The
+[JavaScript setup instructions](js/README.md#browser-prerequisite) describe browser
+installation and executable/library selection. With those prerequisites installed
+and `pnpm` available on your PATH, run from this repository's root:
+
+```sh
+pnpm --dir js install --frozen-lockfile --ignore-scripts
+sh js/check
+```
+
+The command checks JavaScript lint, formatting, admitted types, source
+boundaries, reference behavior and experiments. It does not run PHP, recorded
+vector checks, portable contracts or cross-runtime conformance. Exit 0 means
+all required stages passed; 1 means a stage failed; 2 means a required check
+could not run or verified less than intended.
+
+The [JavaScript instructions](js/README.md) explain setup and separately
+selected commands. See [verification](verification/README.md) for independent
+evidence checks; passing `sh js/check` does not establish full DCA conformance.
+
 ## Documents
 
 | Document | Scope |
 |----------|-------|
 | [Design overview](docs/guide---overview.md) | Deeper explanation of how DCA's parts fit together |
 | [Deployment patterns](docs/guide--deployment-patterns.md) | Browser, server, edge, and hybrid ways to place the DCA client role |
-| [Browser content presentation](docs/guide--browser-content-presentation.md) | Illustrative, non-normative handoff from opened bytes to publisher-owned placement and activation code |
-| [Exact-period integration](docs/guide--integration--exact-period.md) | Publisher, issuer, and client path with runnable reference evidence |
+| [Article placement](docs/guide--browser-content-presentation.md) | Owner-selected browser rendering, template-authored maps and independent article reconstruction |
+| [Period-key integration](docs/guide--integration--period-keys.md) | Publisher, issuer, and client path with runnable reference evidence |
 | [Specification overview](docs/spec---overview.md) | Normative document map, conformance boundaries, and reading order |
-| [Profiles](docs/spec--profiles.md) | The `dca-v1-direct-https` baseline every implementation starts from, and the optional profiles |
-| [Threat model](docs/spec--security-model.md) | Security promises, assumptions, limitations, and operating choices |
+| [Profiles](docs/spec--profiles.md) | The `dca-profile-baseline` profile every implementation starts from, and the optional profiles |
+| [Security model](docs/spec--security-model.md) | Security promises, assumptions, limitations, and operating choices |
 | [Data-format example](docs/design--data-format--example.md) | Worked publisher delivery and wire example |
 | [JavaScript reference](js/README.md) | Reference implementation, runnable demonstration, tests, experiments, and the public check command |
-| [Verification](verification/README.md) | Cross-runtime conformance lanes for six runtimes, recorded wire vectors, and shared fixtures |
+| [Verification](verification/README.md) | Stock-library primitive bridges on pinned runtime lanes, including JavaScript on Node, Deno, Bun and workerd, recorded wire vectors, and shared fixtures |
 
 ## Status
 
 DCA is a public working draft and may change before v1. Current draft
 priorities are listed in
 [roadmap--draft-period.md](roadmap--draft-period.md).
+[CHANGELOG.md](CHANGELOG.md) records key-opening changes since the
+21 September 2026 public draft and the roles that need updated code.
 
 Developed at Labrador CMS AS. Specification editor: Geir Bostad.
 

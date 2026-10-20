@@ -1,0 +1,264 @@
+#!/usr/bin/env bash
+# Install a pinned Rust toolchain into a cache dir. Nothing system-wide.
+#
+# Separated from check so the download can be done once, ahead of time, on a
+# machine that has egress, and the run can then happen with no network at all.
+# A binding's check calls this when the toolchain is missing, so calling it by
+# hand is optional.
+#
+#   ./install-toolchain                    # install if absent, then print BASE
+#   ./install-toolchain --version <token>  # the pin `versions` lists for <token>; default when absent
+#   ./install-toolchain --base <dir>       # use this toolchain as is, download nothing
+#   ./install-toolchain --cache-root <dir> # put or find the toolchain under this root
+#   ./install-toolchain --print-base       # print where BASE is or would be, install nothing
+#   ./install-toolchain --print-bin        # print the cargo binary a caller drives, install nothing
+#   ./install-toolchain --print-cache      # print this runtime's cache dir, install nothing
+#   ./install-toolchain --force            # re-download over an existing install
+#   ./install-toolchain --help             # this text
+#
+# Run it directly: the shebang names bash.
+#
+# The version comes from --version, else DCA_VERSION, else `default`, the first
+# default line of `versions` beside this script. A token that file does not
+# list is refused with exit 2. Each version installs into a directory of its
+# own, so two versions sit side by side in one cache.
+#
+# This installer sits at the runtime level, `rust/`, and every binding under it
+# (`rust/rustcrypto/` today) builds with the toolchain it installs. A binding's
+# crates are that binding's own, pinned by its Cargo.lock and vendored by its
+# own prepare step; nothing here knows a crate.
+#
+# BASE is the installed toolchain: the prefix holding bin/cargo and bin/rustc,
+# with the standard library for this host's target under lib/rustlib. A caller
+# is given it, or is given the root the runtimes live under; nothing here
+# searches PATH and nothing here is put on PATH. rustc finds its standard
+# library relative to its own binary, so no RUSTUP_* or SYSROOT variable is
+# involved. rustc links with the host's `cc`, which this toolchain does not
+# carry.
+#
+# --cache-root and --print-cache are one level apart, which is why the flag
+# carries the word root: the root holds every lane and this runtime's directory
+# is `rust` under it, so --print-cache answers <root>/rust and feeding that back
+# in as a root would install into rust/rust.
+#
+# Where it lands, first match wins:
+#   --base <dir>        an already-installed toolchain to use as is, nothing downloaded.
+#                       --force is refused with it given: this script deletes only what it created.
+#   --cache-root <dir>  root to install into, as <root>/rust
+#   $DCA_CACHE/rust
+#   $XDG_CACHE_HOME/dca/rust
+#   $HOME/.cache/dca/rust
+set -euo pipefail
+
+# Pinned by exact version. Each value is the one-line `<sha256>  <file>` that
+# static.rust-lang.org publishes beside the archive as `<archive>.sha256`, read
+# on 2026-09-30, and the same value is the `hash` of that target in
+# https://static.rust-lang.org/dist/channel-rust-stable.toml (dated
+# 2026-09-03). Each token's release is the second field of its line in
+# `versions`, and its two checksums are below, keyed by token. Bumping a pin
+# means changing the release there and both checksums here together.
+#
+# The archive is the `.tar.gz` build rather than the `.tar.xz` one, because
+# the gzip build needs only `tar` and `gzip` to unpack, and `xz` is not present
+# on every host this runs on.
+pin_checksums() {
+  case "$1" in
+    1.98) SHA256_x86_64=24ba1338a2d35c5a3247936546429e163fa674d726102af18bdf624582c57aea
+          SHA256_aarch64=f00ba576645cef658e1deed96fab8f707958e9d58808b16343448b5d1c4f7407 ;;
+    *) echo "versions lists $1, and this installer carries no checksum for it." >&2
+       echo "Add both checksums for its release to pin_checksums before the token can install." >&2
+       exit 2 ;;
+  esac
+}
+
+# Which pinned archive this host would download, resolved on the leg that
+# downloads one and nowhere else.
+#
+# An OS or an architecture the pin does not cover is a reason to refuse a
+# download. It is not a reason to refuse --base, which is the flag an operator
+# on such a host reaches for and which the refusals below tell them to pass, and
+# it is not a reason to refuse the print queries, which name a path and install
+# nothing. The OS is tested because the archive is a Linux build whatever this
+# host is: a Mac would download it, pass the checksum and fail on the first
+# exec, after the rename below had promoted the tree into $BASE.
+pinned_platform() {
+  case "$(uname -s)" in
+    Linux) ;;
+    *) echo "unsupported OS $(uname -s); the pinned archive is a Linux build." >&2
+       echo "Install Rust ${RUST_VERSION} by hand and pass --base naming the directory holding it." >&2
+       exit 2 ;;
+  esac
+
+  case "$(uname -m)" in
+    x86_64|amd64)  RARCH=x86_64 ;;
+    aarch64|arm64) RARCH=aarch64 ;;
+    *) echo "unsupported arch $(uname -m); install Rust ${RUST_VERSION} by hand and pass --base" >&2; exit 2 ;;
+  esac
+  sha_var="SHA256_${RARCH}"; WANT_SHA="${!sha_var}"
+  TRIPLE="${RARCH}-unknown-linux-gnu"
+  STEM="rust-${RUST_VERSION}-${TRIPLE}"
+  TARBALL="${STEM}.tar.gz"
+}
+
+HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
+# The cache dir rule is written once, in the file sourced below: DCA_CACHE, or the OS
+# cache dir, or a refusal naming DCA_CACHE.
+# shellcheck source=../_shared/cache.sh
+. "$HERE/../_shared/cache.sh"
+
+# The whole argument line is read before anything is resolved, because
+# --cache-root moves where BASE would be and the print actions have to answer
+# for the flags this invocation was given rather than for the defaults. Both
+# path values are made absolute here, at the one place they are read; cache.sh
+# explains why.
+base=""
+cache_root=""
+print=""
+force=0
+version="${DCA_VERSION:-default}"
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --base)
+      [ $# -ge 2 ] || { echo "--base needs the directory holding the toolchain" >&2; exit 2; }
+      resolve_absolute_path "$2"; base="$DCA_ABSOLUTE_PATH"; shift 2 ;;
+    --cache-root)
+      [ $# -ge 2 ] || { echo "--cache-root needs a directory to hold the lanes" >&2; exit 2; }
+      resolve_absolute_path "$2"; cache_root="$DCA_ABSOLUTE_PATH"; shift 2 ;;
+    --version)
+      [ $# -ge 2 ] || { echo "--version needs a token from $HERE/versions, or default" >&2; exit 2; }
+      version="$2"; shift 2 ;;
+    --print-base)  print=base; shift ;;
+    --print-bin)   print=bin; shift ;;
+    --print-cache) print=cache; shift ;;
+    --force)       force=1; shift ;;
+    --help|-h)     awk 'NR>1 && /^#/ { sub(/^# ?/, ""); print; next } NR>1 { exit }' "${BASH_SOURCE[0]}"; exit 0 ;;
+    *) echo "unknown argument: $1" >&2; exit 2 ;;
+  esac
+done
+
+# The version first: an unlisted token refuses every action, print queries
+# included, so no caller is handed a path for a version nobody pinned.
+resolve_version_pin "$HERE/versions" "$version" || exit 2
+RUST_VERSION="$DCA_VERSION_RELEASE"
+pin_checksums "$DCA_VERSION_TOKEN"
+
+if [ -n "$cache_root" ]; then
+  CACHE="$cache_root/rust"
+else
+  resolve_cache_dir rust
+  CACHE="$DCA_CACHE_DIR"
+fi
+
+# --print-cache answers from the root and the runtime name alone, so it answers
+# first, ahead of everything that depends on the pin.
+if [ "$print" = cache ]; then printf '%s\n' "$CACHE"; exit 0; fi
+
+BASE="${base:-$CACHE/rust-${RUST_VERSION}}"
+CARGO_BIN="$BASE/bin/cargo"
+RUSTC_BIN="$BASE/bin/rustc"
+
+# The other two queries answer and stop, before the install branch and before
+# any directory is created. A caller that must not download asks one of these,
+# and a cold cache root is still cold afterwards.
+case "$print" in
+  base)  printf '%s\n' "$BASE"; exit 0 ;;
+  bin)   printf '%s\n' "$CARGO_BIN"; exit 0 ;;
+esac
+
+# --force and --base name opposite things, and taken together this script
+# deletes a directory it did not create: --force enters the install branch even
+# for a toolchain that is already there and complete, and `rm -rf "$BASE"`
+# below takes whatever --base pointed at. The pair is refused by name rather
+# than the rm made conditional: an installer may delete what it created and
+# nothing else.
+if [ -n "$base" ] && [ "$force" = 1 ]; then
+  echo "--force re-downloads the pinned toolchain over the install directory, and it starts by" >&2
+  echo "deleting that directory. --base $base is a directory you pointed this" >&2
+  echo "script at rather than one it created, so this run would delete yours. Refusing." >&2
+  echo "Drop --base to re-download into the cache dir, or remove $base" >&2
+  echo "yourself first if replacing it is what you meant." >&2
+  exit 2
+fi
+
+# This block checks the directory --base names. Both binaries have to be there
+# and run: a toolchain unpacked for another architecture answers -x and then
+# fails the first build with a message about the build, which sends the reader
+# looking in the wrong place.
+if [ -n "$base" ]; then
+  if [ ! -x "$CARGO_BIN" ] || [ ! -x "$RUSTC_BIN" ]; then
+    echo "--base $base has no bin/cargo and bin/rustc; point it at an installed Rust toolchain" >&2
+    exit 2
+  fi
+  if ! "$RUSTC_BIN" --version >/dev/null 2>&1 || ! "$CARGO_BIN" --version >/dev/null 2>&1; then
+    echo "--base $base has a bin/rustc or bin/cargo that will not run on this host" >&2
+    exit 2
+  fi
+fi
+
+installed=0
+if [ "$force" = 1 ] || [ ! -x "$CARGO_BIN" ]; then
+  # This branch downloads, so this is where it checks that the pin covers
+  # the host.
+  pinned_platform
+  mkdir -p "$CACHE"
+  # The cache dir is shared: $HOME is a bind mount that several concurrent runs
+  # see at once. One exclusive lock covers the whole install, so a second caller
+  # waits here instead of writing over the first caller's download or reading a
+  # toolchain that is still being installed.
+  exec 9>"$CACHE/.install.lock"
+  flock 9
+  # Re-tested under the lock, because the caller that held it first may have
+  # finished the install while this one waited. A --force run always installs.
+  if [ "$force" = 1 ] || [ ! -x "$CARGO_BIN" ]; then
+    # Armed before any temp exists, so a failing mktemp cannot leave another
+    # temp behind. `rm` on an empty name is a silent no-op.
+    rust_tar=""
+    rust_unpack=""
+    rust_prefix=""
+    trap 'rm -f "$rust_tar"; rm -rf "$rust_unpack" "$rust_prefix"' EXIT
+    rust_tar="$(mktemp "$CACHE/.${TARBALL}.XXXXXX")"
+    rust_unpack="$(mktemp -d "$CACHE/.${STEM}.unpack.XXXXXX")"
+    rust_prefix="$(mktemp -d "${BASE}.XXXXXX")"
+    echo "fetching $TARBALL (~380 MB, needs network) ..." >&2
+    curl -fSL --max-time 900 -o "$rust_tar" "https://static.rust-lang.org/dist/$TARBALL"
+    # The published .sha256 file has to name the same digest the pin names. A
+    # mismatch there means the pin and the server disagree about this version,
+    # which is a reason to stop and read, not to trust either one. The pin then
+    # checks the bytes that were actually downloaded.
+    published="$(curl -fsSL --max-time 60 "https://static.rust-lang.org/dist/$TARBALL.sha256")"
+    if [ "${published%% *}" != "$WANT_SHA" ]; then
+      echo "static.rust-lang.org publishes ${published%% *} for $TARBALL," >&2
+      echo "and this installer pins $WANT_SHA. Nothing was installed." >&2
+      exit 2
+    fi
+    echo "${WANT_SHA}  $rust_tar" | sha256sum -c - >&2
+    tar -xzf "$rust_tar" -C "$rust_unpack" --strip-components=1
+    rm -f "$rust_tar"
+    # The combined archive carries docs, clippy, rustfmt, LLVM tools and more.
+    # A bridge build needs the compiler, cargo and this target's standard
+    # library, so only those three components are installed.
+    "$rust_unpack/install.sh" --prefix="$rust_prefix" --disable-ldconfig \
+      --components="rustc,cargo,rust-std-${TRIPLE}" >&2
+    rm -rf "$rust_unpack"
+    # The rename is the last step, so $BASE is either absent or a complete
+    # toolchain. Nobody outside the lock sees a half-installed tree. The
+    # installer's own uninstall manifest under lib/rustlib keeps the temp
+    # prefix's path; rustc and cargo locate everything relative to themselves,
+    # so only an uninstall through that manifest would read it, and this
+    # installer removes a toolchain with rm -rf.
+    rm -rf "$BASE"
+    mv "$rust_prefix" "$BASE"
+    trap - EXIT
+    installed=1
+    echo "installed to $BASE" >&2
+    "$RUSTC_BIN" --version >&2
+    "$CARGO_BIN" --version >&2
+  fi
+  exec 9>&-
+fi
+# Said on the reuse path too. If nobody can name a toolchain that is off PATH,
+# the next caller downloads it again, or concludes it is not there.
+[ "$installed" = 1 ] || echo "already present at $BASE" >&2
+
+printf '%s\n' "$BASE"

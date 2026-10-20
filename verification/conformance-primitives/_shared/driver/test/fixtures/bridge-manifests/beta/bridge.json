@@ -1,5 +1,6 @@
 {
     "script": "beta/bridge.mjs",
     "command": "beta/run.sh",
-    "operations": ["open-aes-gcm"]
+    "members": { "openssl": "a library standing in for OpenSSL" },
+    "operations": { "open-aes-gcm": "openssl" }
 }

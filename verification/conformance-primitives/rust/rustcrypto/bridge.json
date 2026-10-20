@@ -1,0 +1,18 @@
+{
+    "script": "rust/rustcrypto/v1/bridge/main.rs",
+    "command": "rust/rustcrypto/v1/target/release/bridge",
+    "prepare": { "command": "rust/rustcrypto/build-bridge" },
+    "members": {
+        "rustcrypto": "the RustCrypto crates pinned in v1/Cargo.lock: aes-gcm, hkdf, sha2, p256, rsa",
+        "lane": "code written in this lane"
+    },
+    "operations": {
+        "decode-base64url": "lane",
+        "hkdf-sha256": "rustcrypto",
+        "open-aes-gcm": "rustcrypto",
+        "seal-aes-gcm": "rustcrypto",
+        "ecdh-p256": "rustcrypto",
+        "p256-point": "rustcrypto",
+        "open-rsa-oaep": "rustcrypto"
+    }
+}

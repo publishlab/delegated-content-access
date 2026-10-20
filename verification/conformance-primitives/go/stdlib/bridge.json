@@ -1,0 +1,18 @@
+{
+    "script": "go/stdlib/v1/bridge/bridge.go",
+    "command": "go/stdlib/v1/bridge/bridge",
+    "prepare": { "command": "go/stdlib/build-bridge" },
+    "members": {
+        "stdlib": "Go's standard library crypto packages",
+        "lane": "code written in this lane"
+    },
+    "operations": {
+        "decode-base64url": "lane",
+        "hkdf-sha256": "stdlib",
+        "open-aes-gcm": "stdlib",
+        "seal-aes-gcm": "stdlib",
+        "ecdh-p256": "stdlib",
+        "p256-point": "lane",
+        "open-rsa-oaep": "stdlib"
+    }
+}

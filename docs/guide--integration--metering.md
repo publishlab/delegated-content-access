@@ -9,25 +9,19 @@ presented key coordinates, and a seam where the issuer's policy decides what
 to grant.
 
 The worked request below uses the
-[`dca-v1-exact-period`](spec--profiles.md#5-dca-v1-exact-period-profile)
-profile because exact period keys are the draft's compatibility anchor and
-make the visibility trade-off concrete. The policy and key-result accounting
-seams are not exact-period mechanisms.
+[`dca-profile-period-keys`](spec--profiles.md#5-dca-profile-period-keys-profile)
+profile because period keys make the visibility trade-off concrete. The policy and key-result accounting
+seams are not period-key mechanisms.
 
 The central limit is simple: an issuer can observe an unlock and prepare a
 key-bearing response for return. It cannot prove that the client received or
 used that response, and it cannot observe a later opening performed with a key
 the client already holds. The
-[capability lifecycle](spec--period-keys.md#11-capability-lifecycle) and
-[pre-delivery and revocation rules](spec--period-keys.md#121-pre-delivery-and-revocation)
-own that limit. Use direct content-key grants when every unresolved render must
-reach the issuer. Use exact period-key grants when fewer issuer calls and
+[capability lifecycle](spec-profile--period-keys.md#11-capability-lifecycle) and
+[pre-delivery and revocation rules](spec-profile--period-keys.md#121-pre-delivery-and-revocation)
+own that limit. Grant item content keys when every unresolved render must
+reach the issuer. Use period-key grants when fewer issuer calls and
 bounded reuse are the intended trade-off.
-
-A later period-chain integration example can add its different request and
-response representation here. It does not need another metering callback:
-once the issuer delivers a reusable period capability, later client-local
-opens within that capability's reach remain invisible to the issuer.
 
 ## What arrives from the client
 
@@ -37,7 +31,7 @@ ciphertexts relayed by the client; their presence grants nothing.
 ```json
 {
   "version": "1",
-  "issuerName": "meter.example",
+  "issuerName": "meter",
   "resourceJWT": "<publisher-signed resource>",
   "keyId": "2026-09",
   "sealed": {
@@ -46,25 +40,26 @@ ciphertexts relayed by the client; their presence grants nothing.
     },
     "periodKeys": {
       "subscriber": {
-        "260921T1000": "<exact period key sealed for this issuer>"
+        "260921T1000": "<period key sealed for this issuer>"
       }
     }
   }
 }
 ```
 
-The client may omit routes it does not need or support. It may also present
-more publisher-authored alternatives than the issuer will use. The issuer
-therefore never treats the request as entitlement or as trusted profile
+The client may omit sealed coordinates it does not need or support. It may also
+present more publisher-authored alternatives than the issuer will use. The
+issuer therefore never treats the request as entitlement or as trusted profile
 selection.
 
 After structural admission and publisher-signature verification, the
 reference reduces the request to the coordinates the policy may decide on:
 
 ```js
-requested = {
+const requested = {
   contentNames: ["bodytext"],
-  accessGroups: ["subscriber"]
+  accessGroups: ["subscriber"],
+  periodCoordinates: { subscriber: ["260921T1000"] },
 };
 ```
 
@@ -85,14 +80,14 @@ decides which of its fields have policy meaning.
 
 The [core request specification](spec--core-protocol.md#5-core-unlock-request)
 defines the wire object. The policy contract is visible in
-[`IssuerEngine.js`](../js/v1/core-issuer/IssuerEngine.js), and the reference
+[`IssuerEngine.js`](../js/core-issuer/IssuerEngine.js), and the reference
 request construction is exercised in
-[`dca-request-builder.test.js`](../js/v1/test/dca-request-builder.test.js).
+[`dca-request-builder.test.js`](../js/test-reference/core-client/dca-request-builder.test.js).
 
 ## Inject the access-policy callback
 
-Supply an object with `decide(claims, requested, input)` when constructing the
-issuer engine. The callback returns only coordinates the issuer intends to
+Supply an object with `decide(claims, requested, input)` to
+`createIssuerCore`. The callback returns only coordinates the issuer intends to
 grant, plus optional opaque host work to commit after the key result is
 prepared:
 
@@ -111,7 +106,7 @@ const accessPolicy = {
       context,
       publisherOrigin: publisher.origin,
       resourceId,
-      publisherData: data
+      publisherData: data,
     });
 
     if (!mayRead || !requested.contentNames.includes("bodytext")) {
@@ -121,26 +116,30 @@ const accessPolicy = {
     return {
       contentNames: ["bodytext"],
       periodGrants: [],
-      policyData: [{ type: "view", user: principal.user, renderId }]
+      policyData: [{ type: "view", user: principal.user, renderId }],
     };
-  }
+  },
 };
 
-const engine = new IssuerEngine({ accessPolicy });
+const { engine, processor, endpoint } = createIssuerCore({
+  operatingIssuerNames: ["meter"],
+  accessPolicy,
+  periodKeyInput: true,
+});
 ```
 
-`contentNames` grants direct content keys. `periodGrants` grants a bounded
-prefix of the exact period labels the request presented for an access group.
-For example, `{ accessGroup: "subscriber", periodCount: 1 }` grants at most
-the first presented exact coordinate in canonical order.
-The engine clamps both answers to presented coordinates, but that clamp is not
-authorization: the callback must still decide from verified claims and
-issuer-owned state.
+`contentNames` grants item content keys. Each `periodGrants` entry names an
+`accessGroup` and explicit `periods` from `requested.periodCoordinates`. The
+engine clamps both answers to presented coordinates, but that clamp is not
+authorization: the callback must also check that each selected period falls
+within the entitlement and meter rules in issuer-owned state.
 
 When the decision depends on an entitlement, meter or policy-state source that
 times out, is unavailable, refuses to answer or returns unusable input, the
-issuer has no policy decision. It fails closed and returns no key material; it
-does not substitute a default grant. The normative rule is in
+issuer has no policy decision. The policy throws a typed
+`policy_unavailable` error, which the endpoint answers with 503 and no key
+material; an empty decision such as `{}` is a completed denial. It does not
+substitute a default grant. The normative rule is in
 [authentication and policy](spec--core-protocol.md#62-authentication-and-policy).
 
 The example returns no `periodGrants` deliberately. Granting the
@@ -151,18 +150,28 @@ instead of individual renders, the corresponding decision is:
 ```js
 return {
   contentNames: [],
-  periodGrants: [{ accessGroup: "subscriber", periodCount: 1 }],
-  policyData: [{ type: "capability-grant", user: principal.user, renderId }]
+  periodGrants: [
+    {
+      accessGroup: "subscriber",
+      periods: (requested.periodCoordinates.subscriber ?? []).filter((t) =>
+        entitlementCoversPeriod(t, principal, context),
+      ),
+    },
+  ],
+  policyData: [{ type: "capability-grant", user: principal.user, renderId }],
 };
 ```
 
-That `policyData` shape is illustrative; the host defines and validates its
-own pending records. The demo `IssuerBusinessData` accepts only its `view`
+`entitlementCoversPeriod` is an issuer-owned check over the requested label
+and the subscriber's validity window. It must not infer entitlement from the
+unsigned label alone. That `policyData` shape is illustrative; the host
+defines and validates its own pending records. The demo `IssuerBusinessData`
+accepts only its `view`
 record, so a `capability-grant` record needs a deployment-owned applier. The
 event being counted is the reusable grant, not each later article it can open.
 
 The demonstration policy in
-[`AccessPolicy.js`](../js/v1/demo/support/AccessPolicy.js) shows a complete
+[`AccessPolicy.js`](../js/demo/support/AccessPolicy.js) shows a complete
 callback with public, entitlement, and metered rules. It is example policy,
 not a deployment API or a required business model.
 
@@ -179,7 +188,7 @@ The issuer integration should:
 2. call the engine with that `principal` and `context`;
 3. prepare the selected
    [response representation](spec--response-binding.md#4-selection-and-agreement)
-   and the binding's [HTTP response](spec--browser-http-binding.md#34-response);
+   and the binding's [HTTP response](spec--http-binding.md#34-response);
 4. determine whether the prepared response contains at least one key member;
    and
 5. atomically apply the returned `policyData` only when that key-bearing
@@ -190,23 +199,109 @@ reader received, opened, or viewed the content." A network failure after the
 commit remains possible. A product that charges money needs its own retry,
 reservation, settlement, and reconciliation rules around that boundary.
 
-The demo [`IssuerServer`](../js/v1/demo/actors/IssuerServer.js) performs this
+The demo [`IssuerServer`](../js/demo/actors/IssuerServer.js) performs this
 ordering, while
-[`IssuerBusinessData`](../js/v1/demo/actors/issuer/IssuerBusinessData.js)
+[`IssuerBusinessData`](../js/demo/actors/issuer/IssuerBusinessData.js)
 validates and applies its pending view records. A production integration must
 replace the in-memory store with its own atomic, idempotent operation. A
 stable event identity such as publisher plus reader plus signed `renderId`
 prevents a retry from consuming the same render twice.
 
-The JavaScript reference does not yet publish a supported issuer integration
-entry or copy manifest. Treat the demo assembly as executable wiring to study,
-then compose the issuer core, adapters, authentication, policy, storage, and
-transport inside the deployment's own application boundary.
+The JavaScript reference provides
+[`createIssuerCore`](../js/integration-issuer/createIssuerCore.js) and an
+[issuer copy manifest](../js/copy-manifest--issuer.json). Use the supported
+entry to compose the issuer engine, processor and endpoint. Authentication,
+policy snapshots, durable storage and atomic metering commits remain the host's
+responsibility. The demo illustrates that commit ordering; its in-memory store
+is not a production accounting backend.
+
+## Share one snapshot across optional routes
+
+A mixed issuer can have an ordinary `accessPolicy` and the content-groups
+contribution's `policy`. Their affirmative grants are independent alternatives:
+a denial in one port does not veto the other. For a global account suspension
+or one article meter, take one host snapshot after caller authentication and
+publisher verification, and make both ports consult it. Do not fetch entitlement
+state twice or debit from either decision callback.
+
+Here `snapshot.permitsItem`, `grantsWithin` and `permitsPeriod` are the host's
+pure decisions over that captured state, not reference APIs. `grantsWithin`
+selects only presented content-group coordinates; `permitsPeriod` authorizes
+every period reached by a reusable grant. A request coordinate is not authority.
+
+```js
+const accessPolicy = {
+  decide(claims, requested, { context: snapshot }) {
+    return {
+      contentNames: snapshot.refused
+        ? []
+        : requested.contentNames.filter((name) =>
+            snapshot.permitsItem(claims.resource, name),
+          ),
+      // Describe the one pending event even if only the other route grants.
+      policyData: snapshot.pendingEvent,
+    };
+  },
+};
+const groupPolicy = {
+  decide(input) {
+    const snapshot = input.context;
+    return {
+      grants: snapshot.refused ? [] : snapshot.grantsWithin(input),
+      authorizePeriod: (contentName, group, t, windowStart) =>
+        !snapshot.refused &&
+        snapshot.permitsPeriod(contentName, group, t, windowStart),
+    };
+  },
+};
+```
+
+Compose `accessPolicy` through `createIssuerCore` and `groupPolicy` through the
+existing `contentGroupsProfile.issuerContribution({ chain, policy: groupPolicy })`.
+The [extension recipe](../js/extensions/content-groups/README.md#base-seams-it-uses)
+owns that optional composition. Pass the same `{ principal, context: snapshot }`
+to `endpoint.handleDocument(document, registration, policyInput, capturedAtMs)`.
+Principal and context are opaque host values: the engine preserves their
+identities rather than making JSON copies of a transaction, Map or class instance.
+The host keeps the snapshot stable throughout the attempt.
+
+The base policy's `policyData` is the pending event for the whole exchange;
+the content-group policy does not return a second accounting channel. Thus an
+ordinary refusal with connector-only success can still commit that event. A
+refusal from both policies produces no key-bearing response and commits none.
+Use the signed publisher/render and authenticated reader to identify one event,
+independent of how many grant routes or keys the final response contains.
+
+After endpoint success, prepare transport with `KeyDelivery` configured with
+`composedSections: core.responseSections` and finish the HTTP response before committing.
+Count both ordinary and selected extension keys in that **final** body:
+
+```js
+// Imports from js/core-shared--client-issuer/responseKeys.js:
+// deliveredKeys, composedKeys, settleComposedSections.
+const sections = settleComposedSections(core.responseSections);
+const hasKey =
+  !deliveredKeys(finalBody.keys).next().done ||
+  !composedKeys(finalBody, sections).next().done;
+if (hasKey) await store.applyOnce(eventId, answered.policyData);
+// Only now return the already prepared response.
+```
+
+`store`, `eventId`, the snapshot, transport preparation and HTTP construction
+belong to the host. `applyOnce` denotes its atomic idempotent storage operation,
+not a reference helper. Do not count only `keys`, which misses a connector-only
+answer, or count pending policy intent before preparation succeeds. Refuse the
+whole response if preparation or accounting fails. A late source failure or
+transport-preparation failure commits nothing. A successful mixed answer and a
+successful connector-only answer each count once. This records issuance, not
+proof of plaintext use; a wrong connector candidate or a later network loss
+cannot establish that the reader viewed the article.
 
 ## Choose what the meter means
 
-- **Per unresolved render:** grant only direct `contentNames`. A later render
-  without a retained usable key reaches the issuer again.
+- **Per unresolved render:** grant only `contentNames`, so the issuer returns
+  item content keys. A later render without a retained usable key reaches the
+  issuer again.
 - **Per reusable capability grant:** grant `periodGrants` and count the grant.
   Later matching opens are intentionally invisible to the issuer.
 - **Per request:** usually the wrong event. Refusals, retries, cache hits, and
@@ -222,19 +317,19 @@ that each issuer maintains a separate meter.
 
 ## Run and inspect the reference evidence
 
-Run from `js/v1/`:
+Run from `js/`:
 
 ```sh
 node --test test/access-policy.test.js
-node --test test/scenario.test.js
+node --test test-reference/demo-browser/scenario.test.js
 ```
 
-[`access-policy.test.js`](../js/v1/test/access-policy.test.js) demonstrates
-two metered direct reads followed by denial, retry-safe counting by signed
-`renderId`, no debit when no key is delivered, and the key limitation: a
-second article opened from a retained period key never reaches the issuer.
-`scenario.test.js` makes that retained-key behavior visible as two opened
-articles and one issuer call.
+[`access-policy.test.js`](../js/test/access-policy.test.js) demonstrates two
+metered reads that each receive the item's content key from the issuer, followed
+by denial, retry-safe counting by signed `renderId`, no debit when no key is
+delivered, and the key limitation: a second article opened from a retained
+period key never reaches the issuer. `scenario.test.js` makes that retained-key
+behavior visible as two opened articles and one issuer call.
 
 These tests exercise the reference integration. They do not make its example
 metering policy part of the DCA protocol.

@@ -86,15 +86,72 @@ behind the bridge produced the same bytes out from the same bytes in.
 From `verification/`:
 
 ```sh
-conformance-primitives/check                 # every lane, one tally
-conformance-primitives/php/check             # one lane, everything it answers
-conformance-primitives/run php               # one lane, the case corpus only, after the framework's own self-check
+conformance-primitives/check                 # every lane at its default runtime versions, one tally
+conformance-primitives/php/openssl/check     # one lane, everything it answers
+conformance-primitives/run php/openssl       # one lane, the case corpus only, after the framework's own self-check
 ```
 
 The framework needs a JavaScript runtime with WebCrypto and bash. Node is the default; `DCA_JS=deno` runs
-the same files under Deno, and names a runtime, never a behavior. A lane whose language needs a toolchain
-installs a pinned one into a cache the first time it runs and reads nothing off `PATH`; the node lane runs
-under the runtime the framework already has.
+the same files under Deno, and names a runtime, never a behavior. That runtime runs the driver only. Every
+lane, node included, installs its pinned runtime into a cache the first time it runs and reads nothing off
+`PATH`.
+
+## Runtime versions
+
+The runtime version is the one input a run takes besides its selectors: `--version <v>` on `check`, on a
+lane's `check` and on `run`, or `DCA_VERSION`, and `default` when neither is given.
+
+```sh
+conformance-primitives/check                          # every lane at its runtime's default versions
+conformance-primitives/check --version all            # every lane at every version its runtime lists
+conformance-primitives/check --version 8.3            # only the lanes whose runtime lists 8.3
+conformance-primitives/php/openssl/check --version 8.3
+conformance-primitives/run node/openssl --version 22
+```
+
+Each runtime lists its versions in `<runtime>/versions`, beside its installer, one line per token:
+
+```text
+8.4 8.4.23 default
+8.3 8.3.32 listed
+```
+
+The columns are the version token, the release pinned by the installer and
+the selection state (`default` or `listed`). Do not add comments or other text
+to a data line; the version-list reader accepts only those three fields.
+
+`default` runs every token marked `default`; the gate runs this. A runtime with a readable list but no `default`
+token makes the default gate incomplete (exit 2), because that lane cannot be included in the claimed default
+run. `all` runs every token the list names. A token runs that version alone. `check` then selects only the lanes whose runtime lists the token, prints the
+others as not selected, and exits 2 when no runtime lists it; a lane's `check` given a token its runtime does
+not list refuses with exit 2 before anything is installed. `run` answers one version, so `default` there is
+the list's first default line and `all` is refused.
+
+The installer keeps the download and its checksum per token and installs each version into a directory of
+its own, so two versions sit side by side in one cache. The lane check exports the token as `DCA_VERSION`,
+and the prepare step and the answering process `bridge.json` names pass it to the installer, so the version
+that answers is the one selected and never a binary on `PATH`.
+
+A run is one (lane, version) pair. Its record carries the token and the version the installed binary
+reported when asked (`php -r 'echo PHP_VERSION;'`, `node --version`), not the list's value:
+
+```text
+lane=php/openssl
+version=8.3
+runtime=8.3.32
+operation=decode-base64url member=lane
+operation=hkdf-sha256 member=hash
+...
+set=encoding status=held
+...
+exit=0
+```
+
+A lane check given several tokens and `--record <file>` writes `<file>.<token>` per token; `check` calls
+each lane once per pair and names every pair `<lane>@<token>`, as in `node/openssl@24: held`. A binding
+that cannot run a version its runtime lists writes a record with `status=refused` and a `reason=` line
+instead of set rows; it folds into no exit code, the way an unsupported set does, and the aggregate names
+it apart from `unsupported`.
 
 ## Exit codes
 
@@ -113,10 +170,10 @@ output names the sets nobody asked it.
 Selectors pick which cases run. One axis per invocation:
 
 ```sh
-conformance-primitives/run php --set encoding
-conformance-primitives/run php --op open-aes-gcm
-conformance-primitives/run php --case encoding/03
-conformance-primitives/run php \
+conformance-primitives/run php/openssl --set encoding
+conformance-primitives/run php/openssl --op open-aes-gcm
+conformance-primitives/run php/openssl --case encoding/03
+conformance-primitives/run php/openssl \
   --case encoding/03 \
   --case rsa-oaep/01
 ```
@@ -149,9 +206,17 @@ the readable text, lives in the corpus, and never crosses to a bridge.
 The case corpus, `_shared/cases/v1/cases.json`, holds every question a run asks, each with its expectation
 withheld from the bridge. This framework owns those expectations as written-out literals, and no expectation
 is computed by one of the implementations under test, which would match that implementation by construction.
-Most octets in the corpus were cut from published DCA vectors, so a bridge that holds here computes what a
-DCA implementation on the same runtime will need; the contract's closing section says which value came from
-where.
+Selected inputs were copied from published DCA vectors; other cases have independent known-answer or
+canonical encoding-rule provenance. The contract's closing section names each source. Runs read only this
+literal corpus, never the vectors or the reference implementation.
+
+A held lane reproduces the expected results for the covered stock calls and supplied parameters. Agreement
+between lanes tests reproducibility; standards, specification rules and each case's provenance establish
+its expected answer separately. Several runtimes share library ancestry, so a runtime count is not a count
+of independent cryptographic stacks. The four JavaScript lanes share one `decode-base64url` answer, the decoder
+in `_source/js/v1/answer.mjs`, so a held `encoding` set across them is one data point, not four. DCA
+composition and a port's joins between calls require that implementation's own tests. The [verification overview](../README.md#what-the-evidence-establishes) explains
+how these evidence boundaries fit together.
 
 The cases are grouped into sets by the operations they ask for, and a lane declares in its own `bridge.json`
 which operations its bridge answers. A set asking for one the lane has not declared is unsupported for that
@@ -166,18 +231,28 @@ document, never in a lane.
 ## Where things live
 
 Shared code lives under `_shared/`: the driver, the contract, the case corpus, the shell helpers and their
-tests. Everything else at the top level is a lane, plus this file and the two entry points, `check` and
-`run`. `check` finds a lane by walking the immediate child directories for an executable `check`; the driver
-finds a lane by walking them for a `bridge.json`. Nothing anywhere lists a lane by name.
+tests. Bridge source that several lanes run unchanged lives under [`_source/`](_source/README.md); it is no
+lane, and each lane that runs it owns its own wrapper, `bridge.json` and `check`. Every lane sits at
+`<runtime>/<binding>/`: the runtime binary and the set of libraries that answers the bridge calls are the two
+things that can change a lane's answers, so both are levels even when a runtime has one binding. The top-level
+entry points are `check` and `run`. `check` discovers a lane by an executable `check`; the driver discovers it
+by `bridge.json`. Nothing lists a lane by name.
 
 A bridge is written against [`_shared/contract/v1/bridge.md`](_shared/contract/v1/bridge.md). Each lane's
-README says which platform owns its crypto binding and how its toolchain arrives:
-[dotnet](dotnet/README.md), [go](go/README.md), [jvm](jvm/README.md), [node](node/README.md),
-[php](php/README.md), [python](python/README.md).
+README says which platform owns its crypto binding, and its runtime's README says how the toolchain arrives:
+[bun/boringssl](bun/boringssl/README.md), [deno/rustcrypto-awslc](deno/rustcrypto-awslc/README.md),
+[dotnet/bcl](dotnet/bcl/README.md), [go/stdlib](go/stdlib/README.md),
+[jvm/jca-jackson](jvm/jca-jackson/README.md), [node/openssl](node/openssl/README.md),
+[php/openssl](php/openssl/README.md), [python/cryptography](python/cryptography/README.md),
+[rust/rustcrypto](rust/rustcrypto/README.md), which uses a pinned RustCrypto crate stack and answers all seven
+operations, and [workerd/boringssl](workerd/boringssl/README.md).
 
-`bridge.json` names `script`, `command` and an `operations` array, and optionally `prepare: {command,
-args?}`. Paths in it are written from the conformance directory, so a lane names its own directory first:
-`php/bridge.json` names `php/v1/bridge.php` rather than a path relative to its own directory. `prepare` runs once before the batch, outside its time budget, and
+`bridge.json` names `script`, `command`, `members` and `operations`, and optionally `prepare: {command,
+args?}`. `members` names each part of the binding that answers something, such as `openssl` for ext/openssl or
+`lane` for code written in the lane; `operations` maps each operation the bridge answers to the member that
+answers it ([contract](_shared/contract/v1/bridge.md#building-is-not-answering)).
+Paths in it are written from the conformance directory, so a lane names its own directory first:
+`php/openssl/bridge.json` names `php/openssl/v1/bridge.php` rather than a path relative to its own directory. `prepare` runs once before the batch, outside its time budget, and
 is where a lane installs its toolchain or compiles its bridge.
 
 A shell script that is run carries no extension; its shebang names the interpreter. A `.sh` file here is
@@ -189,15 +264,28 @@ shell fixtures before it starts a lane; a red self-check exits 2 and starts no b
 ## What a lane check runs
 
 Every lane check runs one step: the case corpus through that lane's own bridge, one run per set, so each row
-carries its own measured status. `_shared/driver/select-sets.mjs` names the sets and says which of them the
-lane declares every operation for. The record a `--record` run writes holds one row per set;
-`_shared/aggregate-results` refolds the records of several lanes and refuses a record that covers nothing.
+carries its own measured status, once per selected runtime version. `_shared/driver/select-sets.mjs` names
+the sets and says which of them the lane declares every operation for. The record a `--record` run writes
+holds the lane, the version and the observed runtime, then one `operation=<operation> member=<member>` row per
+declared operation, then one row per set; `_shared/aggregate-results` refolds the records of several (lane,
+version) pairs, prints each pair's operation rows under it, and refuses a record that covers nothing. The
+operation rows join no comparison and no exit code, and they attribute rather than claim independence: a `lane`
+row may rest on a library call its binding README names. The aggregate refuses a malformed, unknown or
+repeated operation row and trusts the rest: a record with fewer or no operation rows, or any well-formed
+member name, passes, so the rows repeat the lane's own attribution and prove no provider
+([contract](_shared/contract/v1/bridge.md#building-is-not-answering)).
 
 ## Adding a lane
 
-One directory at the top level. In it: `bridge.json`; the bridge, written against `_shared/contract/v1/
-bridge.md` using the runtime's own JSON parser and crypto library and nothing hand-written; an installer
-that puts a pinned toolchain into the lane's cache and answers print-only queries without downloading; a
-`check` that runs the corpus through the driver; a README saying which platform owns the crypto binding. A new lane needs no
+One binding directory, `<runtime>/<binding>/`. The runtime directory keeps the installer and the `versions`
+list; the installer takes `--version <token>`, puts the toolchain into a cache and answers print-only
+queries without downloading.
+In the binding directory: `bridge.json`, naming the binding's members and the member that answers each
+operation; the bridge, written against `_shared/contract/v1/
+bridge.md` using the runtime's own libraries or a pinned third-party stack named in the lane README for JSON
+and crypto (strict base64url checks and JWK member handling remain lane code); a
+`check` that runs the corpus through the driver once per selected version and observes the installed
+runtime's version; a README saying which platform owns the crypto binding and repeating which member answers
+each operation. A new lane needs no
 registration step: `conformance-primitives/check` counts it in its tally and the driver lists it as soon as
 the directory exists.

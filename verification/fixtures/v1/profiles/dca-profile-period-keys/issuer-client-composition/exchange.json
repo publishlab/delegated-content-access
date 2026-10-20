@@ -1,0 +1,61 @@
+{
+  "format": "period-key-composition/v1",
+  "description": "Each unlock the client posted, with the issuer's status and body.",
+  "exchanges": [
+    {
+      "step": 1,
+      "url": "https://api.example.com/unlock",
+      "origin": "https://www.news-site.example",
+      "request": {
+        "version": "1",
+        "issuerName": "paywall_subscription_service",
+        "resourceJWT": "eyJhbGciOiJFUzI1NiIsInR5cCI6IkpXVCIsImtpZCI6InNpZ24tMjAyNS0xMCJ9.eyJyZW5kZXJJZCI6InVVVDU3Nk8zNEJvR0twZ1hwZE11Y3ciLCJvcmlnaW4iOiJodHRwczovL3d3dy5uZXdzLXNpdGUuZXhhbXBsZSIsImlzc3VlZEF0IjoiMjAyNS0xMC0yM1QxNDoyMDowMC4wMDBaIiwicmVzb3VyY2VJZCI6IjEyMzQ1NjUiLCJkYXRhIjp7InNlY3Rpb24iOiJwb2xpdGljcyJ9fQ.lKI9lzeEv5N7A7ti8X3pM83S_FEJrWlrcR2yq4A3Cf57Hnie0k3YUPTvwjbvCxyMV9i2CNQvvoBGF29Z5QqIWQ",
+        "keyId": "2025-10",
+        "sealed": {
+          "contentKeys": {},
+          "periodKeys": {
+            "premium": {
+              "251023T1400": "BFA0yL0vY1kUwCWP7Ilg4QikniFodCs4dUdM3UGquaRQ5bXrHMqrkleSoPczFYq6uWq2OO_4OId3rCxkx7BoIZgBVhnCa-zjyB7E7V9y90jTjJCxLj6o6MziqMn35iBqo86eDI0zCwlcapc5aw",
+              "251023T1500": "BLKkI-IMzphn6k-vFSp8FxuuPuxIK5bBEbdCxjFYRunvS8cqITRkQZPZwMYIDg2tgIsYao28xeEnzZ_1DXvWop06t7sCmU2raNPTPDDLaj67CcoenqpK19S_R8A0ZzgzjrhNXV-3w2MSZEWwDA"
+            }
+          }
+        }
+      },
+      "status": 200,
+      "body": {
+        "keys": {
+          "contentKeys": {},
+          "periodKeys": {
+            "premium": {
+              "251023T1400": "Etewfq8XLudt0AXLRs7gqA"
+            }
+          }
+        }
+      }
+    },
+    {
+      "step": 3,
+      "url": "https://api.example.com/unlock",
+      "origin": "https://www.news-site.example",
+      "request": {
+        "version": "1",
+        "issuerName": "paywall_subscription_service",
+        "resourceJWT": "eyJhbGciOiJFUzI1NiIsInR5cCI6IkpXVCIsImtpZCI6InNpZ24tMjAyNS0xMCJ9.eyJyZW5kZXJJZCI6InpmeUtyN2RxNkRkQjBFNEZaSXVxVFEiLCJvcmlnaW4iOiJodHRwczovL3d3dy5uZXdzLXNpdGUuZXhhbXBsZSIsImlzc3VlZEF0IjoiMjAyNS0xMC0yM1QxNToyMDowMC4wMDBaIiwicmVzb3VyY2VJZCI6IjEyMzQ1NjciLCJkYXRhIjp7InNlY3Rpb24iOiJwb2xpdGljcyJ9fQ.b9IFeMgjPSfPqJPYB3rhAaPuxdKVZ6sifrCHZDCH-HE4o5D3WN9UIpJfBJGrLGyBXzCCbtqxfDDgf_XsZSWaHw",
+        "keyId": "2025-10",
+        "sealed": {
+          "contentKeys": {},
+          "periodKeys": {
+            "premium": {
+              "251023T1500": "BM8tX-57JvnVwqLdXFKRY5hvukcDD9JrcGYys7_KWCp7TY3E8fSk0ixs5JvncAq5gHzz5cCp7EfSUKxFFcOBwGUu0J6AuSZfL2cH7D-oV8mCsG5gE45ERdoBXK7uK0QCL20uisB2nPk12-7Crg",
+              "251023T1600": "BJD0xg74Ri0onR8h_K9XyXYoAbWCC4AGD7esrxuCMEz2N_jlbA9jdJkSQa_0hGALqYqQnmWtaj2NyOLqcFK52hzaCHu4dF4suMkP1yBP49YlapUp-6uM-3fjzkIZWCazLCymtLOzfAwkvkXkOw"
+            }
+          }
+        }
+      },
+      "status": 401,
+      "body": {
+        "error": "denied"
+      }
+    }
+  ]
+}

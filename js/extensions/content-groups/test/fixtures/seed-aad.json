@@ -1,0 +1,15 @@
+{
+  "binding": {
+    "publisher": "https://news.example",
+    "renderId": "AAECAwQFBgcICQoLDA0ODw",
+    "issuerName": "issuer",
+    "contentName": "bodytext",
+    "windowStartLabel": "261014T1200",
+    "periodGeometry": {
+      "chainsPerDay": 2,
+      "periodMinutes": 60
+    }
+  },
+  "expectedAadUtf8": "[\"dca-bind-content-name-seed\",\"2d0a016473ff75fd2afa3cc1dac401896235215a4a61e06d11129ff3442837a7\",\"AAECAwQFBgcICQoLDA0ODw\",\"issuer\",\"bodytext\",\"261014T1200\",2,60]",
+  "expectedAadHex": "5b226463612d62696e642d636f6e74656e742d6e616d652d73656564222c2232643061303136343733666637356664326166613363633164616334303138393632333532313561346136316530366431313132396666333434323833376137222c2241414543417751464267634943516f4c4441304f4477222c22697373756572222c22626f647974657874222c223236313031345431323030222c322c36305d"
+}

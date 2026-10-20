@@ -1,0 +1,371 @@
+// @ts-check
+//
+// Extension-side publisher supply planning.  Base sees only derive(group, t);
+// this module keeps the family generation and its positioned capabilities on
+// the selected extension side until the publisher composition asks for a
+// family plan.
+
+import { dcaError } from "../../../core-shared/errors.js";
+import {
+  MAX_CHAIN_MEMBERS_PER_FAMILY,
+  PERIOD_GEOMETRY_MINUTES_PER_DAY,
+} from "../../../core-shared/geometryBounds.js";
+import { validateAccessGroup } from "../../../core-shared/names.js";
+import { periodsFor } from "../../../core-shared--publisher-issuer/periodKeys.js";
+import { chainKeyConstructionProfile } from "../core-shared/chainKeyConstruction.js";
+
+const MS_PER_MINUTE = 60_000;
+
+/** @param {unknown} accessGroup */
+function checkedGroup(accessGroup) {
+  validateAccessGroup(/** @type {any} */ (accessGroup));
+  return /** @type {string} */ (accessGroup);
+}
+
+/** @param {number} value */
+function two(value) {
+  return String(value).padStart(2, "0");
+}
+
+/** @param {number} minutes */
+function fixedT(minutes) {
+  const date = new Date(minutes * MS_PER_MINUTE);
+  if (date.getUTCFullYear() < 2000 || date.getUTCFullYear() > 2099) {
+    throw dcaError(
+      "bad_config",
+      "a period-family chain plan is inside the profile years 2000 through 2099",
+    );
+  }
+  return (
+    `${two(date.getUTCFullYear() % 100)}${two(date.getUTCMonth() + 1)}${two(date.getUTCDate())}` +
+    `T${two(date.getUTCHours())}${two(date.getUTCMinutes())}`
+  );
+}
+
+/**
+ * One acquired period key, at the width the family's own profile states. The
+ * width comes from the selected profile and never from the value.
+ *
+ * @param {unknown} value
+ * @param {string} where
+ * @param {number} width
+ */
+function keyBytes(value, where, width) {
+  if (!(value instanceof Uint8Array) || value.length !== width) {
+    throw dcaError("bad_config", `${where} returns ${width} period-key bytes`);
+  }
+  return Uint8Array.from(value);
+}
+
+/** @param {unknown} value */
+function frozenGeneration(value) {
+  if (
+    !Object.isFrozen(value) ||
+    typeof (/** @type {any} */ (value)?.periodKey) !== "function" ||
+    typeof (/** @type {any} */ (value)?.chainCapability) !== "function" ||
+    typeof (/** @type {any} */ (value)?.coordinateFor) !== "function" ||
+    typeof (/** @type {any} */ (value)?.constructionProfile?.name) !== "string" ||
+    !Number.isInteger(/** @type {any} */ (value)?.constructionProfile?.chainKeyBytes) ||
+    !Object.isFrozen(/** @type {any} */ (value).geometry)
+  ) {
+    throw dcaError(
+      "bad_config",
+      "a period-family supply family is a frozen periodFamilyGeneration handle",
+    );
+  }
+  const geometry = /** @type {any} */ (value).geometry;
+  if (
+    !Number.isInteger(geometry.chainsPerDay) ||
+    !Number.isInteger(geometry.periodMinutes) ||
+    geometry.chainsPerDay <= 0 ||
+    geometry.periodMinutes <= 0
+  ) {
+    throw dcaError("bad_config", "a period-family generation carries complete positive geometry");
+  }
+  const generation =
+    /** @type {{
+     *   geometry: { chainsPerDay: number, periodMinutes: number },
+     *   constructionProfile: { name: string, constructionId: string, chainKeyBytes: number },
+     *   coordinateFor: (t: string) => { t: string, windowStart: number },
+     *   periodKey: (accessGroup: string, t: string) => Promise<Uint8Array>,
+     *   chainCapability: (accessGroup: string, t: string) => Promise<any>,
+     * }} */ (value);
+  const constructionProfile = chainKeyConstructionProfile(generation.constructionProfile.name);
+  if (generation.constructionProfile.chainKeyBytes !== constructionProfile.chainKeyBytes) {
+    throw dcaError(
+      "bad_config",
+      `a period-family generation carries the registered paired widths for ` +
+        `${JSON.stringify(constructionProfile.name)}`,
+    );
+  }
+  return generation;
+}
+
+/** @param {unknown} now */
+function minutesAt(now) {
+  if (!(now instanceof Date) || !Number.isFinite(now.getTime())) {
+    throw dcaError("bad_config", "a period-family plan needs one finite render Date");
+  }
+  return Math.floor(now.getTime() / MS_PER_MINUTE);
+}
+
+/** @param {unknown} period */
+function slotsOf(period) {
+  const periodPlan = /** @type {any} */ (period);
+  const slots = period === undefined ? 2 : (periodPlan?.slots ?? 2);
+  if (!Number.isInteger(slots) || slots <= 0) {
+    throw dcaError(
+      "bad_config",
+      `a period-family plan needs positive defaultPeriod.slots, got ${String(slots)}`,
+    );
+  }
+  return slots;
+}
+
+/** @param {{ coordinateFor: (t: string) => any }} generation @param {string} t */
+function coordinateAt(generation, t) {
+  const at = generation.coordinateFor(t);
+  if (at === null || typeof at !== "object" || at.t !== t || !Number.isInteger(at.windowStart)) {
+    throw dcaError(
+      "bad_config",
+      `a period-family generation returned no usable coordinate for period ${t}`,
+    );
+  }
+  return /** @type {{ t: string, windowStart: number }} */ (at);
+}
+
+/** @param {readonly string[]} allowed @param {string} t @param {string} operation */
+function planned(allowed, t, operation) {
+  if (typeof t !== "string" || !allowed.includes(t)) {
+    throw dcaError(
+      "bad_config",
+      `${operation} is called only for this family's planned coordinate`,
+    );
+  }
+}
+
+/**
+ * A base-compatible period-key supply plus optional extension family generations.
+ * Own `families` members select construction; inherited names are not family
+ * configuration.  A family handle remains private to this closure, so the
+ * base-facing supply cannot discover positioned-chain operations.
+ *
+ * @param {{ periodKeySupply?: { derive: (accessGroup: string, t: string) => Promise<Uint8Array> }, families: Record<string, unknown>, chainWindows: number, chainItemSlots?: number }} config
+ * @returns {Readonly<{ derive: (accessGroup: string, t: string) => Promise<Uint8Array>, familyPlan: (accessGroup: string, now: Date, defaultPeriod: object, chainRequested?: boolean) => object }>}
+ */
+export function periodFamilySupply(config = /** @type {any} */ ({})) {
+  if (config === null || typeof config !== "object" || Array.isArray(config)) {
+    throw dcaError(
+      "bad_config",
+      "a period-family supply is { periodKeySupply?, families, chainWindows, chainItemSlots? }",
+    );
+  }
+  for (const name of Object.keys(config)) {
+    if (
+      name !== "periodKeySupply" &&
+      name !== "families" &&
+      name !== "chainWindows" &&
+      name !== "chainItemSlots"
+    ) {
+      throw dcaError(
+        "unsupported_option",
+        `a period-family supply has no ${name} yet, and will not pretend to`,
+      );
+    }
+  }
+  if (!Object.hasOwn(config, "families") || !Object.hasOwn(config, "chainWindows")) {
+    throw dcaError("bad_config", "a period-family supply names own families and chainWindows");
+  }
+  const periodKeySupply = Object.hasOwn(config, "periodKeySupply")
+    ? /** @type {any} */ (config).periodKeySupply
+    : undefined;
+  const families = /** @type {any} */ (config).families;
+  const chainWindows = /** @type {any} */ (config).chainWindows;
+  const chainItemSlots = Object.hasOwn(config, "chainItemSlots") ? config.chainItemSlots : 1;
+  if (
+    typeof chainItemSlots !== "number" ||
+    !Number.isSafeInteger(chainItemSlots) ||
+    chainItemSlots <= 0
+  ) {
+    throw dcaError(
+      "bad_config",
+      "a period-family supply chainItemSlots is a positive safe integer",
+    );
+  }
+  if (periodKeySupply !== undefined && typeof periodKeySupply?.derive !== "function") {
+    throw dcaError("bad_config", "a period-family periodKeySupply has derive(accessGroup, t)");
+  }
+  // This supply reads only derive, so it refuses any other member rather than
+  // act as if it had honored it.
+  for (const name of Object.keys(periodKeySupply ?? {})) {
+    if (name !== "derive") {
+      throw dcaError(
+        "unsupported_option",
+        `a period-family periodKeySupply has no ${name} yet, and will not pretend to`,
+      );
+    }
+  }
+  if (families === null || typeof families !== "object" || Array.isArray(families)) {
+    throw dcaError("bad_config", "a period-family supply families is an own-keyed object");
+  }
+  if (
+    !Number.isInteger(chainWindows) ||
+    chainWindows <= 0 ||
+    chainWindows > MAX_CHAIN_MEMBERS_PER_FAMILY
+  ) {
+    throw dcaError(
+      "bad_config",
+      `a period-family supply chainWindows is from 1 through ${MAX_CHAIN_MEMBERS_PER_FAMILY}, got ${String(chainWindows)}`,
+    );
+  }
+
+  /** @type {Map<string, ReturnType<typeof frozenGeneration>>} */
+  const selected = new Map();
+  for (const accessGroup of Object.keys(families)) {
+    const group = checkedGroup(accessGroup);
+    const family = Object.hasOwn(families, group) ? families[group] : undefined;
+    selected.set(group, frozenGeneration(family));
+  }
+
+  /** @param {string} accessGroup @param {string} t */
+  async function periodKeyFor(accessGroup, t) {
+    const generation = selected.get(accessGroup);
+    if (generation !== undefined) {
+      return keyBytes(await generation.periodKey(accessGroup, t), "a period-family generation", 16);
+    }
+    if (periodKeySupply) {
+      return keyBytes(
+        await periodKeySupply.derive(accessGroup, t),
+        "a period-family periodKeySupply",
+        16,
+      );
+    }
+    throw dcaError(
+      "bad_config",
+      `period-family supply has no period-key source for ${JSON.stringify(accessGroup)}`,
+    );
+  }
+
+  return Object.freeze({
+    /** Base-compatible opaque period-key seam. */
+    /** @param {string} accessGroup @param {string} t */
+    derive(accessGroup, t) {
+      return periodKeyFor(checkedGroup(accessGroup), t);
+    },
+
+    /**
+     * Snapshot one family at the render's already-captured instant.
+     * Period-key-only families keep the base labels; selected chain families
+     * use their explicit geometry and the fixed chain label grammar instead.
+     * `chainRequested` says some issuer selected chain delivery. This supplier
+     * snapshots the family's planned wraps and chain sources independently;
+     * Sealer checks actual item-route reach across an issuer's selected
+     * sources before key acquisition.
+     *
+     * @param {string} accessGroup
+     * @param {Date} now
+     * @param {object} defaultPeriod
+     * @param {boolean} [chainRequested]
+     */
+    familyPlan(accessGroup, now, defaultPeriod, chainRequested = false) {
+      const group = checkedGroup(accessGroup);
+      if (typeof chainRequested !== "boolean") {
+        throw dcaError("bad_config", "a period-family chain selection is a boolean");
+      }
+      const at = minutesAt(now);
+      const generation = selected.get(group);
+
+      if (generation === undefined) {
+        if (!periodKeySupply) {
+          throw dcaError(
+            "bad_config",
+            `period-family supply has no period-key source for ${JSON.stringify(group)}`,
+          );
+        }
+        const periods = Object.freeze([...periodsFor(/** @type {Date} */ (now), defaultPeriod)]);
+        return Object.freeze({
+          periods,
+          periodKeyAt: async (/** @type {string} */ t) => {
+            planned(periods, t, "periodKeyAt");
+            return periodKeyFor(group, t);
+          },
+        });
+      }
+
+      const { chainsPerDay, periodMinutes } = generation.geometry;
+      const windowMinutes = PERIOD_GEOMETRY_MINUTES_PER_DAY / chainsPerDay;
+      if (!Number.isInteger(windowMinutes) || windowMinutes % periodMinutes !== 0) {
+        throw dcaError(
+          "bad_config",
+          "a period-family generation geometry divides its stationary window",
+        );
+      }
+      // Item alternatives and the entrusted window terminals are independent.
+      // A generation used only for ordinary delivery retains the base policy.
+      const slots = chainRequested ? chainItemSlots : slotsOf(defaultPeriod);
+      const current = at - (at % periodMinutes);
+      const periods = Object.freeze(
+        Array.from({ length: slots }, (_, index) => fixedT(current + index * periodMinutes)),
+      );
+      // The frozen handle alone decides label range and geometry alignment;
+      // this module only plans from its snapshot.
+      for (const t of periods) coordinateAt(generation, t);
+
+      const windowStart = current - (current % windowMinutes);
+      const terminal = windowStart + windowMinutes - periodMinutes;
+      const suppliedTs = Object.freeze([
+        ...new Set(
+          Array.from({ length: chainWindows }, (_, index) =>
+            fixedT(terminal + index * windowMinutes),
+          ),
+        ),
+      ]);
+      for (const t of suppliedTs) coordinateAt(generation, t);
+      const geometry = Object.freeze({ chainsPerDay, periodMinutes });
+
+      return Object.freeze({
+        periods,
+        periodMinutes,
+        periodKeyAt: async (/** @type {string} */ t) => {
+          planned(periods, t, "periodKeyAt");
+          return periodKeyFor(group, t);
+        },
+        chain: Object.freeze({
+          geometry,
+          suppliedTs,
+          capabilityAt: async (/** @type {string} */ t) => {
+            planned(suppliedTs, t, "capabilityAt");
+            const capability = await generation.chainCapability(group, t);
+            if (
+              capability === null ||
+              typeof capability !== "object" ||
+              capability.t !== t ||
+              !(capability.key instanceof Uint8Array) ||
+              capability.key.length !== 16
+            ) {
+              throw dcaError(
+                "bad_config",
+                "a period-family generation returns its planned 16-byte capability",
+              );
+            }
+            return Uint8Array.from(capability.key);
+          },
+        }),
+      });
+    },
+  });
+}
+
+/**
+ * The chain-key supply as one publisher contribution
+ * (`core-publisher/publisherComposition.js`): it owns the period-key supply
+ * seam with `periodFamilySupply(config)` and claims nothing else, so the chain
+ * bytes are the supply's own.
+ *
+ * @param {Parameters<typeof periodFamilySupply>[0]} config - the configuration
+ *   `periodFamilySupply` takes
+ * @returns {Readonly<{ name: "chain-keys", periodKeySupply: ReturnType<typeof periodFamilySupply> }>}
+ */
+export function periodFamilyContribution(config) {
+  return Object.freeze({ name: "chain-keys", periodKeySupply: periodFamilySupply(config) });
+}

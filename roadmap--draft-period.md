@@ -2,157 +2,257 @@
 
 Status: Informative Draft
 
-DCA is a public working draft. This list records current priorities for the
-draft period. It does not block the initial draft publication.
+The current [specifications and document status](docs/spec---overview.md#document-status)
+define DCA's requirements. This roadmap lists remaining design, implementation
+and evidence work that may affect a public working draft. Each specification,
+proposal and profile retains its stated status. The listed work does not wait for a publication.
 
-The [exact period-key path](docs/spec--period-keys.md#53-periodkeyt) is the
-compatibility anchor: the publisher supplies one exact `periodKey[t]`, the
-key for one publisher, access group, and period coordinate; the issuer grants
-it, and the client retains and reuses it for matching content. The
-[worked example](docs/spec--period-keys.md#81-exact-issuer-and-exact-client)
-shows the complete path. While the editors reorganize profiles, reference code, tests,
-and documentation, preserve what works and close its remaining gaps first.
+## Which document to use
 
-Current [specifications and document
-status](docs/spec---overview.md#document-status) govern. The numbers are local
-labels for referring to items on this page; they are not issue links. Gaps are
-intentional. Completed or rejected items leave this page.
+- **Starting now:** follow the [specification overview](docs/spec---overview.md#start-here)
+  and the one-item baseline example. Add optional profiles only for capabilities
+  your deployment needs.
+- **Updating an implementation:** read [CHANGELOG.md](CHANGELOG.md) against the
+  exact draft revision you implemented. It identifies breaking changes and the
+  publisher, issuer and client updates they need. Matching wire version `"1"`
+  alone does not establish compatibility between drafts.
+- **Evaluating future work:** use this roadmap. Implemented reference code does
+  not adopt a Proposal or establish interoperability with an existing vendor
+  integration. Each specification's stated status remains authoritative.
 
-## Fix shortly
+A content key encrypts one item. Optional period keys let a client reuse access
+across matching content; optional chains compact the delivery of those period
+capabilities. The [period-key worked example](docs/guide--integration--period-keys.md#the-result-to-preserve)
+shows the publisher, issuer and client path. The current baseline requires
+content-key support; period keys and chains remain optional.
 
-- **Supported publisher and issuer entries** [integration, JavaScript] #59 #60
-  - **Now:** The browser client has a supported source-copy manifest and
-    composition entry. Publisher and issuer implementers must still assemble
-    lower-level modules from the integration guides and reference examples.
-  - **Next:** Add small, copyable role entries and manifests with validated
-    inputs, explicit security-sensitive host dependencies, and focused
-    consumer tests. Deliver publisher and issuer entries separately.
-  - **Affects:** JavaScript reference, source boundaries, tests, and the
-    [exact-period integration guide](docs/guide--integration--exact-period.md);
-    no wire change.
+## Next priorities
 
-- **Browser and issuer admission** [browser, JavaScript] #51 #52 #53
-  - **Now:** The specification settles the admission rules. The reference
-    still mishandles pre-verification CORS, redirects, response shape and media
-    type, production URLs, and one fallback case.
-  - **Next:** Fix the settled cases at their owning boundaries; decide the
-    remaining fallback case and align the reference.
-  - **Affects:** Browser client, issuer HTTP adapter, tests, and
-    [fallback guidance](docs/guide--unlock-fallback.md).
+1. **Settle the minimum reusable-key support.** The current baseline uses
+   content keys; period-key support is optional. The design
+   direction under consideration is to require both content-key and period-key
+   support while keeping chains optional. Decide this before changing the
+   baseline claim, then align specifications, reference behavior and evidence.
+   Required support would not force every article to carry both routes or
+   require an issuer to grant reusable keys. Record the extra burden on each
+   role and the resulting interoperability guarantee. Compare the proposed
+   content-group seed/connector construction as another baseline candidate;
+   its implementation as an extension does not settle that choice.
+2. **Publish examples that match the actual capabilities.** Show simple random
+   pkeys, publisher-first chain activation while supplying the ordinary pkeys needed by
+   the selected routes, and
+   issuer chain input with either pkey or chain output. Include forward-overlap
+   rollover without a second transmitted chain. State what each role must support and
+   avoid claiming that the current-format activation tests establish
+   interoperability with the September chain format.
 
-## Decide during the draft
+These are work priorities, not announced changes or a publication date. A
+baseline change requires a separate adoption decision and compatibility notes.
+Each publication records a snapshot of reviewed work. Protocol changes follow
+the [specification adoption process](docs/spec---overview.md#document-status). The [profile specification](docs/spec--profiles.md) remains the
+source of current mandatory and optional duties.
 
-- **Checked profile catalogue** [profiles] #38
-  - **Now:** The [profile specification](docs/spec--profiles.md) defines
-    dependencies and role duties, but no machine-checked catalogue owns them.
-  - **Next:** Resolve requested profiles to one checked set used by
-    configuration, tests, and claims.
-  - **Affects:** Profiles, reference configuration, and profile tests.
+## Implemented since the previous public draft
 
-- **Profile configuration boundary** [profiles, wire] #39 #41
-  - **Now:** The
-    [content-key seal-omission prototype](js/v1/extensions/content-key-seal-omission/README.md)
-    needs classification. Publisher-to-issuer profile agreement remains
-    out-of-band.
-  - **Next:** Classify the prototype. Decide whether out-of-band configuration
-    is enough or a readable publisher commitment earns its wire cost.
-  - **Affects:** Profiles and reference configuration; wire only if a
-    commitment is adopted.
+Compatibility notes against the 21 September 2026 public draft are recorded in
+[CHANGELOG.md](CHANGELOG.md).
 
-- **Period-chain names and derived bytes** [period chains] #33 #35
-  - **Now:** The frozen construction still uses the anomalous
-    `dca-period-chain-v1` identifier; the target is `dca-v1-period-chain`, but
-    the rename is unscheduled. Because the identifier is part of the KDF
-    transcript, the rename changes every derived root, state and leaf. One
-    output name also remains open.
-  - **Next:** Schedule one coordinated rename before v1, settle the remaining
-    name, and regenerate and independently check every frozen vector, fixture,
-    expected-value test and cross-runtime artifact that embeds the old derived
-    bytes.
-  - **Affects:** Specification, reference code, vectors, fixtures, tests,
-    conformance evidence, bridges, and deployments that pin the current
-    identifier or derived bytes.
+**Chain activation and period-key overlap:** a simple publisher can keep random
+pkeys without chain construction. Enabling chains selects a new generation of derived pkeys. Compatible clients
+obtain them through an ordinary unlock and can retain old keys for old pages.
+Supplying both ordinary pkeys and chains lets the relay and issuer enable
+chain handling later using the same saved article. An issuer may consume chains
+and return ordinary pkeys; chain output separately requires a capable client.
 
-- **Open wire proposals** [wire] #42
-  - **Now:** The [proposal set](docs/spec---overview.md#proposals) covers eight
-    candidate wire changes.
-  - **Next:** Adopt, fold in, or drop each proposal.
-  - **Affects:** Target specifications, reference code, and evidence named by
-    each proposal.
+The publisher derives the same bytes for the forward overlap pkey when its
+period becomes current. One
+current-window chain plus an ordinary overlap-period source is sufficient;
+another chain entry is not required merely for overlap. A cached-only overlap
+wrap is also valid when another selected issuer route already completes the item. These paths have executable
+activation, retained-key, rollover and cutoff evidence in
+`js/extensions/chain-keys/test/`. See the
+[chain-key guide](docs/guide--chain-keys.md#starting-with-period-keys-and-enabling-chains-later).
 
-- **Browser binding questions** [browser] #54 #55
-  - **Now:** The public binding defines POST. A GET carrier and the cache
-    partition input outside a publisher page are unassigned questions.
-  - **Next:** Assign or reject each question before describing either path as
-    supported.
-  - **Affects:** Browser binding, deployment guidance, and client integration.
+**Shared period geometry:** period authoring now carries one top-level
+`periodGeometry` with `periodMinutes`; selected chain processing adds
+`chainsPerDay`. All ordinary and content-group chain routes in one delivery
+share that pair. Ordinary pkey labels stay explicit, including overlap or
+next-period wraps. The content-groups Proposal uses root `renderPeriod` and per-item named
+`connectors`; `contentGroups` names its response section, not a delivery-root
+group dictionary. Its secret-rotation candidates require bounded rival trials,
+while retention duration remains an integration choice.
 
-- **Publisher and client key lifecycle** [security, deployment] #44 #45
-  - **Now:** Publisher signing-key rotation and the complete client-bound key
-    lifecycle are not specified.
-  - **Next:** Define rotation, overlap, retirement, retained state, and both
-    sides of the transport-key rule.
-  - **Affects:** Specifications, reference integration, and deployment
-    guidance.
+**Compact ECDH envelopes:** the optional
+[compact ECDH profile](docs/spec-profile--compact-ecdh.md) and its
+[reference extension](js/extensions/compact-ecdh/README.md) provide the fixed
+HPKE-compatible compressed-envelope path. Ordinary envelopes remain available.
+Selection requires matching publisher, relay and issuer support and explicit
+issuer key permissions; no runtime capability negotiation is implied.
 
-- **Not-delivered result** [profiles, JavaScript] #30
-  - **Now:**
-    [`dca-v1-not-delivered-result`](docs/spec--profiles.md#8-dca-v1-not-delivered-result-profile)
-    is specified as a profile, has no reference implementation, and is being
-    reconsidered as ordinary core behavior.
-  - **Next:** Keep it as a profile, fold it into core, or drop it; then align
-    the reference and tests with that decision.
-  - **Affects:** Core and profile specifications, JavaScript reference, and
-    tests.
+**Content-groups reference integration:** the
+[extension](js/extensions/content-groups/README.md) now composes the real
+publisher, issuer and delivery client, with ordinary item-key coexistence,
+persistent storage, reader reset and both client-bound response methods.
+Construction, refusal and composition evidence live in its tests. The profile
+remains a Proposal; reference integration does not select it as the baseline
+or prove every combination of extensions.
 
-- **Portable reference seams** [JavaScript, ports] #58
-  - **Now:** The crypto provider captures host WebCrypto during module load,
-    which blocks clean injection. Some tests also require English error text.
-  - **Next:** Define a replaceable provider seam and use stable refusal codes
-    where another implementation consumes the result.
-  - **Affects:** JavaScript reference, ports, and tests.
+## Remaining draft-period work
 
-- **Evidence gaps** [verification] #61 #63
-  - **Now:** Malformed AES-GCM acceptance is undecided. One integer-spelling
-    case and one exact-versus-chain supply measurement are missing.
-  - **Next:** Decide the behavior first, then add the discriminating cases and
-    measurements.
-  - **Affects:** Specification, domain tests, conformance, and evidence.
+- **Protected HTML reconstruction** [optional profile, publication]
+  - **Current state:** Publisher placement and bounded reconstruction code
+    exist. The [content-description and placement document](docs/spec-proposal--content-description-and-placement.md)
+    and [HTML content-map profile](docs/spec-proposal--html-content-map.md)
+    remain Proposals; neither changes the required item `contentType` or makes
+    a map a baseline requirement.
+  - **Remaining work:** When selected, validate the format against representative
+    customer templates and have the specification maintainers decide promotion.
+    Preserve the
+    publisher's chosen handler as the ordinary renderer; an independent map
+    client remains an explicit alternative.
+  - **Boundary:** This does not change issuer authorization, content-key
+    formats or the baseline JSON delivery.
 
-- **Browser opened-content presentation** [browser, integration] #64
-  - **Now:** The browser client ends at opened bytes. An
-    [early WIP sketch](docs/guide--browser-content-presentation.md) illustrates
-    how a publisher-owned callback might place and activate content, but no
-    interface, discovery namespace, slot convention, or profile is proposed or
-    selected.
-  - **Next:** Exercise the handoff in one publisher-controlled product
-    integration and one independently composed client. Then decide whether
-    explicit injection is sufficient, a shared discovery convention earns
-    support, or presentation should remain entirely deployment-specific.
-  - **Affects:** Browser integration and guidance. No DCA wire, cryptographic,
-    access-policy, or profile change without a separate supported use case and
-    decision.
+- **Browser deployment validation** [integration, product]
+  - **Current state:** The browser-integration interfaces remain a proposal;
+    the [independent-provider prototype](js/experiments/browser-integration/README.md#independent-provider-replacement-example) provides experimental evidence. It does not
+    establish live vendor compatibility, production credentials or a deployed
+    customer-page integration.
+  - **Remaining work:** Have the integrating application owner validate a selected real integration,
+    using its exact credential, ambient-cookie and completion/lifetime questions. Keep this separate from
+    profile adoption and from the HTML-map reconstruction decision.
+  - **Contract:** The [browser integration proposal](docs/spec-proposal--browser-integration.md)
+    defines the candidate interface.
 
-- **Reader guidance** [docs] #46
-  - **Now:** Important vocabulary and evidence status are spread across the
-    public set.
-  - **Next:** Add a short glossary and evidence overview. Add focused guidance
-    on onboarding, access modelling, protocol concepts, content types, and
-    hardening as each subject is ready.
-  - **Affects:** Public documentation only.
+- **Content-key seal-omission adoption** [optional profile, wire]
+  - **Current state:** The extension is classified as a non-adopted prototype.
+    Its documentation describes the prototype's trust and admission boundaries.
+    No interoperable profile for it has been adopted, and it adds no baseline
+    requirement.
+  - **Remaining work:** Decide whether to adopt an optional interoperable
+    profile or retain the experiment. If adopted, define that profile through
+    the existing extension and profile authority; do not reopen the prototype's
+    support signal as a baseline mechanism.
+  - **Design input:** [Seal-omission prototype](js/extensions/content-key-seal-omission/README.md).
 
-## Direction, not an issue list
+- **Content groups with scoped seeds and connectors** [proposal, wire]
+  - **Current state:** The [content-groups Proposal](docs/spec-profile--content-groups.md)
+    has a reference extension integrated as described above. One seed covers
+    one content name and window; named group chains lead through per-item
+    connectors to content keys. The issuer authorizes an item and returns a
+    candidate content key computed from its connector. A wrong candidate leaves
+    the client unable to open the content; no signed key commitment is required.
+  - **Remaining work:** Settle adoption and portability evidence, separately
+    from whether this construction belongs in the baseline. Before advertising
+    broader composition, prove a client using separate stock-chain and
+    content-groups issuers. The stock injected chain-key engine cannot be combined
+    with the content-groups contribution; a host-composed base engine can serve
+    both. Compact-selected
+    content-group seed blocks are not supported by this integration. See the
+    [composition limits](js/extensions/content-groups/README.md#composition-contentgroupsprofile).
+    Compare complete metadata and one unlock response against ordinary period
+    keys plus chains with matching groups, time grants and cache assumptions.
+  - **Tradeoff:** An entrusted issuer can derive every group for the supplied
+    content name and window, across articles. It cannot derive withheld content
+    names. Omitting it from a later article does not revoke the seed's existing
+    reach. Narrower issuer entrustment needs a narrower supplied scope or source.
 
-- [Profile composition](docs/spec--profiles.md#9-composition-rules) that tests
-  prove: select profiles, resolve one defined set, and run an end-to-end
-  scenario for it.
-- [Reference slices](js/v1/README.md#publisher-client-and-issuer-artifacts)
-  implementers can copy into their own code instead of adopting a framework.
-- [Vectors, fixtures, contracts, and conformance
-  lanes](verification/README.md#choose-evidence-by-the-boundary-under-test)
-  implementers can run against their own implementation.
-- Bindings that let another implementation reuse DCA unit tests for extra
-  coverage without rewriting them.
-- A small [worked example](docs/design--data-format--example.md) that can grow
-  into a playground for printing intermediate values and replacing one stage
-  at a time.
+- **Access-group generalization** [design, profile]
+  - **Current state:** Generalization remains paused;
+    the October 12 baseline/naming steering is preserved without adoption.
+    The current period-key and chain-key specifications continue to apply.
+    Named sets are one candidate organization for the bounded
+    OR model; no new wire fields, profile names or production provisioning
+    rules are adopted.
+  - **Remaining work:** Decide whether named sets need a wire representation or
+    remain publisher/issuer configuration, and settle provisioning and
+    combination semantics before any replacement specification is adopted.
+
+- **Reducing multi-group delivery cost** [research, verification]
+  - **Current state:** Ordinary pkeys plus optional chains remain the specified
+    reusable path. Tree-node and subset-cover constructions are unpublished
+    research constructions; neither is an adopted profile. Subset cover is a
+    candidate for reducing both content-key wraps and returned chains when
+    article memberships and authorized access fit configured complete subsets.
+  - **Remaining work:** Compare singleton, aligned, scattered and all-group
+    cases using the same article memberships, reader authorization, time grant
+    and issuer-supply assumptions. Measure serialized DCA metadata separately
+    from encrypted content, and one actual unlock response, as raw JSON and
+    gzip. Verify that authorized content opens, unauthorized content stays
+    closed, and cached capabilities behave as claimed before promotion.
+  - **Tradeoffs to settle:** Configured combinations of groups may save bytes; a flat list of unrelated
+    group names need not. Trees may reduce responses while adding links and
+    tree descriptions to publisher metadata. Subset cover may leave the client
+    without reusable keys for some later articles, requiring another unlock.
+    Report metadata bytes, response bytes and additional unlocks separately from
+    the time reach provided by chains.
+  - **Reference authoring policy:** Selected chain supply defaults to one item
+    wrap at the render period; `chainItemSlots` explicitly adds alternatives and
+    `chainWindows` independently selects supply. Ordinary slots are unchanged.
+    Real rollover/denial/cache/projection checks and the
+    [saved byte comparison](js/evidence-benchmarks/chain-keys-wire-cost/README.md#t0-item-policy-saved-genuine-output)
+    cover this choice. A next-window key alone cannot open an old-window wrap;
+    old matching capability, authorized recovery or another complete route is
+    still required. This changes no profile's required support.
+  - **Boundary:** Preserve sparse article membership and request selection.
+    No new group-set wire object, tree format or subset-cover profile follows
+    from a size estimate alone.
+
+- **Recipient-grant interoperability evidence** [optional profile, verification]
+  - **Current state:** The [recipient-grant specification](docs/spec-profile--recipient-grant-unlock.md)
+    defines an optional profile, with a JavaScript reference implementation.
+    Shared recipient-profile conformance is not established.
+  - **Confirmed gap:** The shared index has no recipient-grant scenario or
+    support declaration. Existing signed-grant, issuer, client, browser-host
+    and profile tests provide implementation evidence; the index gap does not
+    establish a missing implementation test.
+  - **Remaining work:** Compare that existing evidence with the specification's
+    [Section 6 requirements](docs/spec-profile--recipient-grant-unlock.md#6-conformance-boundary),
+    map it into the [evidence index](verification/claim-index/README.md), and
+    identify any uncovered requirement explicitly before adding tests. No
+    specific missing behavioral test has been established here.
+
+- **Reference crypto-provider portability** [JavaScript, ports]
+  - **Current state:** `js/core-shared/cryptoProvider.js` captures the host
+    WebCrypto `subtle` object at module load. `js/PORTING.md` specifies
+    operation and stable error-code behavior for ports, not a replaceable
+    provider interface or English exception text.
+  - **Remaining work:** Establish whether a supported reference-port use case
+    needs provider injection. If so, define and test that reference API at the
+    JavaScript boundary. This is not a protocol or wire-format requirement.
+
+## Deployment work outside the protocol
+
+The [recipient-grant specification](docs/spec-profile--recipient-grant-unlock.md)
+defines the optional unlock contract for link sharing. Grant issuance services,
+share UI, link carriage and storage are host deployment choices outside that
+binding. The JavaScript reference provides implementation evidence; deployed
+browser and issuer-session integration remain deployment work.
+
+Publisher signing-key activation, overlap and retirement follow the
+[core registration rules](docs/spec--core-protocol.md); issuer opening-key
+rotation follows [sealed key envelopes](docs/spec--sealed-key-envelopes.md).
+Client-bound key lifetime and replacement follow
+[response binding](docs/spec--response-binding.md). Deployments handle product
+provisioning, authenticated administration,
+recovery and retention. Those responsibilities do not imply missing DCA
+management messages.
+
+Ports and integrations do not change protocol requirements or establish
+interoperability by themselves. The
+[specification overview](docs/spec---overview.md#proposals) records individual
+proposal statuses, and the [evidence index](verification/claim-index/README.md)
+records what has actually been demonstrated.
+
+## Direction
+
+- Keep [profile composition](docs/spec--profiles.md#11-composition-rules) explicit:
+  include every selected profile's dependencies and verify the duties for that
+  combination.
+- Maintain [reference slices](js/README.md#publisher-client-and-issuer-artifacts)
+  that implementers can copy without adopting a framework.
+- Use [vectors, fixtures, contracts and conformance lanes](verification/README.md#choose-evidence-by-the-boundary-under-test)
+  for evidence at the boundary being tested; bounded results do not imply
+  complete profile or deployment compatibility.
+- Prefer a small worked example that exposes intermediate values and lets an
+  implementer replace one stage at a time.

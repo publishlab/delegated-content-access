@@ -1,0 +1,82 @@
+#!/usr/bin/env bash
+# Opt-in Python conformance check, not part of the default suite.
+#
+# The default `node --test` run and `js/check` never fetch an interpreter and
+# never install a wheel, so the normal suite needs no network and no toolchain.
+# Use this script to run the Python side on purpose: every corpus set this
+# lane declares, through this lane's own operation bridge.
+#
+#   ./check                     # every corpus set this lane declares
+#   ./check --record <file>     # also write this run's lane record to that file
+#   ./check --version <v>       # default, all or a token of ../versions; one run per token
+#
+# The corpus runs once per selected runtime version, through run_lane_versions
+# in ../../_shared/driver-steps.sh. For each version this script installs it
+# through ../install-toolchain --version, prints its banner and records the
+# version the installed binary reports. bridge.json's prepare step and the
+# answering process install and run the same version, because DCA_VERSION
+# carries the token to them.
+#
+# It needs network only for the first toolchain install (~36 MB interpreter,
+# ~5 MB of wheels). After that everything here runs with no egress at all, which
+# is why it is never wired into the suite: run it by hand on a machine that has
+# network once, then forever offline. Nothing is installed system-wide, and
+# bytecode caches go to the cache dir rather than beside the sources, so a
+# checkout never carries build output.
+#
+# Exit codes, the three ../../README.md names:
+#   0  every corpus set this lane was asked held
+#   1  the bridge answered inside the contract and answered wrongly
+#   2  a set verified nothing, no usable toolchain was found, or --version
+#      names a token ../versions does not list
+set -euo pipefail
+
+HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
+# The corpus-set driver step this check is built from.
+# shellcheck source=../../_shared/driver-steps.sh
+. "$HERE/../../_shared/driver-steps.sh"
+
+# The name this lane writes into a record. The cross-lane aggregator keys
+# every comparison it makes on that name.
+DCA_LANE=python/cryptography
+# The file a record goes to. It stays empty until --record names a file, and
+# no record is written while it stays empty.
+DCA_RECORD=""
+# Which runtime versions run: --version, else DCA_VERSION, else default.
+DCA_VERSION_SELECTION="${DCA_VERSION:-default}"
+
+while [ $# -gt 0 ]; do
+    case "$1" in
+        --record)
+            [ $# -ge 2 ] || { echo "--record needs a file path to write the lane record to" >&2; exit 2; }
+            DCA_RECORD="$2"; shift 2 ;;
+        --version)
+            [ $# -ge 2 ] || { echo "--version needs default, all or a token of $HERE/../versions" >&2; exit 2; }
+            DCA_VERSION_SELECTION="$2"; shift 2 ;;
+        *)
+            echo "python/cryptography/check takes --record <file> and --version <v> and nothing else:" >&2
+            echo "it always answers the whole case corpus through the driver." >&2
+            exit 2 ;;
+    esac
+done
+
+# Installs one version, prints its banner and sets DCA_RUNTIME_OBSERVED from
+# what the installed binary says, which is what the record carries.
+lane_runtime() {
+    local base python
+    if ! base="$("$HERE/../install-toolchain" --version "$1")"; then
+        echo "no Python toolchain for version $1." >&2
+        return 1
+    fi
+    python="$base/bin/python3"
+    if [ ! -x "$python" ]; then
+        echo "installer named $base, which holds no executable python3 binary." >&2
+        return 1
+    fi
+    echo "== $("$python" -VV | head -1) ==" >&2
+    DCA_RUNTIME_OBSERVED="$("$python" -c 'import platform; print(platform.python_version())')" || return 1
+}
+
+run_lane_versions "$HERE/.."
+exit "$DCA_LANE_STATUS"

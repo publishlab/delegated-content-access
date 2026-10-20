@@ -1,0 +1,70 @@
+{
+  "cases": [
+    {
+      "id": "integer",
+      "admitted": true,
+      "geometry": {
+        "chainsPerDay": 2,
+        "periodMinutes": 60,
+        "windowMinutes": 720,
+        "positionsPerWindow": 12
+      }
+    },
+    {
+      "id": "chains-decimal",
+      "admitted": true,
+      "geometry": {
+        "chainsPerDay": 2,
+        "periodMinutes": 60,
+        "windowMinutes": 720,
+        "positionsPerWindow": 12
+      }
+    },
+    {
+      "id": "chains-exponent",
+      "admitted": true,
+      "geometry": {
+        "chainsPerDay": 2,
+        "periodMinutes": 60,
+        "windowMinutes": 720,
+        "positionsPerWindow": 12
+      }
+    },
+    {
+      "id": "minutes-decimal",
+      "admitted": true,
+      "geometry": {
+        "chainsPerDay": 2,
+        "periodMinutes": 60,
+        "windowMinutes": 720,
+        "positionsPerWindow": 12
+      }
+    },
+    {
+      "id": "minutes-exponent",
+      "admitted": true,
+      "geometry": {
+        "chainsPerDay": 2,
+        "periodMinutes": 60,
+        "windowMinutes": 720,
+        "positionsPerWindow": 12
+      }
+    },
+    {
+      "id": "chains-fraction",
+      "admitted": false
+    },
+    {
+      "id": "minutes-fraction",
+      "admitted": false
+    },
+    {
+      "id": "chains-string",
+      "admitted": false
+    },
+    {
+      "id": "minutes-string",
+      "admitted": false
+    }
+  ]
+}

@@ -1,0 +1,24 @@
+{
+  "root": "js",
+  "role": "client",
+  "layers": {
+    "core": {
+      "paths": [
+        "core-shared/*.js",
+        "core-shared--client-issuer/*.js",
+        "core-shared--client-publisher/*.js",
+        "core-client/*.js"
+      ]
+    },
+    "adapters": {
+      "paths": [
+        "adapter-client/*.js"
+      ]
+    },
+    "integration": {
+      "paths": [
+        "integration-client/*.js"
+      ]
+    }
+  }
+}

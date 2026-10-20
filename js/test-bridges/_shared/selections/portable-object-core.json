@@ -1,0 +1,13 @@
+{
+  "version": 1,
+  "testCount": 2,
+  "tests": [{ "file": "test-reference/core-shared/dca-request.test.js" }],
+  "required": [
+    { "module": "core-shared--client-issuer/DcaRequest.js", "exports": ["parseDcaRequest"] },
+    {
+      "module": "core-shared--client-issuer/DcaRequest.js",
+      "class": "DcaRequest",
+      "members": ["toObject"]
+    }
+  ]
+}

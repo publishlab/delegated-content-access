@@ -2,8 +2,7 @@
 // uncompressed form only, through either entry, so the 33-byte SEC 1 encoding
 // is recovered here as `04 || X || Y` and handed to the library's own import,
 // which still validates the point. This implements SEC 1 v2.0 section 2.3.4, and it
-// follows the decoding sketch in docs/spec-proposal--compact-ecdh-envelope.md line
-// for line.
+// follows the decoding sketch in ../README.md#decoding-sketch line for line.
 //
 // Every refusal is thrown as a CryptographicException, the same exception type the
 // library throws when it refuses, so a caller sees one kind of failure whether the

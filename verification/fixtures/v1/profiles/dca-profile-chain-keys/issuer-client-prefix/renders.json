@@ -1,0 +1,188 @@
+{
+  "format": "chain-keys-prefix/v1",
+  "description": "The markup delivery of each render, in render order. `resourceJWT` repeats the token in the markup so a regeneration can retain its signature without parsing markup.",
+  "renders": [
+    {
+      "t": "251023T1145",
+      "relation": "preceding window",
+      "renderedAt": "2025-10-23T11:45:00.000Z",
+      "publisherOrigin": "https://www.news-site.example",
+      "wrapped": [
+        "251023T1145"
+      ],
+      "suppliedChain": [
+        "251023T1145"
+      ],
+      "resourceJWT": "eyJhbGciOiJFUzI1NiIsInR5cCI6IkpXVCIsImtpZCI6InNpZ24tMjAyNS0xMCJ9.eyJyZW5kZXJJZCI6InVVVDU3Nk8zNEJvR0twZ1hwZE11Y3ciLCJvcmlnaW4iOiJodHRwczovL3d3dy5uZXdzLXNpdGUuZXhhbXBsZSIsImlzc3VlZEF0IjoiMjAyNS0xMC0yM1QxMTo0NTowMC4wMDBaIiwicmVzb3VyY2VJZCI6ImJ1bGxldGluLTI1MTAyM1QxMTQ1IiwiZGF0YSI6eyJzZWN0aW9uIjoiaGFyYm91ciJ9fQ.T8i2SrMYhRaR2G6SVOw2038WrfgCJ0U5xmGkAVB2n9nXDFYy7ZHMhnT9NIhzALprU3m4rxFh4yugu1ab4AKC3A",
+      "markup": "<script type=\"application/json\" class=\"dca-data\">{\"version\":\"1\",\"resource\":{\"renderId\":\"uUT576O34BoGKpgXpdMucw\",\"origin\":\"https://www.news-site.example\",\"issuedAt\":\"2025-10-23T11:45:00.000Z\",\"resourceId\":\"bulletin-251023T1145\",\"data\":{\"section\":\"harbour\"}},\"resourceJWT\":\"eyJhbGciOiJFUzI1NiIsInR5cCI6IkpXVCIsImtpZCI6InNpZ24tMjAyNS0xMCJ9.eyJyZW5kZXJJZCI6InVVVDU3Nk8zNEJvR0twZ1hwZE11Y3ciLCJvcmlnaW4iOiJodHRwczovL3d3dy5uZXdzLXNpdGUuZXhhbXBsZSIsImlzc3VlZEF0IjoiMjAyNS0xMC0yM1QxMTo0NTowMC4wMDBaIiwicmVzb3VyY2VJZCI6ImJ1bGxldGluLTI1MTAyM1QxMTQ1IiwiZGF0YSI6eyJzZWN0aW9uIjoiaGFyYm91ciJ9fQ.T8i2SrMYhRaR2G6SVOw2038WrfgCJ0U5xmGkAVB2n9nXDFYy7ZHMhnT9NIhzALprU3m4rxFh4yugu1ab4AKC3A\",\"periodGeometry\":{\"chainsPerDay\":2,\"periodMinutes\":15},\"contentData\":{\"bodytext\":{\"contentType\":\"text/html\",\"keys\":{\"premium\":[{\"t\":\"251023T1145\",\"nonce\":\"TFkjME8nXOC96pSh\",\"key\":\"qmqrnTtlqooc59W-UEzFnjCqxLMJg_2tjb61dlKCxWY\"}]}}},\"issuerData\":{\"paywall_subscription_service\":{\"sealed\":{\"chainKeys\":{\"premium\":{\"251023T1145\":\"BJeOoI6vh-uowlT5yoYz0SiVGCthkoppmg5hSMhlFgsl6oPu7ythZK3P1RqSOn3km-x4fVf3Q-GDDFMGHSfcFUXT7HE5yvCNyaDUubKZASY3tng-qUThozxqlKX0g7UG_SY_oQKvNmRxcwOztQ\"}}},\"keyId\":\"2025-10\"}}}</script>\n<script type=\"application/json\" class=\"dca-sealed-content\">\n{\"bodytext\":\"iAk48639DCbyjrZQcOaV-sYHu86CRLMPNStWwvmp4M0XNMvsTmU0byiwpkDU2R-o4n2hOOoQar6Qa6-D-L_S\"}\n</script>"
+    },
+    {
+      "t": "251023T1200",
+      "relation": "prefix",
+      "renderedAt": "2025-10-23T12:00:00.000Z",
+      "publisherOrigin": "https://www.news-site.example",
+      "wrapped": [
+        "251023T1200"
+      ],
+      "suppliedChain": [
+        "251023T2345"
+      ],
+      "resourceJWT": "eyJhbGciOiJFUzI1NiIsInR5cCI6IkpXVCIsImtpZCI6InNpZ24tMjAyNS0xMCJ9.eyJyZW5kZXJJZCI6IkFWWVp3bXZzNDhnZXhPMWZPcmU3QWciLCJvcmlnaW4iOiJodHRwczovL3d3dy5uZXdzLXNpdGUuZXhhbXBsZSIsImlzc3VlZEF0IjoiMjAyNS0xMC0yM1QxMjowMDowMC4wMDBaIiwicmVzb3VyY2VJZCI6ImJ1bGxldGluLTI1MTAyM1QxMjAwIiwiZGF0YSI6eyJzZWN0aW9uIjoiaGFyYm91ciJ9fQ.79-fVRmFS7jcoEdNM75l2naoVPCA-tVXkZMafaM8G2KHH3BSHlnr5Kk437UBbmdJCKMTvXQUKwaznYNtHKrGkw",
+      "markup": "<script type=\"application/json\" class=\"dca-data\">{\"version\":\"1\",\"resource\":{\"renderId\":\"AVYZwmvs48gexO1fOre7Ag\",\"origin\":\"https://www.news-site.example\",\"issuedAt\":\"2025-10-23T12:00:00.000Z\",\"resourceId\":\"bulletin-251023T1200\",\"data\":{\"section\":\"harbour\"}},\"resourceJWT\":\"eyJhbGciOiJFUzI1NiIsInR5cCI6IkpXVCIsImtpZCI6InNpZ24tMjAyNS0xMCJ9.eyJyZW5kZXJJZCI6IkFWWVp3bXZzNDhnZXhPMWZPcmU3QWciLCJvcmlnaW4iOiJodHRwczovL3d3dy5uZXdzLXNpdGUuZXhhbXBsZSIsImlzc3VlZEF0IjoiMjAyNS0xMC0yM1QxMjowMDowMC4wMDBaIiwicmVzb3VyY2VJZCI6ImJ1bGxldGluLTI1MTAyM1QxMjAwIiwiZGF0YSI6eyJzZWN0aW9uIjoiaGFyYm91ciJ9fQ.79-fVRmFS7jcoEdNM75l2naoVPCA-tVXkZMafaM8G2KHH3BSHlnr5Kk437UBbmdJCKMTvXQUKwaznYNtHKrGkw\",\"periodGeometry\":{\"chainsPerDay\":2,\"periodMinutes\":15},\"contentData\":{\"bodytext\":{\"contentType\":\"text/html\",\"keys\":{\"premium\":[{\"t\":\"251023T1200\",\"nonce\":\"c5Rt_ESO97y7HFCl\",\"key\":\"eF3MdABYYh7H0CRJ5NfubEW-pLY9Sr_4hRtjeaI_mdc\"}]}}},\"issuerData\":{\"paywall_subscription_service\":{\"sealed\":{\"chainKeys\":{\"premium\":{\"251023T2345\":\"BPQ1vmXDPS_1WjiS4WSzOhlgfc0QLUEL3uHOjxmPh0uwKJ5OYa-CSmxTf5AtcWAXYJ1QF1gcYtH0-2PmaD9F3nLZGK_pWklZcVsCv6R-e-wm-pGlez3A03jhIPiKizQCk01fV2AJdGoSJQ6cIA\"}}},\"keyId\":\"2025-10\"}}}</script>\n<script type=\"application/json\" class=\"dca-sealed-content\">\n{\"bodytext\":\"JlUq5fXb2Yx1NbwtNpWMuaRsV6vfxMlO1UtOhJVQzfF2MIrAR2Svglj9G4g7gTaj5nsCwBekEgBbjigi3bdD\"}\n</script>"
+    },
+    {
+      "t": "251023T1215",
+      "relation": "prefix",
+      "renderedAt": "2025-10-23T12:15:00.000Z",
+      "publisherOrigin": "https://www.news-site.example",
+      "wrapped": [
+        "251023T1215"
+      ],
+      "suppliedChain": [
+        "251023T2345"
+      ],
+      "resourceJWT": "eyJhbGciOiJFUzI1NiIsInR5cCI6IkpXVCIsImtpZCI6InNpZ24tMjAyNS0xMCJ9.eyJyZW5kZXJJZCI6IjdtTThsdHJwaUFvc2FxZTZZNlV5SEEiLCJvcmlnaW4iOiJodHRwczovL3d3dy5uZXdzLXNpdGUuZXhhbXBsZSIsImlzc3VlZEF0IjoiMjAyNS0xMC0yM1QxMjoxNTowMC4wMDBaIiwicmVzb3VyY2VJZCI6ImJ1bGxldGluLTI1MTAyM1QxMjE1IiwiZGF0YSI6eyJzZWN0aW9uIjoiaGFyYm91ciJ9fQ.B2Ih1J1cs2C_xdehueCQm8VfdatRhYeX9mKaR8BYfKYtSnbpC7YqxjUeh1EpUj_ugCHdGR7DfAySu4E0IsWp6w",
+      "markup": "<script type=\"application/json\" class=\"dca-data\">{\"version\":\"1\",\"resource\":{\"renderId\":\"7mM8ltrpiAosaqe6Y6UyHA\",\"origin\":\"https://www.news-site.example\",\"issuedAt\":\"2025-10-23T12:15:00.000Z\",\"resourceId\":\"bulletin-251023T1215\",\"data\":{\"section\":\"harbour\"}},\"resourceJWT\":\"eyJhbGciOiJFUzI1NiIsInR5cCI6IkpXVCIsImtpZCI6InNpZ24tMjAyNS0xMCJ9.eyJyZW5kZXJJZCI6IjdtTThsdHJwaUFvc2FxZTZZNlV5SEEiLCJvcmlnaW4iOiJodHRwczovL3d3dy5uZXdzLXNpdGUuZXhhbXBsZSIsImlzc3VlZEF0IjoiMjAyNS0xMC0yM1QxMjoxNTowMC4wMDBaIiwicmVzb3VyY2VJZCI6ImJ1bGxldGluLTI1MTAyM1QxMjE1IiwiZGF0YSI6eyJzZWN0aW9uIjoiaGFyYm91ciJ9fQ.B2Ih1J1cs2C_xdehueCQm8VfdatRhYeX9mKaR8BYfKYtSnbpC7YqxjUeh1EpUj_ugCHdGR7DfAySu4E0IsWp6w\",\"periodGeometry\":{\"chainsPerDay\":2,\"periodMinutes\":15},\"contentData\":{\"bodytext\":{\"contentType\":\"text/html\",\"keys\":{\"premium\":[{\"t\":\"251023T1215\",\"nonce\":\"fSCLJLYO088lqmRP\",\"key\":\"J-KGShioa7be73yxHpJhrIpyR3NRQaJE7R6x8SYfLMM\"}]}}},\"issuerData\":{\"paywall_subscription_service\":{\"sealed\":{\"chainKeys\":{\"premium\":{\"251023T2345\":\"BD9cp647xmGbXV_SB9L4O7eAf4IK5ZyUzInFeG_9d0wNg3m7MQI23sBAGrRWgQhHGwmqNQ31LcSxsf7FxNhQvYOTGmtnzfyKr7dq6DdWyIr4-dxsntkWnLXKki-HGzpJohUTNTkxAlakafNcNA\"}}},\"keyId\":\"2025-10\"}}}</script>\n<script type=\"application/json\" class=\"dca-sealed-content\">\n{\"bodytext\":\"qkIQT8J9AX8Z_7mAFVWdft3n6jsxw-0skrfXpk72-0i8FCnyGHFfnnMP_xDbNNmjx5_BeDtnBKLexnXR4l0m\"}\n</script>"
+    },
+    {
+      "t": "251023T1230",
+      "relation": "prefix",
+      "renderedAt": "2025-10-23T12:30:00.000Z",
+      "publisherOrigin": "https://www.news-site.example",
+      "wrapped": [
+        "251023T1230"
+      ],
+      "suppliedChain": [
+        "251023T2345"
+      ],
+      "resourceJWT": "eyJhbGciOiJFUzI1NiIsInR5cCI6IkpXVCIsImtpZCI6InNpZ24tMjAyNS0xMCJ9.eyJyZW5kZXJJZCI6IlFkQk9CV1NMcWszZzY4UG1Oek1wUUEiLCJvcmlnaW4iOiJodHRwczovL3d3dy5uZXdzLXNpdGUuZXhhbXBsZSIsImlzc3VlZEF0IjoiMjAyNS0xMC0yM1QxMjozMDowMC4wMDBaIiwicmVzb3VyY2VJZCI6ImJ1bGxldGluLTI1MTAyM1QxMjMwIiwiZGF0YSI6eyJzZWN0aW9uIjoiaGFyYm91ciJ9fQ.gI_SuEczr_jtF5v_93xUGOWyj-Ik3m0SEgwW6AEIek7DUgqsXkMFWcIEOQGOV6antJg8bmK85zTyXD665O54Rg",
+      "markup": "<script type=\"application/json\" class=\"dca-data\">{\"version\":\"1\",\"resource\":{\"renderId\":\"QdBOBWSLqk3g68PmNzMpQA\",\"origin\":\"https://www.news-site.example\",\"issuedAt\":\"2025-10-23T12:30:00.000Z\",\"resourceId\":\"bulletin-251023T1230\",\"data\":{\"section\":\"harbour\"}},\"resourceJWT\":\"eyJhbGciOiJFUzI1NiIsInR5cCI6IkpXVCIsImtpZCI6InNpZ24tMjAyNS0xMCJ9.eyJyZW5kZXJJZCI6IlFkQk9CV1NMcWszZzY4UG1Oek1wUUEiLCJvcmlnaW4iOiJodHRwczovL3d3dy5uZXdzLXNpdGUuZXhhbXBsZSIsImlzc3VlZEF0IjoiMjAyNS0xMC0yM1QxMjozMDowMC4wMDBaIiwicmVzb3VyY2VJZCI6ImJ1bGxldGluLTI1MTAyM1QxMjMwIiwiZGF0YSI6eyJzZWN0aW9uIjoiaGFyYm91ciJ9fQ.gI_SuEczr_jtF5v_93xUGOWyj-Ik3m0SEgwW6AEIek7DUgqsXkMFWcIEOQGOV6antJg8bmK85zTyXD665O54Rg\",\"periodGeometry\":{\"chainsPerDay\":2,\"periodMinutes\":15},\"contentData\":{\"bodytext\":{\"contentType\":\"text/html\",\"keys\":{\"premium\":[{\"t\":\"251023T1230\",\"nonce\":\"Vn-5ktBOlSB0XD6V\",\"key\":\"aawyuturyNYJ_DM4BIcXaEiIah0oI-VNXcmwdFkaOCU\"}]}}},\"issuerData\":{\"paywall_subscription_service\":{\"sealed\":{\"chainKeys\":{\"premium\":{\"251023T2345\":\"BEVtHEjYwaKS2pN909JDQ353Bb_MVgz2dd46ve6aOrnt4ZUeD5LXEKeEYKgVfqxSFxTtdveSa6lcuF8d_7Rahc2HtHE_LtCegLkmXy-1_GYSXWAQQv9oZePTtvPK4h2_ApNZiReJj_FUXqfIFQ\"}}},\"keyId\":\"2025-10\"}}}</script>\n<script type=\"application/json\" class=\"dca-sealed-content\">\n{\"bodytext\":\"ft0RX43yX_82EevNH_qBoVXcJ0-ZwdVzDxcayMUn25Uhs8zJ6XEKk2wy4Xx48KT1p1JEZhFrEdWT9e3j_T_c\"}\n</script>"
+    },
+    {
+      "t": "251023T1245",
+      "relation": "prefix",
+      "renderedAt": "2025-10-23T12:45:00.000Z",
+      "publisherOrigin": "https://www.news-site.example",
+      "wrapped": [
+        "251023T1245"
+      ],
+      "suppliedChain": [
+        "251023T2345"
+      ],
+      "resourceJWT": "eyJhbGciOiJFUzI1NiIsInR5cCI6IkpXVCIsImtpZCI6InNpZ24tMjAyNS0xMCJ9.eyJyZW5kZXJJZCI6Ilp3ZnNQOW9JZTdoMFhpeTR5UV9YSUEiLCJvcmlnaW4iOiJodHRwczovL3d3dy5uZXdzLXNpdGUuZXhhbXBsZSIsImlzc3VlZEF0IjoiMjAyNS0xMC0yM1QxMjo0NTowMC4wMDBaIiwicmVzb3VyY2VJZCI6ImJ1bGxldGluLTI1MTAyM1QxMjQ1IiwiZGF0YSI6eyJzZWN0aW9uIjoiaGFyYm91ciJ9fQ.Fwt4mcD2NzfaFP4U0Xot4qs2n71se5yY03D0XAaX9s7GXBiIqJy3k2r3BUY-iSWTwYDIjXb2utV1yY_DM8kWyw",
+      "markup": "<script type=\"application/json\" class=\"dca-data\">{\"version\":\"1\",\"resource\":{\"renderId\":\"ZwfsP9oIe7h0Xiy4yQ_XIA\",\"origin\":\"https://www.news-site.example\",\"issuedAt\":\"2025-10-23T12:45:00.000Z\",\"resourceId\":\"bulletin-251023T1245\",\"data\":{\"section\":\"harbour\"}},\"resourceJWT\":\"eyJhbGciOiJFUzI1NiIsInR5cCI6IkpXVCIsImtpZCI6InNpZ24tMjAyNS0xMCJ9.eyJyZW5kZXJJZCI6Ilp3ZnNQOW9JZTdoMFhpeTR5UV9YSUEiLCJvcmlnaW4iOiJodHRwczovL3d3dy5uZXdzLXNpdGUuZXhhbXBsZSIsImlzc3VlZEF0IjoiMjAyNS0xMC0yM1QxMjo0NTowMC4wMDBaIiwicmVzb3VyY2VJZCI6ImJ1bGxldGluLTI1MTAyM1QxMjQ1IiwiZGF0YSI6eyJzZWN0aW9uIjoiaGFyYm91ciJ9fQ.Fwt4mcD2NzfaFP4U0Xot4qs2n71se5yY03D0XAaX9s7GXBiIqJy3k2r3BUY-iSWTwYDIjXb2utV1yY_DM8kWyw\",\"periodGeometry\":{\"chainsPerDay\":2,\"periodMinutes\":15},\"contentData\":{\"bodytext\":{\"contentType\":\"text/html\",\"keys\":{\"premium\":[{\"t\":\"251023T1245\",\"nonce\":\"4vYJvUeEoSQtnVWv\",\"key\":\"AdqG0WD4nqFuWPxn6X0sTMGWDKGmJfrKTRVfTaq9aSU\"}]}}},\"issuerData\":{\"paywall_subscription_service\":{\"sealed\":{\"chainKeys\":{\"premium\":{\"251023T2345\":\"BCOQA7yLm6mPPGkUOhs6NADCwQqo5M-QdJvkrchEy9Bd3Q9oljazyRVlAZOK9mB8uLb9CzMiaCcNQL2PPnf2gSrbC-owpjz_vFxL_8te9AW3WoMlXN-7xAnHHX8e5BIYlZx_TQVpJOLOFK10wA\"}}},\"keyId\":\"2025-10\"}}}</script>\n<script type=\"application/json\" class=\"dca-sealed-content\">\n{\"bodytext\":\"xCzj8Ha6haj3Tpzi3wMzwm2VbjFwc1FL-PCvO7Z28hlXZyZWLHKq_1e7nqAIRdcY1s9AKJ2XvVZdTRx4ZkKJ\"}\n</script>"
+    },
+    {
+      "t": "251023T1300",
+      "relation": "prefix",
+      "renderedAt": "2025-10-23T13:00:00.000Z",
+      "publisherOrigin": "https://www.news-site.example",
+      "wrapped": [
+        "251023T1300"
+      ],
+      "suppliedChain": [
+        "251023T2345"
+      ],
+      "resourceJWT": "eyJhbGciOiJFUzI1NiIsInR5cCI6IkpXVCIsImtpZCI6InNpZ24tMjAyNS0xMCJ9.eyJyZW5kZXJJZCI6IlhpLTVtMjk0RS1QcnduakZ4NGFrU3ciLCJvcmlnaW4iOiJodHRwczovL3d3dy5uZXdzLXNpdGUuZXhhbXBsZSIsImlzc3VlZEF0IjoiMjAyNS0xMC0yM1QxMzowMDowMC4wMDBaIiwicmVzb3VyY2VJZCI6ImJ1bGxldGluLTI1MTAyM1QxMzAwIiwiZGF0YSI6eyJzZWN0aW9uIjoiaGFyYm91ciJ9fQ.ot-rMHObNCnizADHQ0wzb2LbCGl5GuthWQELUpeXve5653DvaDJnQDY7sr9_a9YxknTx4gckHctlYnmGfkXlzw",
+      "markup": "<script type=\"application/json\" class=\"dca-data\">{\"version\":\"1\",\"resource\":{\"renderId\":\"Xi-5m294E-PrwnjFx4akSw\",\"origin\":\"https://www.news-site.example\",\"issuedAt\":\"2025-10-23T13:00:00.000Z\",\"resourceId\":\"bulletin-251023T1300\",\"data\":{\"section\":\"harbour\"}},\"resourceJWT\":\"eyJhbGciOiJFUzI1NiIsInR5cCI6IkpXVCIsImtpZCI6InNpZ24tMjAyNS0xMCJ9.eyJyZW5kZXJJZCI6IlhpLTVtMjk0RS1QcnduakZ4NGFrU3ciLCJvcmlnaW4iOiJodHRwczovL3d3dy5uZXdzLXNpdGUuZXhhbXBsZSIsImlzc3VlZEF0IjoiMjAyNS0xMC0yM1QxMzowMDowMC4wMDBaIiwicmVzb3VyY2VJZCI6ImJ1bGxldGluLTI1MTAyM1QxMzAwIiwiZGF0YSI6eyJzZWN0aW9uIjoiaGFyYm91ciJ9fQ.ot-rMHObNCnizADHQ0wzb2LbCGl5GuthWQELUpeXve5653DvaDJnQDY7sr9_a9YxknTx4gckHctlYnmGfkXlzw\",\"periodGeometry\":{\"chainsPerDay\":2,\"periodMinutes\":15},\"contentData\":{\"bodytext\":{\"contentType\":\"text/html\",\"keys\":{\"premium\":[{\"t\":\"251023T1300\",\"nonce\":\"zf5pmN9JyObeedOS\",\"key\":\"SvaWXWL7enWHS16pt0YCYcje-R-V9qO1YdpLLOkcP9M\"}]}}},\"issuerData\":{\"paywall_subscription_service\":{\"sealed\":{\"chainKeys\":{\"premium\":{\"251023T2345\":\"BOvnfXSt9maQQIk4wn6JvE_nkXFwsHKj3mARi90ojoUNAKxOka33zx_jqqYlRWQSAHR1bITKa6-1cAcJYnB5DcgYhD-krBVs5fwBF7I84xo1yVdZ5eCNNhoOxiCkG6VEOBQdy7xLtikejZo0_w\"}}},\"keyId\":\"2025-10\"}}}</script>\n<script type=\"application/json\" class=\"dca-sealed-content\">\n{\"bodytext\":\"CfCX309FddQKfudi3ONxpxUis7RKMpuZefQWps_ny4N6VWYsHdiBWisi2orDp-z7dn2gs9DMDqqVDChdSGRA\"}\n</script>"
+    },
+    {
+      "t": "251023T1315",
+      "relation": "prefix",
+      "renderedAt": "2025-10-23T13:15:00.000Z",
+      "publisherOrigin": "https://www.news-site.example",
+      "wrapped": [
+        "251023T1315"
+      ],
+      "suppliedChain": [
+        "251023T2345"
+      ],
+      "resourceJWT": "eyJhbGciOiJFUzI1NiIsInR5cCI6IkpXVCIsImtpZCI6InNpZ24tMjAyNS0xMCJ9.eyJyZW5kZXJJZCI6IllzbjFWT2dIQjdSRk5DT3JWdWktRWciLCJvcmlnaW4iOiJodHRwczovL3d3dy5uZXdzLXNpdGUuZXhhbXBsZSIsImlzc3VlZEF0IjoiMjAyNS0xMC0yM1QxMzoxNTowMC4wMDBaIiwicmVzb3VyY2VJZCI6ImJ1bGxldGluLTI1MTAyM1QxMzE1IiwiZGF0YSI6eyJzZWN0aW9uIjoiaGFyYm91ciJ9fQ.D2xbgqTOxSHiIVOn1ZleC7GJkaIjjlMqrSk1ZdQc9JPIphIw9HyDTT2-Jo6H1vWqtinaKtl27fUHHJpodOVGUw",
+      "markup": "<script type=\"application/json\" class=\"dca-data\">{\"version\":\"1\",\"resource\":{\"renderId\":\"Ysn1VOgHB7RFNCOrVui-Eg\",\"origin\":\"https://www.news-site.example\",\"issuedAt\":\"2025-10-23T13:15:00.000Z\",\"resourceId\":\"bulletin-251023T1315\",\"data\":{\"section\":\"harbour\"}},\"resourceJWT\":\"eyJhbGciOiJFUzI1NiIsInR5cCI6IkpXVCIsImtpZCI6InNpZ24tMjAyNS0xMCJ9.eyJyZW5kZXJJZCI6IllzbjFWT2dIQjdSRk5DT3JWdWktRWciLCJvcmlnaW4iOiJodHRwczovL3d3dy5uZXdzLXNpdGUuZXhhbXBsZSIsImlzc3VlZEF0IjoiMjAyNS0xMC0yM1QxMzoxNTowMC4wMDBaIiwicmVzb3VyY2VJZCI6ImJ1bGxldGluLTI1MTAyM1QxMzE1IiwiZGF0YSI6eyJzZWN0aW9uIjoiaGFyYm91ciJ9fQ.D2xbgqTOxSHiIVOn1ZleC7GJkaIjjlMqrSk1ZdQc9JPIphIw9HyDTT2-Jo6H1vWqtinaKtl27fUHHJpodOVGUw\",\"periodGeometry\":{\"chainsPerDay\":2,\"periodMinutes\":15},\"contentData\":{\"bodytext\":{\"contentType\":\"text/html\",\"keys\":{\"premium\":[{\"t\":\"251023T1315\",\"nonce\":\"YrGHJb80sxlTSbHV\",\"key\":\"VkwJKesVqSqp5er4Jebz0oGTocWx1cQ9ywNHEDFOhNI\"}]}}},\"issuerData\":{\"paywall_subscription_service\":{\"sealed\":{\"chainKeys\":{\"premium\":{\"251023T2345\":\"BGep9t8tmUV_61utLtN_vA0GIc1nI7pNKjpGkqNvf58LLXYgnTCyJtQYRO-24OqsW-8iuFScEy9r53N4MjwGMkH-sCOT2I74GrNO-9587v_SH-oK4txcgiDDY2hFO-03scY4_9LAchD04rpTPw\"}}},\"keyId\":\"2025-10\"}}}</script>\n<script type=\"application/json\" class=\"dca-sealed-content\">\n{\"bodytext\":\"cJsZYRfA4cNkLwWhIm7zJ0xV8Pg7_nr1ke_fvUeCcO4FOO3tNUTpY-IUmSsHKC4Hjo5MbQGryzxarMcg5_xW\"}\n</script>"
+    },
+    {
+      "t": "251023T1330",
+      "relation": "prefix",
+      "renderedAt": "2025-10-23T13:30:00.000Z",
+      "publisherOrigin": "https://www.news-site.example",
+      "wrapped": [
+        "251023T1330"
+      ],
+      "suppliedChain": [
+        "251023T2345"
+      ],
+      "resourceJWT": "eyJhbGciOiJFUzI1NiIsInR5cCI6IkpXVCIsImtpZCI6InNpZ24tMjAyNS0xMCJ9.eyJyZW5kZXJJZCI6ImVCWWN2dlV5YnA2V1JaYU16MkRPb3ciLCJvcmlnaW4iOiJodHRwczovL3d3dy5uZXdzLXNpdGUuZXhhbXBsZSIsImlzc3VlZEF0IjoiMjAyNS0xMC0yM1QxMzozMDowMC4wMDBaIiwicmVzb3VyY2VJZCI6ImJ1bGxldGluLTI1MTAyM1QxMzMwIiwiZGF0YSI6eyJzZWN0aW9uIjoiaGFyYm91ciJ9fQ.fyc-G8WTa__A8gCR3ELP0KZoc3GUio_F2lJGLUbKBGPVLkeMb3EHZkuQdrQg9yhPX24CeoGmo_SPE5cFQDlQJQ",
+      "markup": "<script type=\"application/json\" class=\"dca-data\">{\"version\":\"1\",\"resource\":{\"renderId\":\"eBYcvvUybp6WRZaMz2DOow\",\"origin\":\"https://www.news-site.example\",\"issuedAt\":\"2025-10-23T13:30:00.000Z\",\"resourceId\":\"bulletin-251023T1330\",\"data\":{\"section\":\"harbour\"}},\"resourceJWT\":\"eyJhbGciOiJFUzI1NiIsInR5cCI6IkpXVCIsImtpZCI6InNpZ24tMjAyNS0xMCJ9.eyJyZW5kZXJJZCI6ImVCWWN2dlV5YnA2V1JaYU16MkRPb3ciLCJvcmlnaW4iOiJodHRwczovL3d3dy5uZXdzLXNpdGUuZXhhbXBsZSIsImlzc3VlZEF0IjoiMjAyNS0xMC0yM1QxMzozMDowMC4wMDBaIiwicmVzb3VyY2VJZCI6ImJ1bGxldGluLTI1MTAyM1QxMzMwIiwiZGF0YSI6eyJzZWN0aW9uIjoiaGFyYm91ciJ9fQ.fyc-G8WTa__A8gCR3ELP0KZoc3GUio_F2lJGLUbKBGPVLkeMb3EHZkuQdrQg9yhPX24CeoGmo_SPE5cFQDlQJQ\",\"periodGeometry\":{\"chainsPerDay\":2,\"periodMinutes\":15},\"contentData\":{\"bodytext\":{\"contentType\":\"text/html\",\"keys\":{\"premium\":[{\"t\":\"251023T1330\",\"nonce\":\"SIpd0FFsGT5a2MpY\",\"key\":\"4Sr_F6hukVRvPrs5FNsCWRgmhyohkxI5bTmoi1_Nkwc\"}]}}},\"issuerData\":{\"paywall_subscription_service\":{\"sealed\":{\"chainKeys\":{\"premium\":{\"251023T2345\":\"BCALDj85p12SoNIKwWj5DRzUnOLUgCzcCjBkJbxQ62bHL5RyRNw7KHozRTnHUx2eckcijcX3BFa9hqSyyWwO7jYxQJHHBVkcXbvMmHoJnmqVWNfEmdUhf4bbSpZgfQ2Mh_uGhx73v6ZkjIP8Bg\"}}},\"keyId\":\"2025-10\"}}}</script>\n<script type=\"application/json\" class=\"dca-sealed-content\">\n{\"bodytext\":\"WPb_l1gRGtiRzghmCDXWFMCxNNxC-BHlAXcTqlJjPI93sxCL9EFe6D6RGqSCHFosQYKuom_5cy6gb0FBRcvR\"}\n</script>"
+    },
+    {
+      "t": "251023T1345",
+      "relation": "prefix",
+      "renderedAt": "2025-10-23T13:45:00.000Z",
+      "publisherOrigin": "https://www.news-site.example",
+      "wrapped": [
+        "251023T1345"
+      ],
+      "suppliedChain": [
+        "251023T2345"
+      ],
+      "resourceJWT": "eyJhbGciOiJFUzI1NiIsInR5cCI6IkpXVCIsImtpZCI6InNpZ24tMjAyNS0xMCJ9.eyJyZW5kZXJJZCI6Im1wT2ctS25ZSWJRNDQ3TEtrS1V5TkEiLCJvcmlnaW4iOiJodHRwczovL3d3dy5uZXdzLXNpdGUuZXhhbXBsZSIsImlzc3VlZEF0IjoiMjAyNS0xMC0yM1QxMzo0NTowMC4wMDBaIiwicmVzb3VyY2VJZCI6ImJ1bGxldGluLTI1MTAyM1QxMzQ1IiwiZGF0YSI6eyJzZWN0aW9uIjoiaGFyYm91ciJ9fQ.cxEUBGVdLYZBV5P12iFzk89VBnqJQAJn7zfVM-TMP3mUFZJ0W7O-D9IhhzbbkDjAjrHa1xCitnmycSgTvkgCUw",
+      "markup": "<script type=\"application/json\" class=\"dca-data\">{\"version\":\"1\",\"resource\":{\"renderId\":\"mpOg-KnYIbQ447LKkKUyNA\",\"origin\":\"https://www.news-site.example\",\"issuedAt\":\"2025-10-23T13:45:00.000Z\",\"resourceId\":\"bulletin-251023T1345\",\"data\":{\"section\":\"harbour\"}},\"resourceJWT\":\"eyJhbGciOiJFUzI1NiIsInR5cCI6IkpXVCIsImtpZCI6InNpZ24tMjAyNS0xMCJ9.eyJyZW5kZXJJZCI6Im1wT2ctS25ZSWJRNDQ3TEtrS1V5TkEiLCJvcmlnaW4iOiJodHRwczovL3d3dy5uZXdzLXNpdGUuZXhhbXBsZSIsImlzc3VlZEF0IjoiMjAyNS0xMC0yM1QxMzo0NTowMC4wMDBaIiwicmVzb3VyY2VJZCI6ImJ1bGxldGluLTI1MTAyM1QxMzQ1IiwiZGF0YSI6eyJzZWN0aW9uIjoiaGFyYm91ciJ9fQ.cxEUBGVdLYZBV5P12iFzk89VBnqJQAJn7zfVM-TMP3mUFZJ0W7O-D9IhhzbbkDjAjrHa1xCitnmycSgTvkgCUw\",\"periodGeometry\":{\"chainsPerDay\":2,\"periodMinutes\":15},\"contentData\":{\"bodytext\":{\"contentType\":\"text/html\",\"keys\":{\"premium\":[{\"t\":\"251023T1345\",\"nonce\":\"Owk1ZKl_mv-7Bjt7\",\"key\":\"4cFySmKDtlm-zC2f5g2vcDiPVZnaCaXVOE9yqlha7II\"}]}}},\"issuerData\":{\"paywall_subscription_service\":{\"sealed\":{\"chainKeys\":{\"premium\":{\"251023T2345\":\"BF2P3OHLKM3hlEkTxTaStvD0b4ke8S3GEVbWxfBRG6eeCy_QxleqRmi2Knb23DkAS6YPeWxjMWYuEQJhRWpozOM1A4hzuhM_5Ctf7gam7Twp7bS_NShxtFKrjrKLo-jT6tCj1IaREwFmKh-5kg\"}}},\"keyId\":\"2025-10\"}}}</script>\n<script type=\"application/json\" class=\"dca-sealed-content\">\n{\"bodytext\":\"NJsCYGCpTSc_OEFpZUci0H08QtIrZPP7Y5qgh-PTwhWAfPnGCHvRYRtaafqtcwHu9qX1qmOL6tWU8hQxeYjX\"}\n</script>"
+    },
+    {
+      "t": "251023T1400",
+      "relation": "prefix",
+      "renderedAt": "2025-10-23T14:00:00.000Z",
+      "publisherOrigin": "https://www.news-site.example",
+      "wrapped": [
+        "251023T1400"
+      ],
+      "suppliedChain": [
+        "251023T2345"
+      ],
+      "resourceJWT": "eyJhbGciOiJFUzI1NiIsInR5cCI6IkpXVCIsImtpZCI6InNpZ24tMjAyNS0xMCJ9.eyJyZW5kZXJJZCI6ImxXYXJKRE1GdTJId2dHNnhNWFVJd2ciLCJvcmlnaW4iOiJodHRwczovL3d3dy5uZXdzLXNpdGUuZXhhbXBsZSIsImlzc3VlZEF0IjoiMjAyNS0xMC0yM1QxNDowMDowMC4wMDBaIiwicmVzb3VyY2VJZCI6ImJ1bGxldGluLTI1MTAyM1QxNDAwIiwiZGF0YSI6eyJzZWN0aW9uIjoiaGFyYm91ciJ9fQ.YNJXbIMbMQU-KmhO608zuvvjdAeFZQebbPj-xOF7U8oPpj3z6zr-X3hcOy9tanthhBqsuplAetD61-Hmrk21dQ",
+      "markup": "<script type=\"application/json\" class=\"dca-data\">{\"version\":\"1\",\"resource\":{\"renderId\":\"lWarJDMFu2HwgG6xMXUIwg\",\"origin\":\"https://www.news-site.example\",\"issuedAt\":\"2025-10-23T14:00:00.000Z\",\"resourceId\":\"bulletin-251023T1400\",\"data\":{\"section\":\"harbour\"}},\"resourceJWT\":\"eyJhbGciOiJFUzI1NiIsInR5cCI6IkpXVCIsImtpZCI6InNpZ24tMjAyNS0xMCJ9.eyJyZW5kZXJJZCI6ImxXYXJKRE1GdTJId2dHNnhNWFVJd2ciLCJvcmlnaW4iOiJodHRwczovL3d3dy5uZXdzLXNpdGUuZXhhbXBsZSIsImlzc3VlZEF0IjoiMjAyNS0xMC0yM1QxNDowMDowMC4wMDBaIiwicmVzb3VyY2VJZCI6ImJ1bGxldGluLTI1MTAyM1QxNDAwIiwiZGF0YSI6eyJzZWN0aW9uIjoiaGFyYm91ciJ9fQ.YNJXbIMbMQU-KmhO608zuvvjdAeFZQebbPj-xOF7U8oPpj3z6zr-X3hcOy9tanthhBqsuplAetD61-Hmrk21dQ\",\"periodGeometry\":{\"chainsPerDay\":2,\"periodMinutes\":15},\"contentData\":{\"bodytext\":{\"contentType\":\"text/html\",\"keys\":{\"premium\":[{\"t\":\"251023T1400\",\"nonce\":\"FP5HnHis5J7Bxfqs\",\"key\":\"SE9-smzFYt-EkkAe88UgzRuSPq5Zf-z6DNo43pPAuOE\"}]}}},\"issuerData\":{\"paywall_subscription_service\":{\"sealed\":{\"chainKeys\":{\"premium\":{\"251023T2345\":\"BM5jBS9_C9A_ppefrr1Z4IaIIXNh-VWLzJUJS07CMGKF65rjDYm9QG_CA10A6IGFdm5DeIxo5y6sBburCxFsjTKCbvQteukGEPP1CBbMfC4Ua4xIgV0KICmBorvu6sYcOujQ_DfJq-K1Hj2cQA\"}}},\"keyId\":\"2025-10\"}}}</script>\n<script type=\"application/json\" class=\"dca-sealed-content\">\n{\"bodytext\":\"crzh4N4GprjKjgc1ilo9gTTuyUmCsEbfGrr_iFLiLrTlE7ioeWFcbNK1DrhOzH8P8Rd42qwZAV6FoJOyfffX\"}\n</script>"
+    },
+    {
+      "t": "251023T1415",
+      "relation": "prefix",
+      "renderedAt": "2025-10-23T14:15:00.000Z",
+      "publisherOrigin": "https://www.news-site.example",
+      "wrapped": [
+        "251023T1415"
+      ],
+      "suppliedChain": [
+        "251023T2345"
+      ],
+      "resourceJWT": "eyJhbGciOiJFUzI1NiIsInR5cCI6IkpXVCIsImtpZCI6InNpZ24tMjAyNS0xMCJ9.eyJyZW5kZXJJZCI6ImdRNlU1OGQ0ejBja1l5WFQzbFkzVWciLCJvcmlnaW4iOiJodHRwczovL3d3dy5uZXdzLXNpdGUuZXhhbXBsZSIsImlzc3VlZEF0IjoiMjAyNS0xMC0yM1QxNDoxNTowMC4wMDBaIiwicmVzb3VyY2VJZCI6ImJ1bGxldGluLTI1MTAyM1QxNDE1IiwiZGF0YSI6eyJzZWN0aW9uIjoiaGFyYm91ciJ9fQ.XnpRjS6XRkAihvlVmFcKzBZ6_Wm-ox67WtEFIJoXK4pZPwE9M6i4EOGDF9AoHbmTk_-jTeES0BT9Lj_r0Lc0Gg",
+      "markup": "<script type=\"application/json\" class=\"dca-data\">{\"version\":\"1\",\"resource\":{\"renderId\":\"gQ6U58d4z0ckYyXT3lY3Ug\",\"origin\":\"https://www.news-site.example\",\"issuedAt\":\"2025-10-23T14:15:00.000Z\",\"resourceId\":\"bulletin-251023T1415\",\"data\":{\"section\":\"harbour\"}},\"resourceJWT\":\"eyJhbGciOiJFUzI1NiIsInR5cCI6IkpXVCIsImtpZCI6InNpZ24tMjAyNS0xMCJ9.eyJyZW5kZXJJZCI6ImdRNlU1OGQ0ejBja1l5WFQzbFkzVWciLCJvcmlnaW4iOiJodHRwczovL3d3dy5uZXdzLXNpdGUuZXhhbXBsZSIsImlzc3VlZEF0IjoiMjAyNS0xMC0yM1QxNDoxNTowMC4wMDBaIiwicmVzb3VyY2VJZCI6ImJ1bGxldGluLTI1MTAyM1QxNDE1IiwiZGF0YSI6eyJzZWN0aW9uIjoiaGFyYm91ciJ9fQ.XnpRjS6XRkAihvlVmFcKzBZ6_Wm-ox67WtEFIJoXK4pZPwE9M6i4EOGDF9AoHbmTk_-jTeES0BT9Lj_r0Lc0Gg\",\"periodGeometry\":{\"chainsPerDay\":2,\"periodMinutes\":15},\"contentData\":{\"bodytext\":{\"contentType\":\"text/html\",\"keys\":{\"premium\":[{\"t\":\"251023T1415\",\"nonce\":\"9W57jp0FPBi3_47O\",\"key\":\"e3oKZU9Pu8EonlcPkc1zMPoajLHESTIH3w1hnKNrBsM\"}]}}},\"issuerData\":{\"paywall_subscription_service\":{\"sealed\":{\"chainKeys\":{\"premium\":{\"251023T2345\":\"BGrvmPv5Xm0xzYHhmn8WKoFqHnNrlXE-5hfLhNE-AITTQTsGLvKgbbrJhL2vw9TU03mcKUa5FegGFeAdUqnvVZapDbntOYtimX0Wt_gha1wZkw5OrrXV7qg28P2FsKduftaCH7SDQmBXuY3r1g\"}}},\"keyId\":\"2025-10\"}}}</script>\n<script type=\"application/json\" class=\"dca-sealed-content\">\n{\"bodytext\":\"0EeL0w3a0DCgNV3zg4K-bPJ4-Fr-LPwBGV-UGIuohtu8ftttybZs0n96ldc1TYXKCLz9nyRBqIQh2HouVWcP\"}\n</script>"
+    },
+    {
+      "t": "251023T1430",
+      "relation": "later position in the cutoff's window",
+      "renderedAt": "2025-10-23T14:30:00.000Z",
+      "publisherOrigin": "https://www.news-site.example",
+      "wrapped": [
+        "251023T1430"
+      ],
+      "suppliedChain": [
+        "251023T2345"
+      ],
+      "resourceJWT": "eyJhbGciOiJFUzI1NiIsInR5cCI6IkpXVCIsImtpZCI6InNpZ24tMjAyNS0xMCJ9.eyJyZW5kZXJJZCI6IkowNUpEWjNpZi1GMDBNengyTU9SYlEiLCJvcmlnaW4iOiJodHRwczovL3d3dy5uZXdzLXNpdGUuZXhhbXBsZSIsImlzc3VlZEF0IjoiMjAyNS0xMC0yM1QxNDozMDowMC4wMDBaIiwicmVzb3VyY2VJZCI6ImJ1bGxldGluLTI1MTAyM1QxNDMwIiwiZGF0YSI6eyJzZWN0aW9uIjoiaGFyYm91ciJ9fQ.rXIlt3tEelhiVE9_n569wM31c8VEq1rI0h2P5N8hzaZhHLwjfVb8lGMlzMaTM1jMw7waXZ4o0Z2Xm_XscuB16g",
+      "markup": "<script type=\"application/json\" class=\"dca-data\">{\"version\":\"1\",\"resource\":{\"renderId\":\"J05JDZ3if-F00Mzx2MORbQ\",\"origin\":\"https://www.news-site.example\",\"issuedAt\":\"2025-10-23T14:30:00.000Z\",\"resourceId\":\"bulletin-251023T1430\",\"data\":{\"section\":\"harbour\"}},\"resourceJWT\":\"eyJhbGciOiJFUzI1NiIsInR5cCI6IkpXVCIsImtpZCI6InNpZ24tMjAyNS0xMCJ9.eyJyZW5kZXJJZCI6IkowNUpEWjNpZi1GMDBNengyTU9SYlEiLCJvcmlnaW4iOiJodHRwczovL3d3dy5uZXdzLXNpdGUuZXhhbXBsZSIsImlzc3VlZEF0IjoiMjAyNS0xMC0yM1QxNDozMDowMC4wMDBaIiwicmVzb3VyY2VJZCI6ImJ1bGxldGluLTI1MTAyM1QxNDMwIiwiZGF0YSI6eyJzZWN0aW9uIjoiaGFyYm91ciJ9fQ.rXIlt3tEelhiVE9_n569wM31c8VEq1rI0h2P5N8hzaZhHLwjfVb8lGMlzMaTM1jMw7waXZ4o0Z2Xm_XscuB16g\",\"periodGeometry\":{\"chainsPerDay\":2,\"periodMinutes\":15},\"contentData\":{\"bodytext\":{\"contentType\":\"text/html\",\"keys\":{\"premium\":[{\"t\":\"251023T1430\",\"nonce\":\"DDhZvNBtSnKjTH9W\",\"key\":\"c3ow5ZumhXIdQyMfE-B8SsZsyhT7NWTq9e3gZ3Ojq_k\"}]}}},\"issuerData\":{\"paywall_subscription_service\":{\"sealed\":{\"chainKeys\":{\"premium\":{\"251023T2345\":\"BOZK8kCHP3IGxjsZZXPeL-pA6jv_ze3w6-eHfN91dzrNhgbq4rY1ujSFK9PvHiDOqLMKl35FA2VPkeQ36Jjjys1eVCXRfU6rFlIoZgAaViT0tzixG9_wNnQn8vNfNFKVOgHKlvmrbqns0rEG7A\"}}},\"keyId\":\"2025-10\"}}}</script>\n<script type=\"application/json\" class=\"dca-sealed-content\">\n{\"bodytext\":\"swaJXbH-L0KTA-IXe-xmStbl7nvjVdMhANLu7Dft6ObZ8EDHPBh2DYjY-dSynKd-MTF6jaYgqwL-z5u1gY9r\"}\n</script>"
+    },
+    {
+      "t": "251024T0000",
+      "relation": "next window",
+      "renderedAt": "2025-10-24T00:00:00.000Z",
+      "publisherOrigin": "https://www.news-site.example",
+      "wrapped": [
+        "251024T0000"
+      ],
+      "suppliedChain": [
+        "251024T1145"
+      ],
+      "resourceJWT": "eyJhbGciOiJFUzI1NiIsInR5cCI6IkpXVCIsImtpZCI6InNpZ24tMjAyNS0xMCJ9.eyJyZW5kZXJJZCI6InJxSnRSUUFwd2w3THJfN1hscnpTOXciLCJvcmlnaW4iOiJodHRwczovL3d3dy5uZXdzLXNpdGUuZXhhbXBsZSIsImlzc3VlZEF0IjoiMjAyNS0xMC0yNFQwMDowMDowMC4wMDBaIiwicmVzb3VyY2VJZCI6ImJ1bGxldGluLTI1MTAyNFQwMDAwIiwiZGF0YSI6eyJzZWN0aW9uIjoiaGFyYm91ciJ9fQ.PHmS7E4mr-oijiG0NrriJYzU6Nt1Sbb0OQhRuqtpmtByRJh8RI1hEV0G8JJ1bdkhsT2mpGMYz66nUFyDEZBfcw",
+      "markup": "<script type=\"application/json\" class=\"dca-data\">{\"version\":\"1\",\"resource\":{\"renderId\":\"rqJtRQApwl7Lr_7XlrzS9w\",\"origin\":\"https://www.news-site.example\",\"issuedAt\":\"2025-10-24T00:00:00.000Z\",\"resourceId\":\"bulletin-251024T0000\",\"data\":{\"section\":\"harbour\"}},\"resourceJWT\":\"eyJhbGciOiJFUzI1NiIsInR5cCI6IkpXVCIsImtpZCI6InNpZ24tMjAyNS0xMCJ9.eyJyZW5kZXJJZCI6InJxSnRSUUFwd2w3THJfN1hscnpTOXciLCJvcmlnaW4iOiJodHRwczovL3d3dy5uZXdzLXNpdGUuZXhhbXBsZSIsImlzc3VlZEF0IjoiMjAyNS0xMC0yNFQwMDowMDowMC4wMDBaIiwicmVzb3VyY2VJZCI6ImJ1bGxldGluLTI1MTAyNFQwMDAwIiwiZGF0YSI6eyJzZWN0aW9uIjoiaGFyYm91ciJ9fQ.PHmS7E4mr-oijiG0NrriJYzU6Nt1Sbb0OQhRuqtpmtByRJh8RI1hEV0G8JJ1bdkhsT2mpGMYz66nUFyDEZBfcw\",\"periodGeometry\":{\"chainsPerDay\":2,\"periodMinutes\":15},\"contentData\":{\"bodytext\":{\"contentType\":\"text/html\",\"keys\":{\"premium\":[{\"t\":\"251024T0000\",\"nonce\":\"_D1ABHWgC2zk8yiE\",\"key\":\"6rYdIAviEF_wPl8JZ_FFWSMl9tpwJTap8tkJwhCkR6g\"}]}}},\"issuerData\":{\"paywall_subscription_service\":{\"sealed\":{\"chainKeys\":{\"premium\":{\"251024T1145\":\"BCOtzwyep4Z6BhvHMRHgjEbcbflBcurpczcSqW8jbYmKwv1w7J96Ut59lYJfKGYQwJL6NhTLdxWpvk1qGVDAzHS6jY1a-EYZjx2qozDx-XkDlYDrOWD1ER8Dg_Fi9W8RufQkLFzVSZrMoUXCrA\"}}},\"keyId\":\"2025-10\"}}}</script>\n<script type=\"application/json\" class=\"dca-sealed-content\">\n{\"bodytext\":\"Aftp5zqXtorAeljud4Jk5lGmGMZ6kC1Wy1jAbnPfHal2TnzyD5B9vKbDFey507hTixCycEp65HsXDjo-2sSb\"}\n</script>"
+    }
+  ]
+}

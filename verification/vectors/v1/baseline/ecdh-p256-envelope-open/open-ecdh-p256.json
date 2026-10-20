@@ -1,0 +1,24 @@
+{
+  "name": "open-ecdh-p256",
+  "vectorFormat": "ecdh-p256-envelope-open/v1",
+  "description": "Baseline issuer ECDH P-256 envelope open at one item content-key coordinate. The recorded blob and test key are taken from verification/fixtures/v1/profiles/dca-profile-period-keys/issuer-admission/seal-ecdh.json; this package isolates the content-key ECDH carrier from that mixed content-key and period-key render. Replay the 65-byte uncompressed ephemeral point, 12-byte nonce and AES-256-GCM ciphertext/tag. Derive the raw 32-byte ECDH x-coordinate with the issuer private key, use it directly as the AES key without a KDF, and authenticate expected.bind as UTF-8 additional data. The result is the 16-byte content key. The same blob must fail under a different contentName. This package is one carrier observation, not a complete baseline profile claim.",
+  "input": {
+    "algorithm": "ecdh-p256",
+    "binding": {
+      "renderId": "uUT576O34BoGKpgXpdMucw",
+      "contentName": "bodytext"
+    },
+    "recipientPrivateKeyJwk": {
+      "kty": "EC",
+      "crv": "P-256",
+      "x": "KnsL031lVTbNxwtMq3OQmFq-fyPVh3k1__Adl4ieLXw",
+      "y": "-aNkTV8wd6O2rTWc2jkpJgez4Cuvas4J8_Styi-cdsE",
+      "d": "iWEhz6AHq-n4l_YzhTZcyQH7O9B1A1AKl4maOJh3z5g"
+    },
+    "contentKeyBase64url": "jfv7AgoOggA8XPOEE055ww"
+  },
+  "expected": {
+    "bind": "dca-bind-key-envelope|c|uUT576O34BoGKpgXpdMucw|bodytext",
+    "blob": "BP_rrpHAnCFcf8NeehDgUG3w9ktUCbb_1LNPIX5pT8u7s5xZErWJNnNAJfmyMYNXO4LYDDMaasFJMMGHk63Fqhosaqe6Y6UyHEziB6sXe3DGjrotDFBb6mExgzsz3ifzJqNlKZWmsZyM40Xpjg"
+  }
+}

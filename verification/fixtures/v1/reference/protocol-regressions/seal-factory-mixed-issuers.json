@@ -1,0 +1,348 @@
+{
+  "name": "seal-factory-mixed-issuers",
+  "vectorFormat": "sealer-factory-v3",
+  "description": "One render built through the Sealer factory from plain setup. Values are JSON, with the tagged values of the test bridge frames at any depth (js/test-bridges/_shared/CONTRACT.md): {\"$type\":\"Uint8Array\",\"base64url\":...} is a byte string in unpadded base64url, {\"$type\":\"Date\",\"iso\":...} is a UTC instant with milliseconds, and {\"$type\":\"Record\",\"value\":{...}} is an ordinary record that has a $type member. Decode the whole record with that one codec before a replay reads it. Replay: build the Sealer with your port's mapped factory from input.setup. fixedInstant is the instant, randomStream is the random byte stream, fixedPeriodKeys holds one 16-byte key per access group and period, and testKeyDocuments holds PEM keys. A member the setup leaves out stays out of the factory call, so the Sealer uses its default, such as its default period. Then make input.calls in order: each is [member, args] on the Sealer, and the last, seal, answers the render. Check the result against expected. The resourceJWT payload decodes to expected.resource, which is the signed JSON as it is, not a tagged value. Its signature is ES256 over header.payload, raw r||s, and verifies under expected.signingPublicKey; a signature is not pinned. expected.draws lists every value the render draws from the stream, in stream order, with its offset, length and bytes. The draws cover the stream from its first byte to its last, and the wire carries no nonce or wrap entry they do not list. renderId is resource.renderId. Each content nonce is twelve zero octets, not a draw or wire member. wrapNonce is the nonce of the contentData[contentName].keys[accessGroup] entry for t, and that entry's key opens under the fixed period key, with no aad, to the contentKey. envelopeNonce is bytes 65 to 77 of the ECDH envelope at issuerData[issuerName].sealed.contentKeys[contentName] or .periodKeys[accessGroup][t]. The contentKey is not on the wire: sealedContent[name] opens under it, with twelve zero nonce octets and expected.content[name].aad as additionalData, to expected.content[name].plaintext. The item record carries no aad; build it as the content AAD of docs/spec--content-protection.md Section 3.2 and compare it with the recorded bytes: LP(resource.renderId) || LP(contentName), where LP(s) is the four-octet big-endian octet length of UTF8(s) followed by those octets. expected.envelopes lists every ECDH envelope with its BIND and the key it opens to, opensTo. Open one as the issuer does: ECDH between expected.issuerPrivateKeys[keyId] (PKCS#8 PEM, never part of the setup) and the 65-byte point at the envelope's start, the 32-byte x-coordinate as the AES-256-GCM key with no KDF, bytes 65 to 77 as the nonce, the rest as ciphertext and tag, and the BIND as aad. ECDH ephemeral keys and ECDSA signatures come from the platform, not the stream, and are not pinned. An issuer whose input.setup.issuers entry has algorithm RSA-OAEP draws nothing from the stream, so no envelopeNonce names it; its padding randomness comes from the platform, and its envelope bytes are not pinned. expected.envelopes lists its envelopes beside the ECDH ones. Open one as the issuer does: RSA-OAEP with SHA-256, MGF1 with SHA-256 and an empty label, under expected.issuerPrivateKeys[keyId] (PKCS#8 PEM). The plaintext is exactly the BIND followed by the 16-byte key it opens to.",
+  "input": {
+    "setup": {
+      "origin": "https://www.news-site.example",
+      "signingKid": "sign-2025-10",
+      "issuers": [
+        {
+          "issuerName": "paywall_subscription_service",
+          "keyId": "2025-10",
+          "algorithm": "ecdh-p256"
+        },
+        {
+          "issuerName": "paywall_fallback_service",
+          "keyId": "2025-10-rsa",
+          "algorithm": "rsa-oaep"
+        }
+      ],
+      "fixedInstant": {
+        "$type": "Date",
+        "iso": "2025-10-23T14:20:00.000Z"
+      },
+      "randomStream": {
+        "$type": "Uint8Array",
+        "base64url": "kJ-MGqxmNLlTFTaz4qUoaT2_dq4p9dRh7TN7KYRHfleV7X0aFZfHrl1FrJQP7aiW7hDinq0-0Em3Wr7k2QX6GmjmKSczCGBf5ByuyKifrNWpAnhDqDQvQW_hQNpXn3oZgrjlOD3FGft6o3EN6xXCfuFFSthH3YVzkZ8YxDBf_A9RGd-A5DY5JX_F9-d4zqRr"
+      },
+      "testKeyDocuments": {
+        "signingKeys": {
+          "sign-2025-10": "-----BEGIN PRIVATE KEY-----\nMIGHAgEAMBMGByqGSM49AgEGCCqGSM49AwEHBG0wawIBAQQg7O8VtGxSny/jVf0D\nTjDtzhrSwJJXy6MFOcFHjeyM0oihRANCAASG7kcwEmbWL8OZzn5Op+cM+XIGEddc\nzLTv8Ed6ieAFYxSThUQ5PCT3TOOlPrnNt+NfuYJdOKomOLim2XmPfmBY\n-----END PRIVATE KEY-----\n"
+        },
+        "issuerPublicKeys": {
+          "2025-10": "-----BEGIN PUBLIC KEY-----\nMFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAEuXUf+qgjGmMkv5rRX+wv2KR7RrP5\nl7+s8I/QbvWZyrO3bignf8lM4cxuA612rVe0v+TqU2N+C1MeK3e1EfqNNw==\n-----END PUBLIC KEY-----\n",
+          "2025-10-rsa": "-----BEGIN PUBLIC KEY-----\nMIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAlCNWfOwpL+mdkVB7YgtC\nqoTdyIqdY+knKx+s5rcRBAi1DoSTJM5/Ff2OqJMfsbor5JnsSSnAGHfKx/aV58MS\nd98nYPbHurzViKi+CvBJ9ITJUet+uq6A5v6yNeVoY9xXHLldIRHQ2cevfzuyz+HR\niet4Cj6+dnra/+yD7i1sQ0qjw43H9w5QVvTagdV9MHHEWtWCHV1/wF+kPSpUke3X\nLfFawIDQN6hCk4JD1rQEMgXwVhmP72CoXDmsEEZoQ8Xs3m9SuNPGwz7XiFHjRpki\nyOGV1KAecY5Xqg6WELQanbKrlWtqcnVKeaxm2AiPXR8HmWUBpB6AyEDIWQdqszj+\nQQIDAQAB\n-----END PUBLIC KEY-----\n"
+        }
+      },
+      "issuerSupplyPlans": {
+        "paywall_subscription_service": {
+          "contentKeyNames": [
+            "bodytext",
+            "sidebar"
+          ],
+          "suppliedAccessGroups": [
+            "premium"
+          ]
+        },
+        "paywall_fallback_service": {
+          "contentKeyNames": [
+            "bodytext",
+            "sidebar"
+          ],
+          "suppliedAccessGroups": [
+            "premium"
+          ]
+        }
+      },
+      "fixedPeriodKeys": {
+        "premium": {
+          "251023T1400": {
+            "$type": "Uint8Array",
+            "base64url": "oaGhoaGhoaGhoaGhoaGhoQ"
+          },
+          "251023T1500": {
+            "$type": "Uint8Array",
+            "base64url": "oqKioqKioqKioqKioqKiog"
+          }
+        }
+      }
+    },
+    "calls": [
+      [
+        "resource",
+        [
+          "123456",
+          {
+            "section": "politics"
+          }
+        ]
+      ],
+      [
+        "content",
+        [
+          "bodytext",
+          "<p>The council voted 7-2 to rezone the harbour.</p>",
+          "text/html",
+          {
+            "accessGroups": [
+              "premium"
+            ]
+          }
+        ]
+      ],
+      [
+        "content",
+        [
+          "sidebar",
+          "<p>The harbour plan goes to a second reading.</p>",
+          "text/html",
+          {
+            "accessGroups": [
+              "premium"
+            ]
+          }
+        ]
+      ],
+      [
+        "seal",
+        []
+      ]
+    ]
+  },
+  "expected": {
+    "resource": {
+      "renderId": "kJ-MGqxmNLlTFTaz4qUoaQ",
+      "origin": "https://www.news-site.example",
+      "issuedAt": "2025-10-23T14:20:00.000Z",
+      "resourceId": "123456",
+      "data": {
+        "section": "politics"
+      }
+    },
+    "signingPublicKey": "-----BEGIN PUBLIC KEY-----\nMFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAEhu5HMBJm1i/Dmc5+TqfnDPlyBhHX\nXMy07/BHeongBWMUk4VEOTwk90zjpT65zbfjX7mCXTiqJji4ptl5j35gWA==\n-----END PUBLIC KEY-----\n",
+    "issuerPrivateKeys": {
+      "2025-10": "-----BEGIN PRIVATE KEY-----\nMIGHAgEAMBMGByqGSM49AgEGCCqGSM49AwEHBG0wawIBAQQg1PNq26z0tUPvH7EZ\nFJ8Syb80JxJznmXqtSLnIdlk2m+hRANCAAS5dR/6qCMaYyS/mtFf7C/YpHtGs/mX\nv6zwj9Bu9ZnKs7duKCd/yUzhzG4DrXatV7S/5OpTY34LUx4rd7UR+o03\n-----END PRIVATE KEY-----\n",
+      "2025-10-rsa": "-----BEGIN PRIVATE KEY-----\nMIIEvQIBADANBgkqhkiG9w0BAQEFAASCBKcwggSjAgEAAoIBAQCUI1Z87Ckv6Z2R\nUHtiC0KqhN3Iip1j6ScrH6zmtxEECLUOhJMkzn8V/Y6okx+xuivkmexJKcAYd8rH\n9pXnwxJ33ydg9se6vNWIqL4K8En0hMlR6366roDm/rI15Whj3FccuV0hEdDZx69/\nO7LP4dGJ63gKPr52etr/7IPuLWxDSqPDjcf3DlBW9NqB1X0wccRa1YIdXX/AX6Q9\nKlSR7dct8VrAgNA3qEKTgkPWtAQyBfBWGY/vYKhcOawQRmhDxezeb1K408bDPteI\nUeNGmSLI4ZXUoB5xjleqDpYQtBqdsquVa2pydUp5rGbYCI9dHweZZQGkHoDIQMhZ\nB2qzOP5BAgMBAAECggEAO1oLMWLnP5iQdmOyA36yd6JjP5F17M1B0a/PtOJc8WpR\nrF7mm2UWmudrjFPh63HFW0JmXovZOJRqTQKZXfGUyS1B2EIXlNRKk4XUGorafprj\nFCzPqhj3cVVTbm+bCwOBbXNBAlpifJbaVBZFlq+JpgIPJr+rzMl9S/Nlinxtd2no\ne4q5vta9+gTvWvvZdJrc72bClLHH8vYH6yWvGThre1GuYyv4IhLRxUaJys96Yf2R\nRsKoJ5CoYtgSMgMXP7FJcaML2Usyyu8b9ojd8YyfAN79J2rkYFv1IFqZyT3gACor\npBqXZSx37NQB/GsYqBC1ETrAP8XTN9EQJyNrsAT9BwKBgQDNjo4i3HBBqZ6fUvS1\nf9djgecquUCSevxg0PCqws7mzBRwMsmi/VDWJctmY1Al93MIaWPwHCnN6P6LyAU3\nUlGPbaOoMIR/hvAv42J6d50P53t5Hoc0oPL/SrVVKmZ/bO1Th9/AGu0bjiQrFFhj\nH+FNHzSuHN6J9GmAIKlXacV0/wKBgQC4faGNvQp5gXgqdp5SkEPxYK/2sK2Lys+n\n2gJy7zTjY3wTjBQ5TWcFAQIY3cKr19wUNYAnSyQYd5+iYUnwW+31647FMvxSr2g0\nZdUk6wTczK5Z/kmpz6rn2+1AQfefRnPKXT8J2KvrYbeoRLQqHzpzhnXdkBeOm5o/\n/BSELtVMvwKBgFzMteiRInDSddUx614hSAkZdVZ5aeh3c4b17SD6b9QMYFHC6/sU\nZ7E2QNyJi36Idztd8QtOe6UFQh2zAH/YPxAEjHT66mZ0cez8t9HYPGUYuUqV+K5O\n10Vf4ft/9+QhNgeW+PHOdisRgcydE8Y0d0+M/gh46hLX7+UzWaAoFUfbAoGADuW2\nIefd7KnTtjoV1rznf5o7G0Rw/xTFZ9xmzjkaoDHsVve8ulPRucm3DaL6kT3A+7DG\nRGYA6CjgrxAEFHCX6n+2652OWm7njzOZ3n1LyziL66Bo+llWh5pusf2hrS7XMsQM\nzxK77ynY1rGVisEyyxlUcyure0x9TCVi0rmlZ6kCgYEAm0lGO3rvO82jyDOzoKri\nDIzJEOx3ENoCYqn7KukTCYl1cMzu5E1HJ0zxLtWxZ6XWu0Z/V/ks4paV0A+vcQ4a\nd/GmE8m0sjhues3aaVzsPLy/LneKqKsmsVD0KrwERL3m0so+O1auvAguJ1M1OibM\nCThtmTQ8tXP+ArGgsuENowQ=\n-----END PRIVATE KEY-----\n"
+    },
+    "draws": [
+      {
+        "draw": "renderId",
+        "offset": 0,
+        "length": 16,
+        "bytes": {
+          "$type": "Uint8Array",
+          "base64url": "kJ-MGqxmNLlTFTaz4qUoaQ"
+        }
+      },
+      {
+        "draw": "contentKey",
+        "contentName": "bodytext",
+        "offset": 16,
+        "length": 16,
+        "bytes": {
+          "$type": "Uint8Array",
+          "base64url": "Pb92rin11GHtM3sphEd-Vw"
+        }
+      },
+      {
+        "draw": "contentKey",
+        "contentName": "sidebar",
+        "offset": 32,
+        "length": 16,
+        "bytes": {
+          "$type": "Uint8Array",
+          "base64url": "le19GhWXx65dRayUD-2olg"
+        }
+      },
+      {
+        "draw": "wrapNonce",
+        "contentName": "bodytext",
+        "accessGroup": "premium",
+        "t": "251023T1400",
+        "offset": 48,
+        "length": 12,
+        "bytes": {
+          "$type": "Uint8Array",
+          "base64url": "7hDinq0-0Em3Wr7k"
+        }
+      },
+      {
+        "draw": "wrapNonce",
+        "contentName": "bodytext",
+        "accessGroup": "premium",
+        "t": "251023T1500",
+        "offset": 60,
+        "length": 12,
+        "bytes": {
+          "$type": "Uint8Array",
+          "base64url": "2QX6GmjmKSczCGBf"
+        }
+      },
+      {
+        "draw": "wrapNonce",
+        "contentName": "sidebar",
+        "accessGroup": "premium",
+        "t": "251023T1400",
+        "offset": 72,
+        "length": 12,
+        "bytes": {
+          "$type": "Uint8Array",
+          "base64url": "5ByuyKifrNWpAnhD"
+        }
+      },
+      {
+        "draw": "wrapNonce",
+        "contentName": "sidebar",
+        "accessGroup": "premium",
+        "t": "251023T1500",
+        "offset": 84,
+        "length": 12,
+        "bytes": {
+          "$type": "Uint8Array",
+          "base64url": "qDQvQW_hQNpXn3oZ"
+        }
+      },
+      {
+        "draw": "envelopeNonce",
+        "issuerName": "paywall_subscription_service",
+        "contentName": "bodytext",
+        "offset": 96,
+        "length": 12,
+        "bytes": {
+          "$type": "Uint8Array",
+          "base64url": "grjlOD3FGft6o3EN"
+        }
+      },
+      {
+        "draw": "envelopeNonce",
+        "issuerName": "paywall_subscription_service",
+        "contentName": "sidebar",
+        "offset": 108,
+        "length": 12,
+        "bytes": {
+          "$type": "Uint8Array",
+          "base64url": "6xXCfuFFSthH3YVz"
+        }
+      },
+      {
+        "draw": "envelopeNonce",
+        "issuerName": "paywall_subscription_service",
+        "accessGroup": "premium",
+        "t": "251023T1400",
+        "offset": 120,
+        "length": 12,
+        "bytes": {
+          "$type": "Uint8Array",
+          "base64url": "kZ8YxDBf_A9RGd-A"
+        }
+      },
+      {
+        "draw": "envelopeNonce",
+        "issuerName": "paywall_subscription_service",
+        "accessGroup": "premium",
+        "t": "251023T1500",
+        "offset": 132,
+        "length": 12,
+        "bytes": {
+          "$type": "Uint8Array",
+          "base64url": "5DY5JX_F9-d4zqRr"
+        }
+      }
+    ],
+    "envelopes": [
+      {
+        "issuerName": "paywall_subscription_service",
+        "contentName": "bodytext",
+        "bind": "dca-bind-key-envelope|c|kJ-MGqxmNLlTFTaz4qUoaQ|bodytext",
+        "opensTo": {
+          "$type": "Uint8Array",
+          "base64url": "Pb92rin11GHtM3sphEd-Vw"
+        }
+      },
+      {
+        "issuerName": "paywall_subscription_service",
+        "contentName": "sidebar",
+        "bind": "dca-bind-key-envelope|c|kJ-MGqxmNLlTFTaz4qUoaQ|sidebar",
+        "opensTo": {
+          "$type": "Uint8Array",
+          "base64url": "le19GhWXx65dRayUD-2olg"
+        }
+      },
+      {
+        "issuerName": "paywall_subscription_service",
+        "accessGroup": "premium",
+        "t": "251023T1400",
+        "bind": "dca-bind-key-envelope|p|kJ-MGqxmNLlTFTaz4qUoaQ|premium|251023T1400",
+        "opensTo": {
+          "$type": "Uint8Array",
+          "base64url": "oaGhoaGhoaGhoaGhoaGhoQ"
+        }
+      },
+      {
+        "issuerName": "paywall_subscription_service",
+        "accessGroup": "premium",
+        "t": "251023T1500",
+        "bind": "dca-bind-key-envelope|p|kJ-MGqxmNLlTFTaz4qUoaQ|premium|251023T1500",
+        "opensTo": {
+          "$type": "Uint8Array",
+          "base64url": "oqKioqKioqKioqKioqKiog"
+        }
+      },
+      {
+        "issuerName": "paywall_fallback_service",
+        "contentName": "bodytext",
+        "bind": "dca-bind-key-envelope|c|kJ-MGqxmNLlTFTaz4qUoaQ|bodytext",
+        "opensTo": {
+          "$type": "Uint8Array",
+          "base64url": "Pb92rin11GHtM3sphEd-Vw"
+        }
+      },
+      {
+        "issuerName": "paywall_fallback_service",
+        "contentName": "sidebar",
+        "bind": "dca-bind-key-envelope|c|kJ-MGqxmNLlTFTaz4qUoaQ|sidebar",
+        "opensTo": {
+          "$type": "Uint8Array",
+          "base64url": "le19GhWXx65dRayUD-2olg"
+        }
+      },
+      {
+        "issuerName": "paywall_fallback_service",
+        "accessGroup": "premium",
+        "t": "251023T1400",
+        "bind": "dca-bind-key-envelope|p|kJ-MGqxmNLlTFTaz4qUoaQ|premium|251023T1400",
+        "opensTo": {
+          "$type": "Uint8Array",
+          "base64url": "oaGhoaGhoaGhoaGhoaGhoQ"
+        }
+      },
+      {
+        "issuerName": "paywall_fallback_service",
+        "accessGroup": "premium",
+        "t": "251023T1500",
+        "bind": "dca-bind-key-envelope|p|kJ-MGqxmNLlTFTaz4qUoaQ|premium|251023T1500",
+        "opensTo": {
+          "$type": "Uint8Array",
+          "base64url": "oqKioqKioqKioqKioqKiog"
+        }
+      }
+    ],
+    "content": {
+      "bodytext": {
+        "aad": {
+          "$type": "Uint8Array",
+          "base64url": "AAAAFmtKLU1HcXhtTkxsVEZUYXo0cVVvYVEAAAAIYm9keXRleHQ"
+        },
+        "plaintext": "<p>The council voted 7-2 to rezone the harbour.</p>"
+      },
+      "sidebar": {
+        "aad": {
+          "$type": "Uint8Array",
+          "base64url": "AAAAFmtKLU1HcXhtTkxsVEZUYXo0cVVvYVEAAAAHc2lkZWJhcg"
+        },
+        "plaintext": "<p>The harbour plan goes to a second reading.</p>"
+      }
+    }
+  }
+}

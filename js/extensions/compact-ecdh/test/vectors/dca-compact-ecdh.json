@@ -1,0 +1,206 @@
+{
+  "profile": "dca-profile-compact-ecdh",
+  "specification": "docs/spec-profile--compact-ecdh.md",
+  "provenance": {
+    "recorder": "js/extensions/compact-ecdh/tools/record-dca-vectors.mjs, sealing through this extension's testing facility; ikm values are SHA-256 of the UTF-8 labels given",
+    "independentCheck": "Go go1.27.0 crypto/hpke, crypto/ecdh, crypto/elliptic, crypto/aes, crypto/cipher: goChecked lists, per case, the fields that implementation checked on its own, one name per check; it never checks sharedSecret, which crypto/hpke does not expose; goSealed holds envelopes it sealed",
+    "goCheckedMeaning": {
+      "skRm": "Go DeriveKeyPair from ikmR gives this private key",
+      "pkRm": "Go DeriveKeyPair from ikmR gives this public key",
+      "skEm": "Go DeriveKeyPair from ikmE gives this private key",
+      "enc": "Go DeriveKeyPair from ikmE gives this public key",
+      "blob[0:33]": "Go crypto/elliptic compresses enc to these bytes",
+      "blob[33:]": "the blob tail equals the recorded ciphertext",
+      "decompressed-enc": "Go crypto/elliptic decompresses blob[0:33] to enc",
+      "dh": "Go crypto/ecdh gives this x-coordinate from both sides",
+      "ciphertext-opens": "Go crypto/hpke opens the ciphertext under the decompressed enc, the issuer key, info and aad, to payload",
+      "key-and-nonce-reproduce": "Go AES-256-GCM under key and baseNonce at sequence zero reproduces the ciphertext",
+      "flipped-prefix-refused": "Go crypto/hpke refuses the other point with the same x"
+    }
+  },
+  "info": "6463612d64657269766174696f6e2d636f6d706163742d65636468",
+  "infoText": "dca-derivation-compact-ecdh",
+  "issuer": {
+    "label": "dca-compact-ecdh vector issuer",
+    "ikmR": "c55c8d39a48874c74f0fc2e6699716e48abc86f91fd375b0afd93bf73d5da272",
+    "skRm": "31c58df11fbb52ba3e98595f2e505ee6a53a4c481595bef95b12b88c61ef9642",
+    "pkRm": "04ba43392253094e275fc0322ff26e1bc5ea3e9ac1be784c7a17c6b6b2b3ed2834405371d3b498f1e0771c133d6f5250f43d286c910593729c242860b03904a885",
+    "goChecked": ["skRm", "pkRm"]
+  },
+  "cases": [
+    {
+      "id": "content-key-even",
+      "ephemeralLabel": "dca-compact-ecdh vector ephemeral 0",
+      "ikmE": "81d0743e5a783e1f0841f6d48af85a913823a14805a36bf5641e9140778171d0",
+      "skEm": "a13c3328e309120a5242fec89268551f28e4fb5d58815d6d198a313d3d941f5b",
+      "enc": "04148cb30068f19fd2bec9d5bdefd8f29b1a45db6170c8c6f603b0ab3b6533397fffd727ec5bcc304ba946f6e659700e0346616fc09951100620c08090b33d6006",
+      "dh": "9ee9fa05e10ea94017d6973ce5fd7b56bd921a0c462ff323c3258e1d6f40f175",
+      "sharedSecret": "56870d23a48ba949fd4d06e3baff1d04dcd8034e365c383784730a7ad6adcf56",
+      "key": "010bfc0abd01eda18eb74d86cf2230151e8971466883f290fd394710328a4ff9",
+      "baseNonce": "d57288575cfecfe96b6c27d5",
+      "payload": "00112233445566778899aabbccddeeff",
+      "aadText": "dca-bind-key-envelope|c|AAECAwQFBgcICQoLDA0ODw|bodytext",
+      "aad": "6463612d62696e642d6b65792d656e76656c6f70657c637c41414543417751464267634943516f4c4441304f44777c626f647974657874",
+      "ciphertext": "416d360454d7d5eee46844d45695854e1941149bbfb83c9dbe703a11b5b61b42",
+      "blob": "02148cb30068f19fd2bec9d5bdefd8f29b1a45db6170c8c6f603b0ab3b6533397f416d360454d7d5eee46844d45695854e1941149bbfb83c9dbe703a11b5b61b42",
+      "blobBase64url": "AhSMswBo8Z_SvsnVve_Y8psaRdthcMjG9gOwqztlMzl_QW02BFTX1e7kaETUVpWFThlBFJu_uDydvnA6EbW2G0I",
+      "goChecked": [
+        "skEm",
+        "enc",
+        "blob[0:33]",
+        "blob[33:]",
+        "decompressed-enc",
+        "dh",
+        "ciphertext-opens",
+        "key-and-nonce-reproduce",
+        "flipped-prefix-refused"
+      ]
+    },
+    {
+      "id": "content-key-odd",
+      "ephemeralLabel": "dca-compact-ecdh vector ephemeral 1",
+      "ikmE": "6fd5ea202cf78f8949192c6323fcb243cbc6e5ccd3a904b0a2777afcacea3faf",
+      "skEm": "486438a617499fa7cfd5370f77e5d6f99bc081ffb1c7b3badeb39502e0f2a7d2",
+      "enc": "049db81fbefa45c507504554541345bea938af3047e8e8bb390b3cb3df1200d9586f34f96edc938a7cb92ed9d04ddf55839dce78cacfd8d7a4f713736e4d7cfe6d",
+      "dh": "bb16586a0207f48d6ad8257a62d09712ae97a1d8c84bf023d129f7f573180298",
+      "sharedSecret": "ac82b14c49e1fd951d5a43b4d7a2a3bba17b80f54939ff67b871e87cae85cd66",
+      "key": "796c6dd3495a6900a7249df5cf1ffea3dcb73c79ac659726a938149f934465a3",
+      "baseNonce": "d25b4ece56c5afd320948761",
+      "payload": "00112233445566778899aabbccddeeff",
+      "aadText": "dca-bind-key-envelope|c|AAECAwQFBgcICQoLDA0ODw|bodytext",
+      "aad": "6463612d62696e642d6b65792d656e76656c6f70657c637c41414543417751464267634943516f4c4441304f44777c626f647974657874",
+      "ciphertext": "96de413d9d09faa954ad7f3e78e79b77483fc6e74215c940cec06671748c4aba",
+      "blob": "039db81fbefa45c507504554541345bea938af3047e8e8bb390b3cb3df1200d95896de413d9d09faa954ad7f3e78e79b77483fc6e74215c940cec06671748c4aba",
+      "blobBase64url": "A524H776RcUHUEVUVBNFvqk4rzBH6Oi7OQs8s98SANlYlt5BPZ0J-qlUrX8-eOebd0g_xudCFclAzsBmcXSMSro",
+      "goChecked": [
+        "skEm",
+        "enc",
+        "blob[0:33]",
+        "blob[33:]",
+        "decompressed-enc",
+        "dh",
+        "ciphertext-opens",
+        "key-and-nonce-reproduce",
+        "flipped-prefix-refused"
+      ]
+    },
+    {
+      "id": "period-key-dh-leading-zero",
+      "ephemeralLabel": "dca-compact-ecdh vector ephemeral 486",
+      "ikmE": "fb04c9ccea1766f846b88b1ca0c64eb8e491d0e3f40fd3090894bd0c1580728f",
+      "skEm": "36f5c0ed7f06cc1238ccef74c9c6f4dd3d33c0794e3e88f32fb3e32b74d8d5fa",
+      "enc": "04261eff8c6c8104b6b94d1677991d0a881655410ba097cb542063dc70197da32ca7f789e4ad1491e4511d97b938a4858d5ad51a80bbc81625fe2a92e8de2308e1",
+      "dh": "00aa9be0a6ae007354c32ecd443f9e2faef5f57e734087a939a3a0321757ef1c",
+      "sharedSecret": "93dbadf98d03739d6e919a27f6a326fa558fe0b1626752833325cfdff2598927",
+      "key": "bc5e897f9de95a733afd3f3433b32382280994ca4f7f469f361d070bef74c14a",
+      "baseNonce": "3853df9269581b82900b3125",
+      "payload": "00112233445566778899aabbccddeeff",
+      "aadText": "dca-bind-key-envelope|p|AAECAwQFBgcICQoLDA0ODw|premium|261016T0900",
+      "aad": "6463612d62696e642d6b65792d656e76656c6f70657c707c41414543417751464267634943516f4c4441304f44777c7072656d69756d7c3236313031365430393030",
+      "ciphertext": "02cdec7587a1869e5452c7f6cd999e0647aa0958314066bcf18a9d9668df2697",
+      "blob": "03261eff8c6c8104b6b94d1677991d0a881655410ba097cb542063dc70197da32c02cdec7587a1869e5452c7f6cd999e0647aa0958314066bcf18a9d9668df2697",
+      "blobBase64url": "AyYe_4xsgQS2uU0Wd5kdCogWVUELoJfLVCBj3HAZfaMsAs3sdYehhp5UUsf2zZmeBkeqCVgxQGa88YqdlmjfJpc",
+      "goChecked": [
+        "skEm",
+        "enc",
+        "blob[0:33]",
+        "blob[33:]",
+        "decompressed-enc",
+        "dh",
+        "ciphertext-opens",
+        "key-and-nonce-reproduce",
+        "flipped-prefix-refused"
+      ]
+    },
+    {
+      "id": "seed-even",
+      "ephemeralLabel": "dca-compact-ecdh vector ephemeral 487",
+      "ikmE": "397bcd80a2a65e216444ca7dc33273f62725f5b1dfd052ac457fc1b257b78cc1",
+      "skEm": "ea99ff5946d34d41266e18c1e5341abb23828203134d495bb46ae769923ad4cd",
+      "enc": "044a693810ddd6762416483fd569571493f42dcf20e0635a1be5af9b2f25e1d27d3ce9b38a5efa268927e3bec1973473f275a8259c0f1c0151f00202a6144abfc6",
+      "dh": "b0563b9a72a605f7072be6e67b62a73d1649f61413c7a91da50fba992c0b0486",
+      "sharedSecret": "3a2416cec887828b18e7e2fd1db71f0b271418af0486ae51059456a59713b24d",
+      "key": "bbf15a99f4faa133b18c61a91b52e8d50094cf9a8ef9f8235fc18725ad9eb02c",
+      "baseNonce": "1f9d1dca282e7ddc984faf9c",
+      "payload": "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f",
+      "aadText": "dca-bind-key-envelope|c|AAECAwQFBgcICQoLDA0ODw|seedexample",
+      "aad": "6463612d62696e642d6b65792d656e76656c6f70657c637c41414543417751464267634943516f4c4441304f44777c736565646578616d706c65",
+      "ciphertext": "1c639b945d4812879678af6e39273b63d87506ce6b9bc0960e6cd06dae5b9034dea2ff32b1292413c11995e8ddf514be",
+      "blob": "024a693810ddd6762416483fd569571493f42dcf20e0635a1be5af9b2f25e1d27d1c639b945d4812879678af6e39273b63d87506ce6b9bc0960e6cd06dae5b9034dea2ff32b1292413c11995e8ddf514be",
+      "blobBase64url": "AkppOBDd1nYkFkg_1WlXFJP0Lc8g4GNaG-Wvmy8l4dJ9HGOblF1IEoeWeK9uOSc7Y9h1Bs5rm8CWDmzQba5bkDTeov8ysSkkE8EZlejd9RS-",
+      "goChecked": [
+        "skEm",
+        "enc",
+        "blob[0:33]",
+        "blob[33:]",
+        "decompressed-enc",
+        "dh",
+        "ciphertext-opens",
+        "key-and-nonce-reproduce",
+        "flipped-prefix-refused"
+      ]
+    },
+    {
+      "id": "seed-odd",
+      "ephemeralLabel": "dca-compact-ecdh vector ephemeral 490",
+      "ikmE": "b1d46c28d14527397dcf9a73ab289a04d0df7bc3946802cd920e69abc87d21b4",
+      "skEm": "dbda13bd3b5953579c209fdde98827432897674672e32081667b10099f93a0a7",
+      "enc": "0402a1663d0cb4e3a9a854027e477d3f2dd0be432003d33980491cb2e60a79e3903f50ed84cec7182bea4a4a752791a7dfed3a04ded5866785e87193230e335017",
+      "dh": "cef00973abe02108a1f53e0d9b33ef383098cc2a831d0958d5d460b3dd70b934",
+      "sharedSecret": "7afdb3d0d0224f76190d62bba77dd91397f4db44a355effab3e77dd02b0378c4",
+      "key": "fc71dca33876afd9c3bda033e1be20b1d4b0513784682f689d43ad827a41ca8a",
+      "baseNonce": "e11b564134fd52c977cafccc",
+      "payload": "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f",
+      "aadText": "dca-bind-key-envelope|c|AAECAwQFBgcICQoLDA0ODw|seedexample",
+      "aad": "6463612d62696e642d6b65792d656e76656c6f70657c637c41414543417751464267634943516f4c4441304f44777c736565646578616d706c65",
+      "ciphertext": "1c1b4e71bdbd1d896ae5469886cca3029d85bd658ce3523245613eced9946804b0a5d9c44002c82aeffd30ca8f5356f8",
+      "blob": "0302a1663d0cb4e3a9a854027e477d3f2dd0be432003d33980491cb2e60a79e3901c1b4e71bdbd1d896ae5469886cca3029d85bd658ce3523245613eced9946804b0a5d9c44002c82aeffd30ca8f5356f8",
+      "blobBase64url": "AwKhZj0MtOOpqFQCfkd9Py3QvkMgA9M5gEkcsuYKeeOQHBtOcb29HYlq5UaYhsyjAp2FvWWM41IyRWE-ztmUaASwpdnEQALIKu_9MMqPU1b4",
+      "goChecked": [
+        "skEm",
+        "enc",
+        "blob[0:33]",
+        "blob[33:]",
+        "decompressed-enc",
+        "dh",
+        "ciphertext-opens",
+        "key-and-nonce-reproduce",
+        "flipped-prefix-refused"
+      ]
+    }
+  ],
+  "goSealed": [
+    {
+      "id": "go-content-key-even",
+      "payload": "f0e1d2c3b4a5968778695a4b3c2d1e0f",
+      "aadText": "dca-bind-key-envelope|c|AAECAwQFBgcICQoLDA0ODw|sidebar",
+      "aad": "6463612d62696e642d6b65792d656e76656c6f70657c637c41414543417751464267634943516f4c4441304f44777c73696465626172",
+      "enc": "04fa1f1c7035ae0fdd99e8867b99072d68726dbf3ecb9537a4ad2b06a49861cb250e7fc294f560c0d094e52b5ea7da7cad77faa0c009aa5698e16f1a93cb91b6ea",
+      "blob": "02fa1f1c7035ae0fdd99e8867b99072d68726dbf3ecb9537a4ad2b06a49861cb25908c06ea6468eed528386001d53d8d2eebc07f7dce70722c73512fb76e8084f3"
+    },
+    {
+      "id": "go-content-key-odd",
+      "payload": "f0e1d2c3b4a5968778695a4b3c2d1e0f",
+      "aadText": "dca-bind-key-envelope|c|AAECAwQFBgcICQoLDA0ODw|sidebar",
+      "aad": "6463612d62696e642d6b65792d656e76656c6f70657c637c41414543417751464267634943516f4c4441304f44777c73696465626172",
+      "enc": "0482cb2122b1d7366cd63f8f5fc2cdd275a0df4bb672ec56e080fa59265e31e35b307dc3c9b93059b22c05e1140edcdb1278884606fe20e81157bb51fe08572e17",
+      "blob": "0382cb2122b1d7366cd63f8f5fc2cdd275a0df4bb672ec56e080fa59265e31e35b646a357e434680a80d129245b9ae674b0089e590a7bcc8fbb6602beae5da57bf"
+    },
+    {
+      "id": "go-seed-even",
+      "payload": "202122232425262728292a2b2c2d2e2f303132333435363738393a3b3c3d3e3f",
+      "aadText": "dca-bind-key-envelope|c|AAECAwQFBgcICQoLDA0ODw|goseed",
+      "aad": "6463612d62696e642d6b65792d656e76656c6f70657c637c41414543417751464267634943516f4c4441304f44777c676f73656564",
+      "enc": "04892ec59ee9cebd5812051f0537fab6c7584c5f5314342a5ad33b17e5863d7b423357b543235e5d67fcfd020d708d443c98f2e58caeefdf0b443804c7c43b7d7c",
+      "blob": "02892ec59ee9cebd5812051f0537fab6c7584c5f5314342a5ad33b17e5863d7b42c21eb184e1dd53463457df1df97d849d8d49904a6ef2ba16540d85043723b153e7f21f89950fc1bfdf46de46a3db517a"
+    },
+    {
+      "id": "go-seed-odd",
+      "payload": "202122232425262728292a2b2c2d2e2f303132333435363738393a3b3c3d3e3f",
+      "aadText": "dca-bind-key-envelope|c|AAECAwQFBgcICQoLDA0ODw|goseed",
+      "aad": "6463612d62696e642d6b65792d656e76656c6f70657c637c41414543417751464267634943516f4c4441304f44777c676f73656564",
+      "enc": "04b4c975e75ba4a89714b0d42d239adc97d35bbfc4070dcd5a93386c2fc78131c3ed6770c32d88d9dd29a169f861f10f41944e9d8b531d7abd5b27e4f0e401ad13",
+      "blob": "03b4c975e75ba4a89714b0d42d239adc97d35bbfc4070dcd5a93386c2fc78131c361bd2c76692e61e74fc937ff6b5bbaef1b6d2d656f05453a81f31bb67c2d07157e3243cc720de3084e609509f77c928c"
+    }
+  ]
+}

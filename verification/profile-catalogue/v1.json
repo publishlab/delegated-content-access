@@ -1,0 +1,95 @@
+{
+  "authority": "docs/spec--profiles.md",
+  "baseline": "dca-profile-baseline",
+  "profiles": [
+    {
+      "id": "dca-profile-baseline",
+      "dependsOn": [],
+      "ref": "docs/spec--profiles.md#3-dca-profile-baseline-profile"
+    },
+    {
+      "id": "dca-profile-browser-origin",
+      "dependsOn": ["dca-profile-baseline"],
+      "ref": "docs/spec--profiles.md#4-dca-profile-browser-origin-profile"
+    },
+    {
+      "id": "dca-profile-client-bound-ecdh-p256",
+      "dependsOn": ["dca-profile-baseline"],
+      "ref": "docs/spec--profiles.md#7-client-bound-custody-profiles"
+    },
+    {
+      "id": "dca-profile-client-bound-rsa-oaep",
+      "dependsOn": ["dca-profile-baseline"],
+      "ref": "docs/spec--profiles.md#7-client-bound-custody-profiles"
+    },
+    {
+      "id": "dca-profile-content-compression",
+      "dependsOn": ["dca-profile-baseline"],
+      "ref": "docs/spec--profiles.md#6-dca-profile-content-compression-profile"
+    },
+    {
+      "id": "dca-profile-html-carrier",
+      "dependsOn": ["dca-profile-baseline"],
+      "ref": "docs/spec--profiles.md#9-dca-profile-html-carrier-profile"
+    },
+    {
+      "id": "dca-profile-period-keys",
+      "dependsOn": ["dca-profile-baseline"],
+      "ref": "docs/spec--profiles.md#5-dca-profile-period-keys-profile"
+    },
+    {
+      "id": "dca-profile-chain-keys",
+      "dependsOn": ["dca-profile-period-keys"],
+      "ref": "docs/spec--profiles.md#51-dca-profile-chain-keys-profile"
+    },
+    {
+      "id": "dca-profile-recipient-grant-unlock",
+      "dependsOn": ["dca-profile-baseline"],
+      "ref": "docs/spec--profiles.md#8-dca-profile-recipient-grant-unlock-profile"
+    }
+  ],
+  "duties": [
+    {"id": "dca-profile-baseline/publisher/content-key-envelope", "profile": "dca-profile-baseline", "role": "publisher", "ref": "docs/spec--profiles.md#32-publisher-requirements"},
+    {"id": "dca-profile-baseline/publisher/representation-declaration", "profile": "dca-profile-baseline", "role": "publisher", "ref": "docs/spec--profiles.md#32-publisher-requirements"},
+    {"id": "dca-profile-baseline/publisher/json-delivery", "profile": "dca-profile-baseline", "role": "publisher", "ref": "docs/spec--profiles.md#32-publisher-requirements"},
+    {"id": "dca-profile-baseline/issuer/direct-result", "profile": "dca-profile-baseline", "role": "issuer", "ref": "docs/spec--profiles.md#33-issuer-requirements"},
+    {"id": "dca-profile-baseline/client/direct-admission", "profile": "dca-profile-baseline", "role": "client", "ref": "docs/spec--profiles.md#34-client-requirements"},
+    {"id": "dca-profile-baseline/client/representation-processing", "profile": "dca-profile-baseline", "role": "client", "ref": "docs/spec--profiles.md#34-client-requirements"},
+    {"id": "dca-profile-baseline/client/json-delivery", "profile": "dca-profile-baseline", "role": "client", "ref": "docs/spec--profiles.md#34-client-requirements"},
+    {"id": "dca-profile-browser-origin/publisher/signed-origin", "profile": "dca-profile-browser-origin", "role": "publisher", "ref": "docs/spec--profiles.md#4-dca-profile-browser-origin-profile"},
+    {"id": "dca-profile-browser-origin/issuer/origin-admission", "profile": "dca-profile-browser-origin", "role": "issuer", "ref": "docs/spec--profiles.md#4-dca-profile-browser-origin-profile"},
+    {"id": "dca-profile-browser-origin/client/browser-origin", "profile": "dca-profile-browser-origin", "role": "client", "ref": "docs/spec--profiles.md#4-dca-profile-browser-origin-profile"},
+    {"id": "dca-profile-period-keys/publisher/period-key-supply", "profile": "dca-profile-period-keys", "role": "publisher", "ref": "docs/spec--profiles.md#5-dca-profile-period-keys-profile"},
+    {"id": "dca-profile-period-keys/issuer/period-key-result", "profile": "dca-profile-period-keys", "role": "issuer", "ref": "docs/spec--profiles.md#5-dca-profile-period-keys-profile"},
+    {"id": "dca-profile-period-keys/client/period-key-admission", "profile": "dca-profile-period-keys", "role": "client", "ref": "docs/spec--profiles.md#5-dca-profile-period-keys-profile"},
+    {"id": "dca-profile-chain-keys/publisher/chain-supply", "profile": "dca-profile-chain-keys", "role": "publisher", "ref": "docs/spec--profiles.md#51-dca-profile-chain-keys-profile"},
+    {"id": "dca-profile-chain-keys/client/chain-relay", "profile": "dca-profile-chain-keys", "role": "client", "ref": "docs/spec--profiles.md#51-dca-profile-chain-keys-profile"},
+    {"id": "dca-profile-chain-keys/issuer/chain-input", "profile": "dca-profile-chain-keys", "role": "issuer", "ref": "docs/spec--profiles.md#51-dca-profile-chain-keys-profile"},
+    {"id": "dca-profile-chain-keys/issuer/chain-output", "profile": "dca-profile-chain-keys", "role": "issuer", "ref": "docs/spec--profiles.md#51-dca-profile-chain-keys-profile"},
+    {"id": "dca-profile-chain-keys/client/projected-period-key-admission", "profile": "dca-profile-chain-keys", "role": "client", "ref": "docs/spec--profiles.md#12-conformance-claims"},
+    {"id": "dca-profile-chain-keys/client/chain-derivation", "profile": "dca-profile-chain-keys", "role": "client", "ref": "docs/spec--profiles.md#51-dca-profile-chain-keys-profile"},
+    {"id": "dca-profile-content-compression/publisher/gzip-compression", "profile": "dca-profile-content-compression", "role": "publisher", "ref": "docs/spec--profiles.md#6-dca-profile-content-compression-profile"},
+    {"id": "dca-profile-content-compression/client/gzip-decompression", "profile": "dca-profile-content-compression", "role": "client", "ref": "docs/spec--profiles.md#6-dca-profile-content-compression-profile"},
+    {"id": "dca-profile-html-carrier/publisher/markup-emission", "profile": "dca-profile-html-carrier", "role": "publisher", "ref": "docs/spec--profiles.md#9-dca-profile-html-carrier-profile"},
+    {"id": "dca-profile-html-carrier/client/markup-extraction", "profile": "dca-profile-html-carrier", "role": "client", "ref": "docs/spec--profiles.md#9-dca-profile-html-carrier-profile"},
+    {"id": "dca-profile-client-bound-ecdh-p256/client/offer-and-admit", "profile": "dca-profile-client-bound-ecdh-p256", "role": "client", "ref": "docs/spec--profiles.md#7-client-bound-custody-profiles"},
+    {"id": "dca-profile-client-bound-ecdh-p256/issuer/wrapped-result", "profile": "dca-profile-client-bound-ecdh-p256", "role": "issuer", "ref": "docs/spec--profiles.md#7-client-bound-custody-profiles"},
+    {"id": "dca-profile-client-bound-rsa-oaep/client/offer-and-admit", "profile": "dca-profile-client-bound-rsa-oaep", "role": "client", "ref": "docs/spec--profiles.md#7-client-bound-custody-profiles"},
+    {"id": "dca-profile-client-bound-rsa-oaep/issuer/wrapped-result", "profile": "dca-profile-client-bound-rsa-oaep", "role": "issuer", "ref": "docs/spec--profiles.md#7-client-bound-custody-profiles"},
+    {"id": "dca-profile-recipient-grant-unlock/publisher/signed-grant-mint", "profile": "dca-profile-recipient-grant-unlock", "role": "publisher", "ref": "docs/spec-profile--recipient-grant-unlock.md#21-common-signed-grant"},
+    {"id": "dca-profile-recipient-grant-unlock/issuer/configured-grant-mint", "profile": "dca-profile-recipient-grant-unlock", "role": "issuer", "ref": "docs/spec-profile--recipient-grant-unlock.md#21-common-signed-grant"},
+    {"id": "dca-profile-recipient-grant-unlock/client/recipient-presentation", "profile": "dca-profile-recipient-grant-unlock", "role": "client", "ref": "docs/spec-profile--recipient-grant-unlock.md#3-presentation"},
+    {"id": "dca-profile-recipient-grant-unlock/issuer/grant-admission-and-result", "profile": "dca-profile-recipient-grant-unlock", "role": "issuer", "ref": "docs/spec-profile--recipient-grant-unlock.md#4-issuer-admission-and-result"},
+    {"id": "dca-profile-recipient-grant-unlock/client/result-refusal", "profile": "dca-profile-recipient-grant-unlock", "role": "client", "ref": "docs/spec-profile--recipient-grant-unlock.md#5-client-admission-and-independent-attempts"}
+  ],
+  "selections": [
+    {"profile": "dca-profile-browser-origin", "scope": "route", "decider": "trusted-endpoint-contract", "ref": "docs/spec--profiles.md#4-dca-profile-browser-origin-profile", "choices": {"credentialMode": ["uncredentialed", "credentialed", "bearer"], "proxyMode": ["pass-through", "write"]}},
+    {"profile": "dca-profile-period-keys", "scope": "item-and-issuer-route", "decider": "trusted-publisher-configuration", "ref": "docs/spec--profiles.md#5-dca-profile-period-keys-profile", "choices": {"periodSupply": ["period-keys"], "itemContentKeyAlternative": ["retained", "omitted"]}},
+    {"profile": "dca-profile-chain-keys", "scope": "publisher-issuer-client-operation", "decider": "publisher-supply-and-trusted-issuer-client-selection", "ref": "docs/spec-profile--chain-keys.md#capability-and-configuration-model", "choices": {"supply": ["period-keys", "chain-keys", "both"], "selectedInput": ["period-keys", "chain-keys"], "issuerInput": "boolean", "relay": "boolean", "issuerOutput": ["period-keys", "chain-keys"], "projectedPeriodKeyAdmission": "boolean", "clientDerivation": "boolean", "responseForm": ["direct", "client-bound"]}, "requires": [{"if": {"supply": "period-keys"}, "then": {"selectedInput": "period-keys"}}, {"if": {"supply": "chain-keys"}, "then": {"selectedInput": "chain-keys"}}, {"if": {"selectedInput": "chain-keys"}, "then": {"relay": true, "issuerInput": true}}, {"if": {"issuerOutput": "chain-keys"}, "then": {"selectedInput": "chain-keys", "clientDerivation": true}}, {"if": {"selectedInput": "chain-keys", "issuerOutput": "period-keys"}, "then": {"projectedPeriodKeyAdmission": true}}]},
+    {"profile": "dca-profile-content-compression", "scope": "item", "decider": "publisher-authored-list", "ref": "docs/spec--profiles.md#6-dca-profile-content-compression-profile", "choices": {"itemRepresentation": ["unencoded", "gzip"]}},
+    {"profile": "dca-profile-html-carrier", "scope": "delivery", "decider": "publisher-publication-arrangement", "ref": "docs/spec--profiles.md#9-dca-profile-html-carrier-profile", "choices": {"deliveryCarrier": ["json", "html", "both"]}},
+    {"profile": "dca-profile-client-bound-ecdh-p256", "scope": "endpoint-and-response", "decider": "endpoint-contract-and-issuer-selection", "ref": "docs/spec--profiles.md#7-client-bound-custody-profiles", "choices": {"endpointMode": ["required", "fallback-permitted"], "directFallbackAccepted": "boolean"}, "requires": [{"if": {"endpointMode": "fallback-permitted"}, "then": {"directFallbackAccepted": true}}]},
+    {"profile": "dca-profile-client-bound-rsa-oaep", "scope": "endpoint-and-response", "decider": "endpoint-contract-and-issuer-selection", "ref": "docs/spec--profiles.md#7-client-bound-custody-profiles", "choices": {"endpointMode": ["required", "fallback-permitted"], "directFallbackAccepted": "boolean"}, "requires": [{"if": {"endpointMode": "fallback-permitted"}, "then": {"directFallbackAccepted": true}}]},
+    {"profile": "dca-profile-recipient-grant-unlock", "scope": "recipient-attempt", "decider": "trusted-recipient-host-selection", "ref": "docs/spec-profile--recipient-grant-unlock.md#2-grant-and-endpoint-agreement", "choices": {"caller": ["browser", "non-browser"]}, "requiresProfiles": [{"if": {"caller": "browser"}, "profiles": ["dca-profile-browser-origin"]}]}
+  ]
+}

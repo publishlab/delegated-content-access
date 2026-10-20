@@ -1,11 +1,13 @@
 # Vectors
 
 Recorded wire bytes for any implementation to replay. The JavaScript reference
-owns its explicit vector-test tier under `../../js/v1/test-vectors/`.
+owns its explicit vector-test tier under `../../js/test-vectors/`.
 
 Whole-protocol renders and unlock requests are test fixtures rather than
-primitive vector sets. They live in `../fixtures/protocol-v1/`, whose manifest
-selects them for portable base contracts or reference tests.
+primitive vector sets. They live under [`../fixtures/`](../fixtures/README.md),
+where each package declares exact membership and assertion consumers. The
+three protocol fixture packages that `js/tools/make-vectors.js` writes stay
+separate from the dedicated period-key composition package and its recorder.
 
 This subtree is passive recorded data. It imports and executes nothing; each
 consumer selects its set explicitly. The independent
@@ -32,21 +34,47 @@ wins over 1 when both apply.
 
 ## The run manifest
 
-`sets.txt` names one set directory per data line and owns the complete vector
-walk. `read-sets.sh` validates that walk and `check-sums.sh` hashes every set
-in it. A set that fails ends the run red.
+`sets.txt` names one set path per data line and owns the complete vector
+walk. It includes direct child sets, baseline algorithm packages at exact
+depth `v1/baseline/<item>/`, profile packages at
+`v1/profiles/<profile>/`, and recorded alternatives at
+`v1/experiments/<experiment>/`. The `v1/` directory is a container that
+holds only those three group directories, and every set is flat.
+`read-sets.sh` validates that walk and `check-sums.sh` hashes every listed
+set. A set that fails ends the run red.
 
 The shared readers implement both of these rules:
 
 - A directory named in `sets.txt` that is missing is a failure, not a skip.
-- A set directory sitting beside `sets.txt` that no line names is a failure.
+- A root set or nested package that no line names is a failure.
+- A file or directory off that layout is a failure, and the reader names each
+  one: `v1/extras/hidden/vector.json`, `v1/baseline/stray.json` and
+  `v1/baseline/<item>/nested/` all sit where no walk reads them. Beside
+  `sets.txt` it refuses only JSON files and `SHA256SUMS`.
 
-The second rule catches a forgotten line. Without it, someone adds a set
-directory, forgets the line, and the checksum walk silently passes the
-directory by and still reports green.
+The second rule catches a forgotten line. Without it, someone adds a
+package, forgets the line, and the checksum walk silently passes the package
+by and still reports green. Each listed package also refuses a JSON member
+absent from its `SHA256SUMS`.
 
-The public `../../js/check` runs no vector command. Run `check-sums.sh` or the
-explicit JavaScript vector tier when checking these recorded sources.
+The public `../../js/check` runs no vector command. Run `check-sums.sh` for
+recorded-byte integrity, or `sh check-replays.sh` for the explicit all-set
+maintainer gate. The latter validates the full set manifest, checksums and
+set-to-replayer map, then runs the JavaScript vector tests and the independent
+Python chain-key replay. Each replayer checks exact member coverage for its
+set. This aggregate is not a role-scoped conformance claim.
+When changing the Python chain-key replayer's membership check, run
+`python3 check-chain-key-primitives.test.py` from this directory. That
+focused self-test remains a maintainer command; the public JavaScript test
+gate does not depend on Python or claim to test this tool.
+
+The [claim-index pilot](../claim-index/README.md) lists every package in this
+walk. All eight pilots select the baseline ECDH carrier-open package. The
+client-bound ECDH and RSA-OAEP pilots also select their respective profile
+packages. The baseline RSA-OAEP and chain-key construction packages remain
+`unmapped`, and the BIND package is an `experiment`. A package's path under
+`v1/baseline/` or `v1/profiles/` names what it records, not a claim that it
+covers that profile's duties.
 
 ## Replay payload formats
 
@@ -54,15 +82,17 @@ explicit JavaScript vector tier when checking these recorded sources.
 does not decide whether the containing record is a vector or fixture. The
 record's path, package manifest, consuming boundary and assertions make that
 classification. Each format has its own replay path.
-The base set `v1/` carries format 3. Format 4 lives in
-`v1-alt--bind-on-renderId-and-slot/`, and the two client-bound sets carry
-`"profile"`. A set can gain a format after this sentence was written, so read
+The optional baseline `v1/baseline/rsa-oaep-envelope-open/` package carries
+format 3. Format 4 lives in
+`v1/experiments/bind-on-renderId-and-slot/`, and the two client-bound sets carry
+`"profile"`. The baseline ECDH carrier-open package carries
+`"ecdh-p256-envelope-open/v1"`. A set can gain a format after this sentence was written, so read
 each file's own `vectorFormat`.
 
 **Format 1 is a render.** The file carries an `input` on one side and the wire
 it produces on the other. Seal the input, diff `expected`, then walk the
 recorded wire on its own: unseal each blob, decrypt each ciphertext, and recover
-each independently supplied exact periodKey with no derivation input in reach.
+each independently supplied periodKey with no derivation input in reach.
 It pins what a conformant implementation produces.
 
 Run it both ways. Unsealing shows an implementation can read the wire; only
@@ -93,7 +123,7 @@ protocol bytes, the signatures over them, the binding reconstruction, the
 refusal classes and the fail-closed private-key reach. HTTP, routing and
 endpoint policy are outside it: no transport status is recorded here, and no
 vector records how a deployment finds a signing key. Those belong to the
-endpoint contract under `../../js/v1/test-contract/issuer-endpoint/`, and a
+endpoint contract under `../../js/test-contract/issuer-endpoint/`, and a
 replayer that gets every byte right does not fail this corpus over a status code
 or a key it was handed rather than told to look up. These vectors pin what a
 conformant implementation declines to produce, the half that positive vectors
@@ -126,10 +156,20 @@ are joined on yields no binding value at all, and structural admission refuses
 the whole request before any coordinate is answered. The section
 "What a conformant issuer answers" below says which vector does which.
 
-**Format 3 is a base RSA-OAEP open.** A replayer opens a recorded ciphertext and
+**Format 3 is an optional baseline RSA-OAEP envelope open.** A replayer opens a
+recorded ciphertext and
 compares the recovered binding-plus-key whole; OAEP seals are randomized and
 cannot be byte-replayed. **Format 4** is the focused bound-carrier fixture:
 deterministic ECDH seals and an RSA-OAEP open under one binding grammar.
+
+**`ecdh-p256-envelope-open/v1` is a baseline content-key carrier open.** Its
+recorded blob and issuer test key were extracted from the `seal-ecdh` fixture
+that mixes content keys and period keys. An independent replay imports the issuer
+private key, parses the 65-byte ephemeral point and 12-byte nonce, derives the
+raw 32-byte ECDH x-coordinate, and uses those bytes directly as an AES-256-GCM
+key. The recorded BIND is UTF-8 additional data; a changed coordinate fails
+the tag. The package isolates one baseline carrier observation without
+counting the mixed render as baseline-only or claiming a complete profile.
 
 A replay that meets a `vectorFormat` it does not know has to fail, not skip.
 A vector nobody executes still leaves the run green. A replayer enumerates
@@ -139,36 +179,57 @@ than by shape, for the same reason. The `SHA256SUMS` beside it falls outside the
 glob, and `check-sums.sh` reads that one.
 
 **Profile vectors are portable replay contracts.** Their `vectorFormat` is
-`"profile"` and their `profile` string names a versioned delivery profile.
-`client-bound-ecdh-p256/v1` exposes the client key, the issuer ephemeral
-keypair, the delivery key, the nonce, the client-bound transport fields and the
-resulting profile wire. Its public JWK is the semantic P-256 point only (`kty`,
-`crv`, `x`, `y`), avoiding browser-specific JWK export metadata, and the
-injected ephemeral pair and nonce keep both directions repeatable, so a
-replayer reproduces both. `client-bound-rsa-oaep/v1` exposes a client key, the
-transport fields and a recorded `{key}` ciphertext for the open direction only,
-because an OAEP seal cannot be compared byte-for-byte. Neither fixture imports
-issuer, page, or request context; they carry only client key material, delivery
-keys and profile crypto inputs.
+`"profile"` and their `profile` string names the selected delivery profile.
+`dca-profile-client-bound-ecdh-p256` exposes the client key, issuer ephemeral keypair,
+client-bound transport fields and three `deliveredKeys`: one content key,
+one period key and one chain key. Each records its key kind, delivery key,
+nonce and kind context. Its public JWK is the semantic P-256 point only (`kty`,
+`crv`, `x`, `y`), avoiding browser-specific JWK export metadata. The injected
+ephemeral pair and nonces keep sealing repeatable, so a replayer checks both
+directions. `dca-profile-client-bound-rsa-oaep` likewise records three delivered keys, each
+opened with its key-kind context as the OAEP label; its recorded `{key}`
+ciphertexts are open-only because OAEP sealing is randomized. Neither fixture
+imports issuer, page or request context; they carry client key material,
+delivery keys and profile crypto inputs.
 
-**Period-chain primitive vectors are recorded construction-profile bytes.** Their
-`vectorFormat` is `"period-chain-primitives-v1"`; their `profile` names the
-period-chain construction profile whose outputs they record. They are not a
-complete delivery-profile claim.
+**Chain-key primitive vectors are recorded construction bytes.** Their
+`vectorFormat` is `"chain-key-primitives-v1"`; their `profile` names
+`dca-profile-chain-keys`, which selects the
+`dca-construction-chain-keys` construction whose outputs they record. They
+are not a complete delivery-profile claim.
+
+The chain-key rows are literal recorded observations with no generator. A
+standard-library Python script checks them independently:
+
+```sh
+python3 verification/vectors/check-chain-key-primitives.py
+```
+
+It builds the section 6.4 contexts of `../../docs/spec-profile--chain-keys.md`
+itself, runs HKDF-SHA-256 with an empty salt, and compares every recorded info,
+ikm and okm, plus the values of the JavaScript canonical fixture that it can
+derive. This set and that fixture both record `dca-profile-chain-keys` bytes, so a
+row they share holds the same value in both. The conformance `hkdf/01` to `hkdf/11` expectations are
+literal recorded observations too; the script checks each as plain
+HKDF-SHA-256 from its own recorded ikm, info and length and compares none of
+them with the chain-key rows. No replay reads superseded construction records. The
+script also refuses another JSON vector beside its named member, so a new
+member cannot sit in the set without a replay. It imports no implementation,
+writes nothing, and exits 1 on any disagreement.
 
 ## Inside a sealed blob
 
 A value under `sealed.contentKeys` or `sealed.periodKeys` is base64url of a
 self-contained blob, and the two key types lay those bytes out differently. The
 wire carries no algorithm field, because the issuer knows its own key type.
-`../../js/v1/core-shared--publisher-issuer/keySealing.js` seals and opens both.
+`../../js/core-shared--publisher-issuer/keySealing.js` seals and opens both.
 
 **ECDH P-256** uses fixed-size fields with no length prefixes, and the envelope
 specification carries their field table:
 [ECDH P-256 envelope](../../docs/spec--sealed-key-envelopes.md#4-ecdh-p-256-envelope).
 The reference reads those same three offsets out of `EPHEMERAL_BYTES` in
 `keySealing.js` and `NONCE_BYTES` and `TAG_BYTES` in
-`../../js/v1/core-shared/aead.js`, which are 65, 12 and 16, so the canonical
+`../../js/core-shared/aead.js`, which are 65, 12 and 16, so the canonical
 16-byte key seals to 109 bytes and 146 base64url characters. The binding value
 travels outside those bytes, as the AES-256-GCM `additionalData` that the issuer
 rebuilds and the tag covers.
@@ -211,10 +272,10 @@ attack is gone before the run starts. Anything on the path that re-encodes a
 body (a proxy, a framework that normalizes JSON, a test helper that takes an
 object) removes what is being tested.
 
-## What a conformant issuer answers
+## What the reference issuer answers
 
 Where a paragraph below names a function, that function belongs to the
-JavaScript reference under `../../js/v1/`.
+JavaScript reference under `../../js/`.
 
 **A request that fails integrity is refused whole.** The signed resource
 carries the renderId every blob of that render is bound to, so a signature that
@@ -271,9 +332,9 @@ delimiter inside a bound field, so a blind join rebuilds the exact string the
 blob was sealed under, the tag verifies, and a key comes back at a coordinate
 `expected.keys` does not list. Take the ban out of a binding builder and the
 older pair still passes while these two fail, handing back
-`periodKeys.premium.sport|251023T14` and `contentKeys.body|text`. The
+`periodKeys.premium.sport|251023T1400` and `contentKeys.body|text`. The
 accessgroup one carries the collision the ban exists for: `("premium|sport",
-"251023T14")` and `("premium", "sport|251023T14")` join to one string. The
+"251023T1400")` and `("premium", "sport|251023T1400")` join to one string. The
 contentname one is there because an issuer that runs the ban on the two fields
 that can collide and skips `contentName` passes everything else in the corpus
 and still hands a key back.
@@ -293,7 +354,7 @@ work the attacker wanted.
 cache sends half the blobs, so a short request is ordinary and the issuer
 answers the coordinates the body carries. A blob at a coordinate the publisher
 never sealed it at is caught at the unseal: the issuer rebuilds
-`dca-bind-v1|c|` + renderId + `|` + contentName as the AES-256-GCM
+`dca-bind-key-envelope|c|` + renderId + `|` + contentName as the AES-256-GCM
 additionalData,
 the tag fails, and `reject-unknown-contentname` records that as `unseal_failed`
 at that one coordinate inside a 200.
@@ -310,9 +371,13 @@ contentKey or nothing.
 **Own-property lookups on everything off the wire.** Every map in a request is
 keyed by a name the client picked, `constructor` and `__proto__` included.
 
+These codes and exact statuses describe the reference issuer; the browser
+binding fixes status classes where noted, not every code or exact status.
 Each whole-request refusal names the check that refused. `invalid_json`,
-`too_many_entries`, `unknown_key`, `bad_version`, `bad_jwt`, `bad_alg`,
-`bad_signature`, `unknown_publisher_key` and `binding_failed` answer 400,
+`too_many_entries`, `bad_version`, `bad_jwt`, `bad_alg`,
+`bad_signature`, `unknown_publisher_key` and `binding_failed` answer 400.
+An out-of-scope issuer alias is terminal 4xx; an unknown opening-key version
+is operational 5xx (503 in the reference). `policy_unavailable` is 503,
 `body_too_large` answers 413, and `denied` answers 401.
 `internal_error` sits outside that map: `IssuerProcessor` re-codes a
 `bad_config` thrown beneath it to `internal_error` at the request boundary,
@@ -327,7 +392,7 @@ what its `errorDetail` option selects, either that code or the one word
 `rejected` for every refusal alike.
 
 **The refusal body is one member.** `refusalBody` in
-`../../js/v1/ports/UnlockEndpoint.js` writes it, and the port passes it no detail
+`../../js/ports/UnlockEndpoint.js` writes it, and the port passes it no detail
 of its own, so a refusal puts exactly this on the wire:
 
 | `errorDetail` | body | |
@@ -348,7 +413,7 @@ under `code` the body carries that unmapped code.
 `unseal_failed` under both settings.
 
 A host that words its own refusals hands `refusalBody` extra members, and only
-`code` keeps them. `IssuerServer` in `../../js/v1/demo/actors/` adds `issuerName`,
+`code` keeps them. `IssuerServer` in `../../js/demo/actors/` adds `issuerName`,
 so a fault there reads
 `{"error":"internal_error","issuerName":"paywall_subscription_service"}` under
 `code` and `{"error":"rejected"}` under `uniform`. Uniform drops host detail
@@ -385,12 +450,11 @@ as documented by the decoder in Go's `encoding/base64` package, .NET
 because it skips any whitespace anywhere, and Python because it discards every
 non-alphabet character.
 
-The data format needs a decision here, not a lane fix: whether
-base64url fields are canonical. If they are, every implementation decodes,
-re-encodes unpadded, and compares against the input, because no decoder does the
-whole job. Two vectors would settle it, a value spelled with non-zero trailing
-bits and the same value spelled with an embedded space, each with a recorded
-verdict.
+The [data format](../../docs/spec--data-format.md#22-binary-strings)
+requires canonical base64url. A decoder must enforce the admitted alphabet,
+length and trailing bits; decoding and unpadded re-encoding can check canonical
+spelling. Recorded refusal cases for non-zero trailing bits and an embedded
+space remain evidence work; they do not decide the already-adopted rule.
 
 **A shared secret is a fixed-width field element.** Every runtime checked
 returns the full 32 bytes for P-256, left zero padded, including when the
@@ -432,9 +496,11 @@ comparing raw response text matches only its own encoder.
 **PHP takes an AES key of any length and uses the first 32 bytes.** A 33-byte and
 a 64-byte key sharing their first 32 bytes both return the correct plaintext, so
 a wrong key looks like a right answer. Go, Python, the JVM and .NET each refuse a
-key that is not 32 bytes and a nonce that is not 12. The data format needs one
-sentence here: the key is exactly 32 bytes and the nonce exactly 12, and another
-width is malformed input rather than something to trim.
+key that is not 32 bytes and a nonce that is not 12. The selected
+[ECDH envelope](../../docs/spec--sealed-key-envelopes.md#4-ecdh-p-256-envelope)
+already fixes a 32-octet wrapping key and a 12-octet nonce; another width is
+malformed input, not permission to trim. These are envelope widths, not the
+16-octet item-content or ordinary period-key width.
 
 **A carrier shorter than the 16-byte tag has no agreed answer.** Python, Go, the
 JVM and .NET report the authentication refusal, the JVM reaching it through
@@ -477,7 +543,7 @@ across those builds.
 | .NET | built-in HKDF |
 | WebCrypto | `deriveBits` under HKDF |
 
-The one trap is an empty salt, which the period-chain and client-bound-transport
+The one trap is an empty salt, which the chain-key and client-bound-transport
 constructions both use. Java throws on a zero-length `SecretKeySpec` key, so
 widen the salt to 32 zero bytes; .NET's built-in treats a null salt exactly as a
 zero-length one, which confirms that reading from the outside. A hand-rolled
@@ -512,11 +578,13 @@ returns false rather than throwing, so nothing points at the encoding.
 
 ## Replay ownership
 
-Current JavaScript replay lives in `../../js/v1/test-vectors/`.
+Current JavaScript replay lives in `../../js/test-vectors/`.
 This vector directory owns recorded bytes, set metadata and checksum behavior.
 
 ## Where the rest is written
 
-Lane READMEs carry what is genuinely lane-specific: how that runtime is
-installed and built, and what its crypto library gets wrong.
-`../conformance-primitives/jvm/README.md` is the current example of that split.
+Lane READMEs carry what is genuinely lane-specific: the runtime README says how
+that runtime is installed, the binding README says how the bridge is built and
+what its crypto library gets wrong. `../conformance-primitives/jvm/README.md`
+and `../conformance-primitives/jvm/jca-jackson/README.md` are the current
+example of that split.

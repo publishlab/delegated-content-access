@@ -1,0 +1,1119 @@
+{
+  "name": "seal-factory-refusals",
+  "vectorFormat": "sealer-factory-refusal-v2",
+  "description": "Refusals of Sealers built through the factory from plain setup. Values are JSON, with the tagged values of the test bridge frames at any depth (js/test-bridges/_shared/CONTRACT.md): {\"$type\":\"Uint8Array\",\"base64url\":...} is a byte string in unpadded base64url, {\"$type\":\"Date\",\"iso\":...} is a UTC instant with milliseconds, and {\"$type\":\"Record\",\"value\":{...}} is an ordinary record that has a $type member. Decode the whole record with that one codec before a replay reads it. input.setup is the setup of a sealer-factory-v3 record; set and unset name members as the factory takes them. For each entry of cases, lay the members of set over input.setup, remove the members named in unset, and build the Sealer with your port's mapped factory. Then make the calls in order: each is [member, args] on the Sealer. The last call must refuse, or the factory itself when calls is empty or absent, with a DCA error whose code is expected.code; the calls before it must not refuse. A port may refuse at once or through a promise. The message is the port's own and is not pinned.",
+  "input": {
+    "setup": {
+      "origin": "https://www.news-site.example",
+      "signingKid": "sign-2025-10",
+      "issuers": [
+        {
+          "issuerName": "paywall_subscription_service",
+          "keyId": "2025-10",
+          "algorithm": "ecdh-p256"
+        }
+      ],
+      "fixedInstant": {
+        "$type": "Date",
+        "iso": "2025-10-23T14:20:00.000Z"
+      },
+      "randomStream": {
+        "$type": "Uint8Array",
+        "base64url": "jh_hn_zoThuHc0mC1e_4orCEc0om_kLDe5oB9MilIytJhE1tzcWQC73GD0o"
+      },
+      "testKeyDocuments": {
+        "signingKeys": {
+          "sign-2025-10": "-----BEGIN PRIVATE KEY-----\nMIGHAgEAMBMGByqGSM49AgEGCCqGSM49AwEHBG0wawIBAQQg7O8VtGxSny/jVf0D\nTjDtzhrSwJJXy6MFOcFHjeyM0oihRANCAASG7kcwEmbWL8OZzn5Op+cM+XIGEddc\nzLTv8Ed6ieAFYxSThUQ5PCT3TOOlPrnNt+NfuYJdOKomOLim2XmPfmBY\n-----END PRIVATE KEY-----\n"
+        },
+        "issuerPublicKeys": {
+          "2025-10": "-----BEGIN PUBLIC KEY-----\nMFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAEuXUf+qgjGmMkv5rRX+wv2KR7RrP5\nl7+s8I/QbvWZyrO3bignf8lM4cxuA612rVe0v+TqU2N+C1MeK3e1EfqNNw==\n-----END PUBLIC KEY-----\n"
+        }
+      },
+      "issuerSupplyPlans": {
+        "paywall_subscription_service": {
+          "contentKeyNames": [
+            "bodytext"
+          ],
+          "suppliedAccessGroups": []
+        }
+      }
+    }
+  },
+  "cases": [
+    {
+      "name": "origin missing",
+      "unset": [
+        "origin"
+      ],
+      "expected": {
+        "code": "bad_config"
+      }
+    },
+    {
+      "name": "origin www.news-site.example",
+      "set": {
+        "origin": "www.news-site.example"
+      },
+      "expected": {
+        "code": "bad_config"
+      }
+    },
+    {
+      "name": "origin HTTPS://www.news-site.example",
+      "set": {
+        "origin": "HTTPS://www.news-site.example"
+      },
+      "expected": {
+        "code": "bad_config"
+      }
+    },
+    {
+      "name": "origin https://www.news-site.example/",
+      "set": {
+        "origin": "https://www.news-site.example/"
+      },
+      "expected": {
+        "code": "bad_config"
+      }
+    },
+    {
+      "name": "origin https://www.news-site.example:443",
+      "set": {
+        "origin": "https://www.news-site.example:443"
+      },
+      "expected": {
+        "code": "bad_config"
+      }
+    },
+    {
+      "name": "origin https://www.news-site.example/news",
+      "set": {
+        "origin": "https://www.news-site.example/news"
+      },
+      "expected": {
+        "code": "bad_config"
+      }
+    },
+    {
+      "name": "origin https://www.news-site.example|x",
+      "set": {
+        "origin": "https://www.news-site.example|x"
+      },
+      "expected": {
+        "code": "bad_config"
+      }
+    },
+    {
+      "name": "origin https://[2001:DB8::1]",
+      "set": {
+        "origin": "https://[2001:DB8::1]"
+      },
+      "expected": {
+        "code": "bad_config"
+      }
+    },
+    {
+      "name": "origin https://[fe80::1%25eth0]",
+      "set": {
+        "origin": "https://[fe80::1%25eth0]"
+      },
+      "expected": {
+        "code": "bad_config"
+      }
+    },
+    {
+      "name": "origin https://[2001:db8::1",
+      "set": {
+        "origin": "https://[2001:db8::1"
+      },
+      "expected": {
+        "code": "bad_config"
+      }
+    },
+    {
+      "name": "origin http://publisher.example without the profile",
+      "set": {
+        "origin": "http://publisher.example"
+      },
+      "expected": {
+        "code": "bad_config"
+      }
+    },
+    {
+      "name": "origin http://localhost:8080 without the profile",
+      "set": {
+        "origin": "http://localhost:8080"
+      },
+      "expected": {
+        "code": "bad_config"
+      }
+    },
+    {
+      "name": "origin http://www-default.localhost without the profile",
+      "set": {
+        "origin": "http://www-default.localhost"
+      },
+      "expected": {
+        "code": "bad_config"
+      }
+    },
+    {
+      "name": "origin http://publisher.example with the profile",
+      "set": {
+        "origin": "http://publisher.example",
+        "developmentHttpOrigin": true
+      },
+      "expected": {
+        "code": "bad_config"
+      }
+    },
+    {
+      "name": "origin http://[::1]:8080 with the profile",
+      "set": {
+        "origin": "http://[::1]:8080",
+        "developmentHttpOrigin": true
+      },
+      "expected": {
+        "code": "bad_config"
+      }
+    },
+    {
+      "name": "domain",
+      "set": {
+        "domain": "www.news-site.example"
+      },
+      "expected": {
+        "code": "unsupported_option"
+      }
+    },
+    {
+      "name": "periodKeySupplies",
+      "set": {
+        "periodKeySupplies": true
+      },
+      "expected": {
+        "code": "unsupported_option"
+      }
+    },
+    {
+      "name": "ephemeralKeyPairs",
+      "set": {
+        "ephemeralKeyPairs": true
+      },
+      "expected": {
+        "code": "unsupported_option"
+      }
+    },
+    {
+      "name": "periodSecret",
+      "set": {
+        "periodSecret": null
+      },
+      "expected": {
+        "code": "bad_config"
+      }
+    },
+    {
+      "name": "content value 42",
+      "calls": [
+        [
+          "content",
+          [
+            "bodytext",
+            42,
+            "text/html",
+            {}
+          ]
+        ]
+      ],
+      "expected": {
+        "code": "bad_config"
+      }
+    },
+    {
+      "name": "content value [1, 2, 3]",
+      "calls": [
+        [
+          "content",
+          [
+            "bodytext",
+            [
+              1,
+              2,
+              3
+            ],
+            {
+              "accessGroups": [
+                "premium"
+              ]
+            }
+          ]
+        ]
+      ],
+      "expected": {
+        "code": "unsupported_option"
+      }
+    },
+    {
+      "name": "accessGroups a string",
+      "calls": [
+        [
+          "content",
+          [
+            "bodytext",
+            "article",
+            "text/html",
+            {
+              "accessGroups": "premium"
+            }
+          ]
+        ]
+      ],
+      "expected": {
+        "code": "bad_config"
+      }
+    },
+    {
+      "name": "content type left out",
+      "calls": [
+        [
+          "content",
+          [
+            "bodytext",
+            "<p>x</p>"
+          ]
+        ]
+      ],
+      "expected": {
+        "code": "bad_config"
+      }
+    },
+    {
+      "name": "content type 7",
+      "calls": [
+        [
+          "content",
+          [
+            "bodytext",
+            "<p>x</p>",
+            7,
+            {
+              "accessGroups": [
+                "premium"
+              ]
+            }
+          ]
+        ]
+      ],
+      "expected": {
+        "code": "bad_config"
+      }
+    },
+    {
+      "name": "descriptor {}",
+      "calls": [
+        [
+          "content",
+          [
+            "bodytext",
+            {},
+            {}
+          ]
+        ]
+      ],
+      "expected": {
+        "code": "bad_config"
+      }
+    },
+    {
+      "name": "descriptor bytes a list",
+      "calls": [
+        [
+          "content",
+          [
+            "bodytext",
+            {
+              "bytes": [
+                1,
+                2,
+                3
+              ],
+              "contentType": "text/html",
+              "contentEncodings": [
+                "example"
+              ]
+            },
+            {}
+          ]
+        ]
+      ],
+      "expected": {
+        "code": "bad_config"
+      }
+    },
+    {
+      "name": "descriptor without contentEncodings",
+      "calls": [
+        [
+          "content",
+          [
+            "bodytext",
+            {
+              "bytes": {
+                "$type": "Uint8Array",
+                "base64url": "AQID"
+              },
+              "contentType": "text/html"
+            },
+            {}
+          ]
+        ]
+      ],
+      "expected": {
+        "code": "bad_config"
+      }
+    },
+    {
+      "name": "descriptor without contentType",
+      "calls": [
+        [
+          "content",
+          [
+            "bodytext",
+            {
+              "bytes": {
+                "$type": "Uint8Array",
+                "base64url": "AQID"
+              },
+              "contentEncodings": [
+                "example"
+              ]
+            },
+            {}
+          ]
+        ]
+      ],
+      "expected": {
+        "code": "bad_config"
+      }
+    },
+    {
+      "name": "descriptor contentEncodings a string",
+      "calls": [
+        [
+          "content",
+          [
+            "bodytext",
+            {
+              "bytes": {
+                "$type": "Uint8Array",
+                "base64url": "AQID"
+              },
+              "contentType": "text/html",
+              "contentEncodings": "example"
+            },
+            {}
+          ]
+        ]
+      ],
+      "expected": {
+        "code": "bad_config"
+      }
+    },
+    {
+      "name": "descriptor contentEncodings [\"\"]",
+      "calls": [
+        [
+          "content",
+          [
+            "bodytext",
+            {
+              "bytes": {
+                "$type": "Uint8Array",
+                "base64url": "AQID"
+              },
+              "contentType": "text/html",
+              "contentEncodings": [
+                ""
+              ]
+            },
+            {}
+          ]
+        ]
+      ],
+      "expected": {
+        "code": "bad_config"
+      }
+    },
+    {
+      "name": "descriptor contentEncodings with a number",
+      "calls": [
+        [
+          "content",
+          [
+            "bodytext",
+            {
+              "bytes": {
+                "$type": "Uint8Array",
+                "base64url": "AQID"
+              },
+              "contentType": "text/html",
+              "contentEncodings": [
+                "example",
+                7
+              ]
+            },
+            {}
+          ]
+        ]
+      ],
+      "expected": {
+        "code": "bad_config"
+      }
+    },
+    {
+      "name": "descriptor with an extra member",
+      "calls": [
+        [
+          "content",
+          [
+            "bodytext",
+            {
+              "bytes": {
+                "$type": "Uint8Array",
+                "base64url": "AQID"
+              },
+              "contentType": "text/html",
+              "contentEncodings": [
+                "example"
+              ],
+              "extra": true
+            },
+            {}
+          ]
+        ]
+      ],
+      "expected": {
+        "code": "unsupported_option"
+      }
+    },
+    {
+      "name": "descriptor with legacy contentType and options",
+      "calls": [
+        [
+          "content",
+          [
+            "bodytext",
+            {
+              "bytes": {
+                "$type": "Uint8Array",
+                "base64url": "AQID"
+              },
+              "contentType": "text/html",
+              "contentEncodings": [
+                "example"
+              ]
+            },
+            "text/html",
+            {}
+          ]
+        ]
+      ],
+      "expected": {
+        "code": "bad_config"
+      }
+    },
+    {
+      "name": "descriptor with legacy contentType",
+      "calls": [
+        [
+          "content",
+          [
+            "bodytext",
+            {
+              "bytes": {
+                "$type": "Uint8Array",
+                "base64url": "AQID"
+              },
+              "contentType": "text/html",
+              "contentEncodings": [
+                "example"
+              ]
+            },
+            "text/html"
+          ]
+        ]
+      ],
+      "expected": {
+        "code": "bad_config"
+      }
+    },
+    {
+      "name": "a list instead of a fixed period-key record",
+      "set": {
+        "fixedPeriodKeys": []
+      },
+      "expected": {
+        "code": "bad_config"
+      }
+    },
+    {
+      "name": "a list instead of an access group's period-key record",
+      "set": {
+        "fixedPeriodKeys": {
+          "premium": []
+        }
+      },
+      "expected": {
+        "code": "bad_config"
+      }
+    },
+    {
+      "name": "a read past the end of the random stream",
+      "set": {
+        "randomStream": {
+          "$type": "Uint8Array",
+          "base64url": "Vi-x-1r7zHFG5LszBQPs5akAZX8PGQVM4PwxNWMbQBH8aJI5ovs"
+        }
+      },
+      "calls": [
+        [
+          "resource",
+          [
+            "123456",
+            {}
+          ]
+        ],
+        [
+          "content",
+          [
+            "bodytext",
+            "<p>The council voted 7-2 to rezone the harbour.</p>",
+            "text/html",
+            {
+              "accessGroups": []
+            }
+          ]
+        ],
+        [
+          "seal",
+          []
+        ]
+      ],
+      "expected": {
+        "code": "bad_config"
+      }
+    },
+    {
+      "name": "a random stream that is a list of numbers",
+      "set": {
+        "randomStream": [
+          1,
+          2,
+          3
+        ]
+      },
+      "expected": {
+        "code": "bad_config"
+      }
+    },
+    {
+      "name": "a period the fixed keys do not list",
+      "set": {
+        "randomStream": {
+          "$type": "Uint8Array",
+          "base64url": "2r-SVliDhRAUnIq6khgyOxaz_7v48qaDHJYVKpx20UFK5_GO0IPaZaIicHJat0JTW1mKB6qBY3Qr7_wc0PZKV6D9Hn16YhWIE2gROu4aIkMUdOGRIT2vRgrWHfI"
+        },
+        "fixedPeriodKeys": {
+          "premium": {
+            "251023T1400": {
+              "$type": "Uint8Array",
+              "base64url": "oaGhoaGhoaGhoaGhoaGhoQ"
+            }
+          }
+        }
+      },
+      "calls": [
+        [
+          "resource",
+          [
+            "123456",
+            {
+              "section": "politics"
+            }
+          ]
+        ],
+        [
+          "content",
+          [
+            "bodytext",
+            "<p>The council voted 7-2 to rezone the harbour.</p>",
+            "text/html",
+            {
+              "accessGroups": [
+                "premium"
+              ]
+            }
+          ]
+        ],
+        [
+          "seal",
+          []
+        ]
+      ],
+      "expected": {
+        "code": "bad_config"
+      }
+    },
+    {
+      "name": "a clock in the setup",
+      "set": {
+        "clock": {}
+      },
+      "expected": {
+        "code": "bad_config"
+      }
+    },
+    {
+      "name": "a random in the setup",
+      "set": {
+        "random": {}
+      },
+      "expected": {
+        "code": "bad_config"
+      }
+    },
+    {
+      "name": "an empty signing-key document",
+      "set": {
+        "testKeyDocuments": {
+          "signingKeys": {
+            "sign-2025-10": ""
+          },
+          "issuerPublicKeys": {
+            "2025-10": "-----BEGIN PUBLIC KEY-----\nMFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAEuXUf+qgjGmMkv5rRX+wv2KR7RrP5\nl7+s8I/QbvWZyrO3bignf8lM4cxuA612rVe0v+TqU2N+C1MeK3e1EfqNNw==\n-----END PUBLIC KEY-----\n"
+          }
+        }
+      },
+      "expected": {
+        "code": "bad_config"
+      }
+    },
+    {
+      "name": "a public-key document as the signing key",
+      "set": {
+        "testKeyDocuments": {
+          "signingKeys": {
+            "sign-2025-10": "-----BEGIN PUBLIC KEY-----\nMFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAEuXUf+qgjGmMkv5rRX+wv2KR7RrP5\nl7+s8I/QbvWZyrO3bignf8lM4cxuA612rVe0v+TqU2N+C1MeK3e1EfqNNw==\n-----END PUBLIC KEY-----\n"
+          },
+          "issuerPublicKeys": {
+            "2025-10": "-----BEGIN PUBLIC KEY-----\nMFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAEuXUf+qgjGmMkv5rRX+wv2KR7RrP5\nl7+s8I/QbvWZyrO3bignf8lM4cxuA612rVe0v+TqU2N+C1MeK3e1EfqNNw==\n-----END PUBLIC KEY-----\n"
+          }
+        }
+      },
+      "expected": {
+        "code": "bad_config"
+      }
+    },
+    {
+      "name": "a framed private-key document that does not import",
+      "set": {
+        "testKeyDocuments": {
+          "signingKeys": {
+            "sign-2025-10": "-----BEGIN PRIVATE KEY-----\nAAAA\n-----END PRIVATE KEY-----"
+          },
+          "issuerPublicKeys": {
+            "2025-10": "-----BEGIN PUBLIC KEY-----\nMFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAEuXUf+qgjGmMkv5rRX+wv2KR7RrP5\nl7+s8I/QbvWZyrO3bignf8lM4cxuA612rVe0v+TqU2N+C1MeK3e1EfqNNw==\n-----END PUBLIC KEY-----\n"
+          }
+        }
+      },
+      "expected": {
+        "code": "bad_config"
+      }
+    },
+    {
+      "name": "a period-key supply beside fixed period keys",
+      "set": {
+        "periodKeySupply": {},
+        "fixedPeriodKeys": {
+          "premium": {
+            "251023T1400": {
+              "$type": "Uint8Array",
+              "base64url": "oaGhoaGhoaGhoaGhoaGhoQ"
+            }
+          }
+        }
+      },
+      "expected": {
+        "code": "bad_config"
+      }
+    },
+    {
+      "name": "a signing key beside the signing-key documents",
+      "set": {
+        "signingKeys": {
+          "sign-2025-10": "-----BEGIN PRIVATE KEY-----\nMIGHAgEAMBMGByqGSM49AgEGCCqGSM49AwEHBG0wawIBAQQg7O8VtGxSny/jVf0D\nTjDtzhrSwJJXy6MFOcFHjeyM0oihRANCAASG7kcwEmbWL8OZzn5Op+cM+XIGEddc\nzLTv8Ed6ieAFYxSThUQ5PCT3TOOlPrnNt+NfuYJdOKomOLim2XmPfmBY\n-----END PRIVATE KEY-----\n"
+        }
+      },
+      "expected": {
+        "code": "bad_config"
+      }
+    },
+    {
+      "name": "an issuer public key beside its key document",
+      "set": {
+        "issuers": [
+          {
+            "issuerName": "paywall_subscription_service",
+            "keyId": "2025-10",
+            "algorithm": "ecdh-p256",
+            "publicKey": "-----BEGIN PUBLIC KEY-----\nMFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAEuXUf+qgjGmMkv5rRX+wv2KR7RrP5\nl7+s8I/QbvWZyrO3bignf8lM4cxuA612rVe0v+TqU2N+C1MeK3e1EfqNNw==\n-----END PUBLIC KEY-----\n"
+          }
+        ]
+      },
+      "expected": {
+        "code": "bad_config"
+      }
+    },
+    {
+      "name": "a fixed period key of 15 bytes",
+      "set": {
+        "randomStream": {
+          "$type": "Uint8Array",
+          "base64url": "2r-SVliDhRAUnIq6khgyOxaz_7v48qaDHJYVKpx20UFK5_GO0IPaZaIicHJat0JTW1mKB6qBY3Qr7_wc0PZKV6D9Hn16YhWIE2gROu4aIkMUdOGRIT2vRgrWHfI"
+        },
+        "fixedPeriodKeys": {
+          "premium": {
+            "251023T1400": {
+              "$type": "Uint8Array",
+              "base64url": "oaGhoaGhoaGhoaGhoaGh"
+            },
+            "251023T1500": {
+              "$type": "Uint8Array",
+              "base64url": "oqKioqKioqKioqKioqKiog"
+            }
+          }
+        }
+      },
+      "calls": [
+        [
+          "resource",
+          [
+            "123456",
+            {
+              "section": "politics"
+            }
+          ]
+        ],
+        [
+          "content",
+          [
+            "bodytext",
+            "<p>The council voted 7-2 to rezone the harbour.</p>",
+            "text/html",
+            {
+              "accessGroups": [
+                "premium"
+              ]
+            }
+          ]
+        ],
+        [
+          "seal",
+          []
+        ]
+      ],
+      "expected": {
+        "code": "bad_key"
+      }
+    },
+    {
+      "name": "no issuers",
+      "set": {
+        "issuers": []
+      },
+      "expected": {
+        "code": "bad_config"
+      }
+    },
+    {
+      "name": "one issuer name twice",
+      "set": {
+        "issuers": [
+          {
+            "issuerName": "paywall_subscription_service",
+            "keyId": "2025-10",
+            "algorithm": "ecdh-p256"
+          },
+          {
+            "issuerName": "paywall_subscription_service",
+            "keyId": "2025-10",
+            "algorithm": "ecdh-p256"
+          }
+        ]
+      },
+      "expected": {
+        "code": "bad_config"
+      }
+    },
+    {
+      "name": "a supply without derive",
+      "set": {
+        "periodKeySupply": {}
+      },
+      "expected": {
+        "code": "bad_config"
+      }
+    },
+    {
+      "name": "a sealing hook without seal",
+      "set": {
+        "keySealing": {}
+      },
+      "expected": {
+        "code": "bad_config"
+      }
+    },
+    {
+      "name": "an empty signing-key map",
+      "set": {
+        "testKeyDocuments": {
+          "signingKeys": {},
+          "issuerPublicKeys": {
+            "2025-10": "-----BEGIN PUBLIC KEY-----\nMFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAEuXUf+qgjGmMkv5rRX+wv2KR7RrP5\nl7+s8I/QbvWZyrO3bignf8lM4cxuA612rVe0v+TqU2N+C1MeK3e1EfqNNw==\n-----END PUBLIC KEY-----\n"
+          }
+        }
+      },
+      "expected": {
+        "code": "bad_config"
+      }
+    },
+    {
+      "name": "a selected signing key absent from the map",
+      "set": {
+        "signingKid": "not-present"
+      },
+      "expected": {
+        "code": "bad_config"
+      }
+    },
+    {
+      "name": "two signing keys and no selection",
+      "set": {
+        "testKeyDocuments": {
+          "signingKeys": {
+            "sign-2025-10": "-----BEGIN PRIVATE KEY-----\nMIGHAgEAMBMGByqGSM49AgEGCCqGSM49AwEHBG0wawIBAQQg7O8VtGxSny/jVf0D\nTjDtzhrSwJJXy6MFOcFHjeyM0oihRANCAASG7kcwEmbWL8OZzn5Op+cM+XIGEddc\nzLTv8Ed6ieAFYxSThUQ5PCT3TOOlPrnNt+NfuYJdOKomOLim2XmPfmBY\n-----END PRIVATE KEY-----\n",
+            "next": "-----BEGIN PRIVATE KEY-----\nMIGHAgEAMBMGByqGSM49AgEGCCqGSM49AwEHBG0wawIBAQQg7O8VtGxSny/jVf0D\nTjDtzhrSwJJXy6MFOcFHjeyM0oihRANCAASG7kcwEmbWL8OZzn5Op+cM+XIGEddc\nzLTv8Ed6ieAFYxSThUQ5PCT3TOOlPrnNt+NfuYJdOKomOLim2XmPfmBY\n-----END PRIVATE KEY-----\n"
+          },
+          "issuerPublicKeys": {
+            "2025-10": "-----BEGIN PUBLIC KEY-----\nMFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAEuXUf+qgjGmMkv5rRX+wv2KR7RrP5\nl7+s8I/QbvWZyrO3bignf8lM4cxuA612rVe0v+TqU2N+C1MeK3e1EfqNNw==\n-----END PUBLIC KEY-----\n"
+          }
+        }
+      },
+      "unset": [
+        "signingKid"
+      ],
+      "expected": {
+        "code": "bad_config"
+      }
+    },
+    {
+      "name": "an issuer naming a derivation",
+      "set": {
+        "issuers": [
+          {
+            "issuerName": "paywall_subscription_service",
+            "keyId": "2025-10",
+            "algorithm": "ecdh-p256",
+            "kdf": "hkdf"
+          }
+        ]
+      },
+      "expected": {
+        "code": "unsupported_option"
+      }
+    },
+    {
+      "name": "an issuer name with a delimiter",
+      "set": {
+        "issuers": [
+          {
+            "issuerName": "bad|name",
+            "keyId": "2025-10",
+            "algorithm": "ecdh-p256"
+          }
+        ]
+      },
+      "expected": {
+        "code": "bad_name"
+      }
+    },
+    {
+      "name": "a wrap strategy that is null",
+      "set": {
+        "contentKeyWrapStrategy": null
+      },
+      "expected": {
+        "code": "bad_config"
+      }
+    },
+    {
+      "name": "a wrap strategy that is a list",
+      "set": {
+        "contentKeyWrapStrategy": []
+      },
+      "expected": {
+        "code": "bad_config"
+      }
+    },
+    {
+      "name": "a wrap strategy that is a string",
+      "set": {
+        "contentKeyWrapStrategy": "ordinary"
+      },
+      "expected": {
+        "code": "bad_config"
+      }
+    },
+    {
+      "name": "a wrap strategy that is an empty record",
+      "set": {
+        "contentKeyWrapStrategy": {}
+      },
+      "expected": {
+        "code": "bad_config"
+      }
+    },
+    {
+      "name": "a supply planner that is a record",
+      "set": {
+        "issuerSupplyPlanFor": {}
+      },
+      "unset": [
+        "issuerSupplyPlans"
+      ],
+      "expected": {
+        "code": "bad_config"
+      }
+    },
+    {
+      "name": "no issuer scope",
+      "unset": [
+        "issuerSupplyPlans"
+      ],
+      "expected": {
+        "code": "bad_config"
+      }
+    },
+    {
+      "name": "an issuer scope naming content the render does not carry",
+      "set": {
+        "issuerSupplyPlans": {
+          "paywall_subscription_service": {
+            "contentKeyNames": [
+              "footnote"
+            ],
+            "suppliedAccessGroups": []
+          }
+        }
+      },
+      "calls": [
+        [
+          "resource",
+          [
+            "123456",
+            {}
+          ]
+        ],
+        [
+          "content",
+          [
+            "bodytext",
+            "<p>The council voted 7-2 to rezone the harbour.</p>",
+            "text/html",
+            {
+              "accessGroups": []
+            }
+          ]
+        ],
+        [
+          "seal",
+          []
+        ]
+      ],
+      "expected": {
+        "code": "bad_config"
+      }
+    },
+    {
+      "name": "an issuer scope with no content-key selection",
+      "set": {
+        "issuerSupplyPlans": {
+          "paywall_subscription_service": {
+            "suppliedAccessGroups": []
+          }
+        }
+      },
+      "calls": [
+        [
+          "resource",
+          [
+            "123456",
+            {}
+          ]
+        ],
+        [
+          "content",
+          [
+            "bodytext",
+            "<p>The council voted 7-2 to rezone the harbour.</p>",
+            "text/html",
+            {
+              "accessGroups": []
+            }
+          ]
+        ],
+        [
+          "seal",
+          []
+        ]
+      ],
+      "expected": {
+        "code": "bad_config"
+      }
+    },
+    {
+      "name": "seal before a resource",
+      "calls": [
+        [
+          "seal",
+          []
+        ]
+      ],
+      "expected": {
+        "code": "bad_config"
+      }
+    },
+    {
+      "name": "seal before a content item",
+      "calls": [
+        [
+          "resource",
+          [
+            "123456",
+            {
+              "section": "politics"
+            }
+          ]
+        ],
+        [
+          "seal",
+          []
+        ]
+      ],
+      "expected": {
+        "code": "bad_config"
+      }
+    }
+  ]
+}

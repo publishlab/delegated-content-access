@@ -1,0 +1,57 @@
+{
+  "schema": "dca-protocol-fixture-manifest/v1",
+  "protocol": "dca",
+  "version": "1",
+  "stability": "draft",
+  "files": [
+    {
+      "path": "reject-delimiter-accessgroup.json",
+      "vectorFormat": "2",
+      "consumers": [
+        "base-contract"
+      ]
+    },
+    {
+      "path": "reject-delimiter-sealed-accessgroup.json",
+      "vectorFormat": "2",
+      "consumers": [
+        "base-contract"
+      ]
+    },
+    {
+      "path": "reject-foreign-render.json",
+      "vectorFormat": "2",
+      "consumers": [
+        "base-contract"
+      ]
+    },
+    {
+      "path": "reject-identifier-accessgroup.json",
+      "vectorFormat": "2",
+      "consumers": [
+        "base-contract"
+      ]
+    },
+    {
+      "path": "reject-relabeled.json",
+      "vectorFormat": "2",
+      "consumers": [
+        "base-contract"
+      ]
+    },
+    {
+      "path": "reject-unknown-contentname.json",
+      "vectorFormat": "2",
+      "consumers": [
+        "base-contract"
+      ]
+    },
+    {
+      "path": "seal-ecdh.json",
+      "vectorFormat": "1",
+      "consumers": [
+        "base-contract"
+      ]
+    }
+  ]
+}

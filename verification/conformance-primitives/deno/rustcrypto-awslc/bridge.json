@@ -1,0 +1,19 @@
+{
+    "script": "_source/js/v1/bridge.mjs",
+    "command": "deno/rustcrypto-awslc/bridge",
+    "prepare": { "command": "deno/rustcrypto-awslc/bridge", "args": ["--prepare"] },
+    "members": {
+        "rustcrypto": "the RustCrypto crates the pinned Deno compiles into its WebCrypto: aes-gcm, rsa with sha2, p256",
+        "awslc": "aws-lc-rs, the AWS-LC binding the pinned Deno compiles into its WebCrypto for HKDF",
+        "lane": "the shared JavaScript answer source in _source/js/v1, decoding through Deno's Buffer compat code"
+    },
+    "operations": {
+        "decode-base64url": "lane",
+        "hkdf-sha256": "awslc",
+        "open-aes-gcm": "rustcrypto",
+        "seal-aes-gcm": "rustcrypto",
+        "ecdh-p256": "rustcrypto",
+        "p256-point": "rustcrypto",
+        "open-rsa-oaep": "rustcrypto"
+    }
+}

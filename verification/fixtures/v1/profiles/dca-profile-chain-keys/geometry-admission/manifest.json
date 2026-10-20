@@ -1,0 +1,49 @@
+{
+  "schema": "dca-fixture-package-manifest/v1",
+  "package": "fixtures/v1/profiles/dca-profile-chain-keys/geometry-admission",
+  "profile": "dca-profile-chain-keys",
+  "format": "chain-keys-geometry-admission/v1",
+  "stability": "draft",
+  "scope": {
+    "boundary": "parsed JSON geometry pair admitted by settleChainGeometry",
+    "cases": 9
+  },
+  "provenance": {
+    "recorder": "js/tools/record-chain-keys-geometry-admission.js",
+    "sourceCommit": "d780e9ed",
+    "expectedResults": "Hand-specified from chain keys document-member and §7.2/§22; never derived from implementation observations."
+  },
+  "members": [
+    {
+      "path": "expected.json",
+      "sha256": "d819c923bf9fc97123be1a4bf07455c27b072e0e18694a8c9c9825abd49b16e6"
+    },
+    {
+      "path": "inputs.json",
+      "sha256": "7f8a27ef1add83191f65eedc26ef96240fc85aa82c400550b80d32448234c31f"
+    },
+    {
+      "path": "observations.json",
+      "sha256": "209ac2bf98364acd2ae99d2b9a8f165702164a8c9fcd6f367bc3a117dfd3152d"
+    }
+  ],
+  "consumers": [
+    {
+      "path": "js/test-vectors/chain-keys-geometry-admission.test.js",
+      "role": "domain replay"
+    },
+    {
+      "path": "js/test-tools/record-chain-keys-geometry-admission.test.js",
+      "role": "recorder self-test"
+    },
+    {
+      "command": "node js/tools/record-chain-keys-geometry-admission.js --check",
+      "role": "package check"
+    }
+  ],
+  "limitations": [
+    "JavaScript domain admission only; not independent conformance or complete profile coverage.",
+    "No issuer exchange, cryptographic operation, capability grant or normative refusal-code assertion.",
+    "Raw spellings are preserved in inputs.json; observations intentionally report parsed values."
+  ]
+}

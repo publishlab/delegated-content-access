@@ -1,0 +1,13 @@
+{
+  "version": 1,
+  "testCount": 1,
+  "tests": [{ "file": "test-reference/core-publisher/sealer-composition.test.js" }],
+  "required": [
+    { "module": "core-publisher/testing/sealerFactory.js", "exports": ["sealerForRender"] },
+    {
+      "module": "core-publisher/Sealer.js",
+      "class": "Sealer",
+      "members": ["resource", "content", "seal"]
+    }
+  ]
+}

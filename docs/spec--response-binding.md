@@ -5,26 +5,24 @@ Status: Public Working Draft
 ## Abstract
 
 This document specifies how an authorized DCA issuer-core result is delivered
-to and admitted by a client. The base direct representation carries key bytes
-inside an issuer-authenticated confidential request/response channel. Optional
-client-bound methods additionally wrap each key for one client's
-non-extractable keypair; they do not replace channel authentication.
+to and admitted by a client. In the base direct transport mode, the response
+carries key bytes inside an issuer-authenticated confidential request/response
+channel. Optional client-bound methods additionally wrap each key for one
+client's non-extractable keypair; they do not replace channel authentication.
 
 <a id="1-scope-and-requirements-language"></a>
+
 ## 1. Introduction
 
-This document defines response-binding selection, common client admission, direct
-key representation, client-bound key representation, ECDH-P256 and RSA-OAEP
-client-bound transcripts and their downgrade and failure rules.
+This document defines response-binding selection, client admission of a result,
+and the direct and client-bound key representations with their ECDH-P256 and
+RSA-OAEP transcripts. The
+[overview glossary](spec---overview.md#terms-across-the-specifications)
+distinguishes endpoint bindings, transport modes, key kinds and profiles.
 
-It does not authorize a coordinate, define capability reach, define content
-encryption or specify browser Origin/CORS processing. The core produces the
-semantic result. Content and period specifications constrain admitted keys. An
-endpoint specification says how the deployment provides the authenticated
-channel required here.
-
-Every result containing usable keys requires an issuer-authenticated
-confidential request/response channel.
+It does not authorize a coordinate, define capability reach or content
+encryption, or specify browser Origin/CORS processing; an endpoint
+specification says how a deployment provides the channel Section 2 requires.
 
 The key words **MUST**, **MUST NOT**, **SHOULD** and **MAY** in this document
 are to be interpreted as described in BCP 14 when, and only when, they appear
@@ -41,15 +39,25 @@ A conforming key response has two distinct layers:
    or, under an optional client-bound method, as a value that only the selected
    client private key can open.
 
+The direct and client-bound alternatives are the issuer-to-client **transport
+modes**. A transport mode names how one response carries keys; it does not
+name the response channel or the publisher-to-issuer envelope algorithm.
+
+A transport mode is independent of the key it carries: direct and client-bound
+transport mode can each carry an item content key, a period key or, under the
+chain-key profile, a chain key, and neither changes the key's kind,
+construction or reach.
+
 Every deployment returning usable keys MUST select an endpoint binding that
 provides layer 1. TLS, HTTP, CORS and proxy configuration are not inferred by
 this document; an applicable endpoint specification must state how it provides
 these properties.
 
-Client-bound wrapping supplies additional client-side key custody. It does not
-authenticate the issuer: any party that knows a client's public key can produce
-a value encrypted to it. It therefore MUST NOT be used without layer 1 and
-MUST NOT be described as an issuer signature or response-wide authentication.
+Client-bound wrapping encrypts each delivered key for the selected client. This
+wrapping does not authenticate the issuer: any party that knows a client's
+public key can produce a value encrypted to it. It MUST NOT be used without
+layer 1 and MUST NOT be described as an issuer signature or response-wide
+authentication.
 
 Publisher-to-issuer BIND is unrelated to this boundary. It authenticates
 publisher-supplied coordinates during issuer opening and does not authenticate
@@ -60,9 +68,9 @@ the issuer response.
 The input is the issuer-core result defined by
 [spec--core-protocol.md](spec--core-protocol.md#7-baseline-issuer-core-result).
 The issuer MUST preserve the core result's `keys` coordinates, complete `errors`
-entries and non-key members, including the top-level `periodChain` geometry of
-a delivered chain result and the top-level `notDelivered` member of a result that
-carries one. It may replace only delivered key leaves with the selected
+entries and non-key members, including `notDelivered` when present.
+Chain-result geometry comes from the exact associated request, not a response
+echo. It may replace only delivered key entries with the selected
 representation and may add a top-level `transport` member; `transport` is the
 only member this binding adds. It MUST NOT turn an error into a key
 representation or move a coordinate between `keys` and `errors`.
@@ -70,10 +78,31 @@ representation or move a coordinate between `keys` and `errors`.
 The issuer MUST NOT add a key coordinate, widen a result, rename a coordinate
 or transform one key kind into another. A response contains at most one key
 representation. The client admits sections before it judges the representation.
-It first rejects or ignores an unsupported section, including
-`keys.periodChainKeys` and its `periodChain` geometry beside `transport` under
-Section 5.1. It then judges the supported sections. Mixing direct string leaves
-and client-bound object leaves among supported sections is malformed.
+It first rejects or ignores any section it does not support, without affecting
+the supported sections. It then judges the supported sections, including
+`keys.chainKeys` for a selected chain-key client. Mixing direct string key
+entries and client-bound object key entries among supported sections is
+malformed; the client MUST reject the response representation.
+
+After discarding unsupported sections and applying container admission, the
+client classifies entries in the remaining key maps by JSON type, before
+individual coordinate or key-entry admission. A string counts as a direct
+entry and a non-array object counts as a client-bound object entry, even when
+its method-specific members are absent or malformed. If both kinds occur,
+the client MUST reject the response representation. Other JSON values do not
+establish a representation and fail at their individual entry. This
+classification grants no key and admits neither its coordinate nor contents.
+
+A client without selected stock chain-result support MUST discard
+`keys.chainKeys`. Selected stock and content-group chain consumers use the
+complete geometry captured in the exact associated request, validate it before
+opening key entries, and retain that same pair with the capability. They MUST
+NOT obtain or override that geometry from response metadata.
+The conflict checks of period keys Section 5.6 still apply
+to the received result. An operation that selects chain-result consumption
+requires its applicable client duties; a client lacking that support MUST fail
+the selected operation rather than reinterpret the result as another capability
+form.
 
 The response channel MUST preserve one response as the answer to one exact
 request. Before it opens or retains a key, the client MUST have:
@@ -83,22 +112,13 @@ request. Before it opens or retains a key, the client MUST have:
 - the publisher delivery and render to which the request belonged; and
 - the response obtained through the selected authenticated channel.
 
-The client MUST ignore or reject every returned coordinate outside the
-admissible result set of the associated request. For the core sections that set
-is exactly the presented set. For a selected capability extension it is the
-deterministically checkable set the extension's specification derives from the
-admitted source coordinates: for a period-chain result, a returned cutoff or
-projected exact leaf is admissible only for a family the request presented,
-under the geometry the request resolved for that family, in the window of a
-presented source member and at or below that member's supplied position.
-Before it admits or retains a cutoff, the client MUST resolve the response's
-geometry pair for that family. The resolved values MUST equal the values the
-request resolved for it; JSON placement need not match. A family
-whose values differ has no admissible cutoff. A projected exact leaf needs no
-response geometry. The client MUST perform these checks before opening a
-client-bound leaf or retaining direct bytes. A syntactically valid unsolicited
-key grants nothing; a chain cutoff or projected leaf outside its admissible set
-is unsolicited.
+The client MUST ignore or reject, before opening, every returned coordinate
+outside the admissible result set of the associated request
+([core Section 6.1](spec--core-protocol.md#61-presented-coordinates)) and MUST
+retain no key for it; for the chain-key extension,
+[chain-keys Section 9](spec-profile--chain-keys.md#9-chain-key-role-requirements)
+states the window, position and captured-request geometry checks. A syntactically
+valid unsolicited key grants nothing.
 
 Before surfacing or using an error, the client MUST admit its error-object
 shape and coordinate grammar and associate the coordinate with the presented
@@ -106,108 +126,78 @@ set of that request as
 [spec--core-protocol.md](spec--core-protocol.md#61-presented-coordinates)
 defines. It MUST ignore or reject a malformed, nonconforming or unsolicited
 error and MUST NOT use such an entry for control flow. A core error grants no
-capability. The core protocol assigns it no retry, sibling-issuer-walk or
-terminal-refusal meaning; such control flow requires a
-separately selected profile that defines the applicable outcome vocabulary and
-complete behavior.
+capability; core Sections 5.3 and 10 say when a selected profile may give it
+control-flow meaning.
 
-[spec--core-protocol.md](spec--core-protocol.md#72-not-delivered-access-group-families)
-defines the `notDelivered` member, which an issuer emits only under such a profile,
-and [spec--profiles.md](spec--profiles.md#8-dca-v1-not-delivered-result-profile)
-fixes when a client counts as having selected it.
-
-A client that has not selected that profile treats `notDelivered` as an unsupported
-section and ignores or rejects it before any control flow. Ignoring it gives
-the response the same semantics as a response without the member; rejecting it
-gives this binding's visible unsupported-response result. Under
-either outcome the client MUST NOT infer a grant, a denial or a fallback
-decision from the member.
-
-A client that has selected the profile validates the whole section and its
-request association before it uses any entry. Each of these makes the response
-visibly malformed: a `notDelivered` member that is an array, an entry that is not an
-object, an entry whose `reason` is absent, empty or not defined by the selected
-profile, an entry whose
-`message` is present and is not a string, an entry naming an access group the
-associated request did not present, an entry naming an access group for which
-the same response delivers a period capability under the family rule of core
-Section 7.2, and an entry whose family a period-coordinate `errors` entry of
-the same response belongs to under that rule. Direct content-name results are
-independent as core Section 7.2 specifies. The client MUST report a malformed
-response and MUST NOT record it as an empty result.
-
-A leaf-local rejection does not discard an otherwise admitted `notDelivered`
-section; its entries retain the selected profile's control-flow meaning. A
-whole-response rejection produces no admitted `notDelivered` entry.
+Every client, a baseline-only client included, MUST admit and process the
+top-level `notDelivered` member as
+[period-keys Section 5.6](spec-profile--period-keys.md#56-family-reports-notdelivered)
+requires. A malformed report does not itself invalidate independently
+admissible item keys or unrelated sections; its specified refusal scope applies
+only after the original supported entries have passed response representation
+classification. A selected capability extension may define further top-level result
+members and their admission and refusal scope. Before using any key from such a
+member, the client MUST admit that member and its association with the request.
+If the extension defines member-local refusal, a malformed member MUST supply
+no key or control-flow permission, but does not invalidate independently
+admissible siblings. Without a specified narrower refusal scope, a malformed
+member makes the whole response malformed. An extension's local refusal scope
+MUST NOT bypass the common response association, representation classification
+or selected transport checks; those shared failures still refuse every affected
+key.
 
 ## 4. Selection and agreement
 
-An issuer endpoint has a declared response profile: direct, client-bound by one
-named method, or a profile that permits both according to stated policy. A
-client MUST know that profile before it treats the endpoint as usable. This can
-be established by a containing deployment profile or authenticated endpoint
-metadata; it MUST NOT be an undisclosed local convention whose wire-visible
-choice the peer cannot predict.
+An issuer endpoint has a declared **endpoint response agreement**: direct
+transport mode, client-bound transport mode by one named method, or both
+according to stated policy, together with its offer, selection, fallback and
+admission rules. A client MUST know that agreement before it treats the
+endpoint as usable. This can be established by a containing deployment
+profile or authenticated endpoint metadata; it MUST NOT be an undisclosed
+local convention whose wire-visible choice the peer cannot predict. The
+agreement is not a profile identifier. It states which transport modes the
+issuer may select; each response selects one.
 
 The optional request member `clientPublicKey` offers one client-bound method.
 The strict JWK shape determines the offered method:
 
-| Public JWK | Offered method |
-| --- | --- |
-| `kty` `EC`, `crv` `P-256` | `ECDH-P256` |
-| `kty` `RSA` | `RSA-OAEP` |
+| Public JWK                | Offered method |
+| ------------------------- | -------------- |
+| `kty` `EC`, `crv` `P-256` | `ECDH-P256`    |
+| `kty` `RSA`               | `RSA-OAEP`     |
 
-Presence of `clientPublicKey` is an offer, not authorization. An issuer selects
-client-bound delivery only when its endpoint profile permits it, it implements
-the offered method and the public key passes that method's admission rules.
-The response confirms selection with `transport.mode` and
-`transport.method`.
+An issuer selects client-bound transport mode only when its endpoint response
+agreement permits it, it implements the offered method and the public key passes
+that method's admission rules. The response confirms selection with
+the presence of `transport` and its `method` member.
 
-An endpoint profile that requires client-bound delivery MUST fail a request
-without a compatible offer before opening any publisher-supplied key and MUST
-NOT fall back to direct delivery. An issuer MUST NOT return a direct response
-to a client-bound offer unless its endpoint profile permits direct fallback and
-the client is known, under that same profile contract, to accept it.
-
-Until interoperable fallback/profile signaling is specified, a deployment
-claiming strict client-bound behavior requires pre-established authenticated
-endpoint-profile agreement.
+An endpoint response agreement that requires client-bound transport mode MUST
+fail a request whose offer is missing, malformed, unsupported or fails the
+method's admission rules before opening any publisher-supplied key, and MUST NOT
+fall back to direct transport mode. Before publisher-envelope opening under
+that agreement, the issuer MUST establish the method state needed to wrap a
+response. Placement relative to policy remains subject to core processing and
+the endpoint failure model. An issuer MUST NOT return a direct response
+to a client-bound offer unless its endpoint response agreement permits direct
+fallback and the client is known, under that same agreement, to accept it.
 
 ## 5. Direct representation
 
-A direct response has no `transport` member. Each leaf in `keys.contentKeys`,
-`keys.periodKeys` or `keys.periodChainKeys` is the canonical unpadded
-base64url encoding of exactly 16 key octets (22 characters).
-[spec--period-key-chains.md](spec--period-key-chains.md#issuer-decision-and-response)
-constrains the optional chain-result section. V1 defines no alternate delivered
-width or profile selected by observed length.
+A key entry is the JSON value at one coordinate of `keys.contentKeys`,
+`keys.periodKeys` or `keys.chainKeys`. A direct response has no `transport`
+member. Each of its key entries is the canonical unpadded base64url encoding of
+exactly 16 key octets (22 characters).
 
-The client MUST accept a direct leaf only if its selected endpoint profile
-permits direct delivery, the response channel requirements in Section 2 hold,
-the coordinate belongs to the associated request's admissible result set under
-Section 3 and the leaf satisfies the canonical spelling and length rules.
-Otherwise it releases and retains no key from that leaf.
+The client MUST accept a direct key entry only if its endpoint response
+agreement permits direct transport mode, the response channel requirements in
+Section 2 hold, the coordinate belongs to the associated request's admissible
+result set under Section 3 and the key entry satisfies the canonical spelling
+and length rules. Otherwise it releases and retains no key from that key entry.
 
-Direct delivery by design exposes raw key bytes to the client application
-boundary. Its confidentiality and integrity come from the selected response
-channel; absence of `transport` is not cryptographic protection. A deployment
-requiring non-extractable browser custody must select a client-bound-only
-profile and refuse direct responses before decoding their leaves.
-
-### 5.1. Chain results and transport composition
-
-In v1 a chain result is direct-only. `keys.periodChainKeys` and the top-level
-`periodChain` member travel only in a direct response, beside direct
-`contentKeys` and `periodKeys` string leaves. An issuer MUST NOT emit
-`keys.periodChainKeys` in a response that carries `transport`. When `transport`
-is present, a client MUST reject or ignore `keys.periodChainKeys` and its
-`periodChain` geometry before it opens any leaf in that section and before it
-judges the remaining sections' representation. It MUST NOT reinterpret those
-leaves under the transport method. The non-key `periodChain` member is
-meaningful only beside a delivered `keys.periodChainKeys`; a client preserves it
-with a valid direct chain result and otherwise ignores it. V1 defines no
-client-bound representation of chain state. A separately selected profile
-would define one.
+Direct transport mode exposes raw key bytes to the client application; its
+confidentiality and integrity come from the response channel. A deployment that
+needs non-extractable custody for content and period keys selects an endpoint
+response agreement that requires client-bound transport mode (Section 4).
 
 ## 6. Client-bound common representation
 
@@ -215,44 +205,64 @@ A client-bound response has:
 
 ```json
 {
-  "keys": { "contentKeys": {}, "periodKeys": {} },
+  "keys": { "contentKeys": {}, "periodKeys": {}, "chainKeys": {} },
   "transport": {
-    "mode": "client-bound",
     "method": "METHOD"
   }
 }
 ```
 
-Method-specific members may occur in `transport`, and every delivered key leaf
-is replaced by one method-specific object. `transport.mode` MUST be exactly
-`client-bound`. `transport.method` MUST equal the method offered by the client
-and selected by the issuer. Unknown, missing or mismatched values make the
-whole transport invalid; the client MUST NOT retry its leaves as direct keys.
+Method-specific members may occur in `transport`, and every delivered key entry
+is replaced by one method-specific object. Absent `transport` means direct
+transport; present `transport` selects client-bound transport. Its `method`
+MUST name a known method offered by the client and selected by the issuer.
+An unknown, missing or mismatched method makes the
+whole transport invalid; the client MUST NOT retry its key entries as direct
+bytes. Unknown transport members are ignored under the common JSON rules;
+they do not select a method or change admission.
 
-Before publisher-envelope opening in a client-bound-required profile, the
-issuer MUST admit the offered public key and establish the method state needed
-to wrap a response. Its placement relative to policy remains subject to the
-core processing and endpoint failure model. A missing, malformed or unsupported
-offer fails client-bound selection and MUST NOT silently release raw keys.
+The issuer wraps every delivered `contentKeys`, `periodKeys` and
+`chainKeys` key entry under the one response transport. A selected profile
+may add a response section beside `keys`; the issuer wraps that section's key
+entries under the same transport.
 
-The issuer wraps every delivered `contentKeys` and exact `periodKeys` leaf
-under the one response transport. It leaves the result's errors and other
-non-key members, including `notDelivered`, unchanged.
-Chain results never travel client-bound; Section 5.1 states the composition.
-Every delivered key below is exactly 16 octets: a `contentKey` or an exact
-`periodKey` under `dca-v1-exact-period`. Both client-bound methods support
-these canonical capabilities. This does not permit delivery of chain state.
+Each wrapped key entry has a key kind fixed by its result section:
+`keys.contentKeys` is `contentKey`, `keys.periodKeys` is `periodKey`, and
+`keys.chainKeys` is `chainKey`. The issuer and client MUST bind that kind into
+the cryptographic wrapping and opening operations. The kind context is the UTF-8
+encoding of `dca-bind-client-bound-key-kind`, followed by one zero octet, followed by
+the UTF-8 encoding of the exact kind string. The issuer uses the section it is
+writing; the client uses the admitted section it is reading. Neither peer infers
+the kind from key length, caller-requested usage or the ciphertext. A missing or
+unsupported kind MUST NOT be opened as another kind. A failed kind check is a
+malformed individual key entry; the client MUST NOT retry it with another kind
+or with an empty context.
+
+A selected profile that adds a response section names the key kind of each
+section it adds, and the same kind context binds it. A profile reuses a base
+kind only for the same key use. The
+[content groups proposal](spec-profile--content-groups.md) binds
+`contentGroups.chainKeys` to `contentGroupChainKey`, `contentGroups.periodKeys`
+to `contentGroupPeriodKey` and `contentGroups.contentKeys` to `contentKey`.
 
 The client opens a delivered content key as a non-extractable AES-128-GCM
-handle with `decrypt` usage. It opens an exact period key as a non-extractable
-AES-128-GCM handle with `unwrapKey` usage. The returned handle MUST NOT be
-exportable. The applicable content or period specification defines its use and
-cache scope.
+handle with `decrypt` usage and a delivered period key as one with `unwrapKey`
+usage, directly from the key entry; it MUST NOT expose those key bytes through
+its application API, and the handles MUST NOT be exportable. A client that
+cannot store such a handle with its extractability and usages MUST NOT store it,
+and MUST NOT export it, substitute an extractable key or fall back to direct
+transport mode instead. The client opens a delivered chain key to usable
+16-octet key bytes; its Step operation may expose later chain keys to
+application code, and no non-extractability claim applies to chain keys or to
+period keys locally derived from them. A profile-defined kind states how the
+client opens it. Content-group chain and period keys open to 16 usable key
+bytes, because the client derives period keys and item pads from them; no
+non-extractability claim applies to them.
 
-If the client cannot admit the transport, it rejects every wrapped leaf in the response.
-A malformed or unauthentic individual leaf fails locally and does not suppress
-a valid sibling leaf. Neither failure permits direct fallback within that
-response.
+If the client cannot admit the transport, it rejects every wrapped key entry in
+the response. A malformed or unauthentic individual key entry fails locally and
+does not suppress a valid sibling key entry. Neither failure permits direct
+fallback within that response.
 
 ## 7. ECDH-P256 client-bound method
 
@@ -283,22 +293,32 @@ retaining or adding leading zero octets as needed. Those 32 octets are the HKDF
 input keying material. Both sides derive one AES-256-GCM transport key with
 HKDF-SHA-256 using:
 
-| HKDF input | Value |
-| --- | --- |
-| salt | empty octet string |
-| info | UTF-8 octets of `DCA-client-bound-transport` |
-| output | 32-octet AES-GCM key |
+| HKDF input | Value                                                               |
+| ---------- | ------------------------------------------------------------------- |
+| salt       | empty octet string                                                  |
+| info       | UTF-8 octets of `dca-derivation-client-bound-transport` (37 octets) |
+| output     | 32-octet AES-GCM key                                                |
 
-The transport key is non-extractable. The issuer's ephemeral public JWK is
-carried as `transport.publicKey` in the same strict four-member form as the
-client offer. The issuer MUST NOT expose or persist its ephemeral private key
-or transport key beyond preparation of that response.
+The client MUST keep its transport key non-extractable. The issuer's ephemeral
+public JWK is carried as `transport.publicKey` in the same strict four-member
+form as the client offer. The issuer MUST NOT expose or persist its ephemeral
+private key or transport key beyond preparation of that response.
 
-### 7.3. Delivered leaves
+The client MUST keep its derived transport key transient; it MUST NOT cache
+or persist that key. The client MUST release its references to the transport
+key after opening the response's key entries or completing a later reopening
+operation.
+
+To reopen a retained wrapped key entry, the client derives the transport key
+again from the original client private-key handle and the retained issuer
+ephemeral public key using the same transcript.
+
+### 7.3. Wrapped key entries
 
 For every 16-octet delivered key, the issuer generates a fresh 12-octet nonce
 and AES-256-GCM encrypts the key under the response transport key with a
-16-octet tag and no `additionalData`. The leaf is:
+16-octet tag and the Section 6 kind context as `additionalData`. The wrapped key
+entry is:
 
 ```json
 { "key": "WRAPPED_KEY", "nonce": "NONCE" }
@@ -308,10 +328,8 @@ and AES-256-GCM encrypts the key under the response transport key with a
 16 encrypted key octets followed by the 16-octet tag. Both use canonical
 unpadded base64url.
 
-The client performs the inverse operation directly into a non-extractable
-AES-128-GCM handle with the usage required by the containing key section. It
-MUST NOT expose an intermediate plaintext byte string through its application
-API.
+The client opens each wrapped key entry as Section 6 requires; for a chain key
+it recovers exactly 16 key octets.
 
 ## 8. RSA-OAEP client-bound method
 
@@ -319,124 +337,111 @@ The method identifier is `RSA-OAEP`.
 
 The client generates or loads an RSA-OAEP keypair using SHA-256. The modulus
 MUST be at least 2048 bits. The private key MUST be non-extractable and permit
-`unwrapKey`. The offered public JWK has `kty` exactly `RSA` and canonical
+`unwrapKey`; a client selected to receive chain keys MUST also be able to
+decrypt their wrapped value to key octets. The offered public JWK has `kty`
+exactly `RSA` and canonical
 `n` and `e` members encoded as Base64urlUInt values under
 [RFC 7518, Section 2](https://www.rfc-editor.org/rfc/rfc7518.html#section-2).
 Each is the unpadded base64url encoding of the minimum-length unsigned
-big-endian representation, with no leading zero octet. The modulus is a
-positive RSA modulus of at least 2048 bits and the exponent is a positive odd
-integer of at least 3. The JWK contains no private RSA members and, if `alg` is
-present, it is compatible with RSA-OAEP using SHA-256.
+big-endian representation, with no leading zero octet. The exponent is a
+positive odd integer of at least 3. The JWK contains no private RSA members
+and, if `alg` is present, it MUST be exactly `RSA-OAEP-256`. If `use` is
+present it MUST be `enc`; if `key_ops` is present it MUST be an array containing
+only `encrypt` and `wrapKey` (an empty array is permitted); if `ext` is present
+it MUST be a boolean. These metadata checks do not authorize another algorithm.
 
-The response `transport` contains only the common `mode` and `method` members.
+The response `transport` contains only the common `method` member.
 For every 16-octet delivered key, the issuer applies RSAES-OAEP with SHA-256,
-MGF1 with SHA-256 and the empty label under the admitted client public key. The
-leaf is:
+MGF1 with SHA-256 and the Section 6 kind context as its label under the
+admitted client public key. A deployment selecting this method MUST use
+RSA-OAEP implementations that support that label at both the issuer and client.
+The label-free RSA construction in
+[Sealed Key Envelopes Section 5](spec--sealed-key-envelopes.md#5-rsa-oaep-envelope)
+applies only to publisher-to-issuer envelopes. The wrapped key entry is:
 
 ```json
 { "key": "WRAPPED_KEY" }
 ```
 
 `key` is canonical unpadded base64url and decodes to exactly the RSA modulus
-width. The client unwraps it directly into a non-extractable AES-128-GCM handle
-with the usage required by the containing key section. An OAEP failure is one
-malformed leaf and produces no key.
+width. The client opens it as Section 6 requires; for a chain key it recovers
+exactly 16 key octets. An OAEP failure is one malformed key entry and
+produces no key.
 
-RSA-OAEP encryption is randomized. Conformance vectors may record and open a
-ciphertext but do not require two conforming sealers to reproduce identical
-ciphertext.
+<a id="9-replay-caching-and-composition"></a>
 
-## 9. Replay, caching and composition
-
-The response channel MUST reject substitution of an unrelated response for the
-live request. The
-client-bound methods add no request identifier, render,
-issuer, origin or coordinate to their HKDF info, GCM AAD or OAEP label. They do
-not independently prevent a copied leaf from being replayed to the same client.
-
-Client admission against the associated request prevents a replay from
-creating an unrequested coordinate. A replayed direct content key or wrapped
-content-key handle remains scoped to its associated `(renderId, contentName)`.
-An exact period key remains reusable for precisely the reach defined by its
-period-capability specification; response processing does not narrow that inherent
-reach.
+## 9. Caching and client-key accounting
 
 A shared response cache may reuse a direct response only under an endpoint
 profile whose authentication, authorization, freshness and cache-key rules make
-that safe. A client-bound response is recipient-specific. It MUST NOT be served
-from a shared cache unless the cache is partitioned by the exact client public
-key and all other authorization inputs required by the selected endpoint
-profile.
+that safe; under the HTTPS binding,
+[HTTPS endpoint binding Section 3.4](spec--http-binding.md#34-response)
+also applies and this section does not relax it. A client-bound response is
+recipient-specific. It MUST NOT be served from a shared cache unless the cache
+is partitioned by the exact client public key and all other authorization
+inputs required by the selected endpoint profile.
 
-When the browser and HTTP binding is selected, its response-caching rule owns
-the additional HTTP cache-control, Origin partitioning and `Vary` requirements.
-Meeting this section's response-binding conditions does not relax that endpoint
-rule.
+An implementation MAY include an opaque original request, including unknown
+members, as an additional cache discriminator. This can only refine a partition:
+unknown members MUST NOT replace authentication, authorization, freshness,
+client-public-key or other partition inputs required by the selected endpoint
+profile, and a cache hit MUST still meet that profile's reuse conditions.
 
-A client may store a non-extractable exact period-key handle or retain the
-wrapped leaf plus enough transport context to reopen it with the same client
-private key. Cache representation does not change period capability reach.
+An issuer that accounts for or revokes delivery per client key MUST associate
+each admitted method and public-key identity with the trusted authorization
+context, the granted capability scope and the grant's state. That context may
+be an authenticated account or another admitted authorization context, such as
+a recipient grant; client-bound delivery does not require an account. These
+records are issuer delivery metadata, not BIND inputs. This specification
+defines neither a registration wire member nor a public-key fingerprint
+algorithm.
+
+Replacement of a key associated with that context MUST be authorized under the
+same trusted authorization context. A replacement offer MUST NOT silently
+transfer entitlement, reset accounting or widen authority. Redelivery to the
+replacement key MUST satisfy current issuer authorization and ordinary response
+admission; replacement and redelivery may occur in one transaction. Key
+replacement does not make previously wrapped key entries openable with the new
+private key and does not promise recovery of previously delivered capability.
+Previously retained non-extractable capability handles remain usable within
+their original scope. Reopening old wrapped key entries requires the original
+client private-key handle and the applicable retained transport context. Key
+lifetime, rotation frequency, overlap, recovery and record retention are
+deployment policy; revocation stops future delivery and does not revoke
+capability already delivered.
 
 ## 10. Failures
 
-| Condition | Required outcome |
-| --- | --- |
-| response channel not authenticated, confidential, intact or associated with the request | Reject the whole response; retain no keys |
-| response coordinate outside the request's admissible result set | Ignore or reject before opening; retain no key for it |
-| mixed direct and client-bound leaves among supported sections | Reject the response representation |
-| unknown, missing or mismatched client-bound method/transport | Reject all wrapped leaves; no direct retry |
-| missing or malformed required public-key offer for a required client-bound profile | Fail before publisher-envelope opening; no direct downgrade |
-| malformed direct leaf | Reject that leaf |
-| malformed or unauthentic client-bound leaf | Reject that leaf; valid siblings may remain |
-| unsupported section or kind, or a chain section beside `transport` | Reject or ignore it first; never reinterpret it |
-| malformed `notDelivered` section under a selected not-delivered-result profile | Reject the whole response as malformed; record no empty result |
-
-An endpoint binding maps these outcomes to its own status and transport
-behavior. Error detail MUST NOT expose key existence or authorization beyond
-the core failure model.
+Sections 3 to 8 state client outcomes; an endpoint binding maps issuer-side
+failures to its status classes.
+[Core Section 8](spec--core-protocol.md#8-failure-model) limits error detail.
+Error detail MUST NOT expose key existence or authorization beyond the core
+failure model.
 
 ## 11. Security considerations
 
-The authenticated channel is the issuer-authentication boundary. Client-bound
-public-key encryption without it is vulnerable to forged-key responses because
-the public key is public by design.
+Non-extractable content and period-key handles raise the cost of portable key
+theft; they do not stop authorized decryption, plaintext access, same-origin
+script using the handle, or a compromised client. Section 6 states what custody
+each key kind has. A profile must not claim DRM, attestation or protection from
+code executing in the admitted client context.
 
-Non-extractable handles raise the cost of portable key theft but do not stop
-authorized decryption, plaintext access, same-origin script acting as a key
-oracle, browser compromise or a rooted device. A profile must not claim DRM,
-attestation or protection from code executing in the admitted client context.
+The client-bound transcripts bind no request identifier, render, issuer, origin
+or coordinate, and they authenticate each wrapped key only under its transport
+or RSA key, not the surrounding coordinate names or metadata. The kind context
+separates key roles but does not stop a copied wrapped key entry being replayed
+to the same client. Admission against the associated request (Section 3) and the
+response channel (Section 2) are therefore mandatory parts of the guarantee: a
+replay cannot add an unrequested coordinate, and a replayed key keeps exactly
+the reach its own specification defines.
 
-The client-bound methods authenticate each wrapped key only under their
-transport key or RSA key. They do not authenticate surrounding coordinate
-names or response metadata. Request-associated coordinate admission and the
-response channel are mandatory parts of the composed guarantee.
-
-## 12. Dependencies
-
-This specification depends on:
-
-- [spec--core-protocol.md](spec--core-protocol.md) for request coordinates,
-  authorization and the semantic issuer result;
-- [spec--content-protection.md](spec--content-protection.md) for content-key use
-  and handle semantics; and
-- [spec--period-keys.md](spec--period-keys.md) when exact reusable keys or
-  chain results are delivered.
-
-[spec--browser-http-binding.md](spec--browser-http-binding.md) instantiates the
-response channel as HTTPS JSON and defines an optional browser Origin/CORS
-profile. The Origin/CORS requirements apply only when that profile is selected.
-
-## 13. Normative References
+## 12. Normative References
 
 - [BCP 14: RFC 2119 and RFC 8174](https://www.rfc-editor.org/info/bcp14)
 - [RFC 7518: JSON Web Algorithms](https://www.rfc-editor.org/rfc/rfc7518)
 - [DCA core protocol](spec--core-protocol.md)
 - [DCA content protection](spec--content-protection.md)
-- [DCA exact period-key capabilities](spec--period-keys.md)
-- [DCA period-chain construction and delegation](spec--period-key-chains.md)
-- [DCA browser and HTTP binding](spec--browser-http-binding.md)
+- [DCA period-key capabilities](spec-profile--period-keys.md)
+- [DCA chain keys: construction and delegation](spec-profile--chain-keys.md)
+- [DCA HTTPS endpoint binding](spec--http-binding.md)
 - [DCA security model](spec--security-model.md)
-
-## 14. Informative References
-
-This specification has no additional informative references.

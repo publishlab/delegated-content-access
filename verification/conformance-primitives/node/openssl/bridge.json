@@ -1,0 +1,18 @@
+{
+    "script": "_source/js/v1/bridge.mjs",
+    "command": "node/openssl/bridge",
+    "prepare": { "command": "node/openssl/bridge", "args": ["--prepare"] },
+    "members": {
+        "openssl": "the OpenSSL built into the pinned Node, reached through WebCrypto's globalThis.crypto.subtle",
+        "lane": "the shared JavaScript answer source in _source/js/v1, decoding through Node's Buffer"
+    },
+    "operations": {
+        "decode-base64url": "lane",
+        "hkdf-sha256": "openssl",
+        "open-aes-gcm": "openssl",
+        "seal-aes-gcm": "openssl",
+        "ecdh-p256": "openssl",
+        "p256-point": "openssl",
+        "open-rsa-oaep": "openssl"
+    }
+}

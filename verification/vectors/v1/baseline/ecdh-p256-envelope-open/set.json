@@ -1,0 +1,11 @@
+{
+  "set": "ecdh-p256-envelope-open",
+  "phase": "devel",
+  "formatProofs": {
+    "ecdh-p256-envelope-open/v1": {
+      "proofBoundary": "carrier",
+      "operation": "open",
+      "projection": "content-key"
+    }
+  }
+}

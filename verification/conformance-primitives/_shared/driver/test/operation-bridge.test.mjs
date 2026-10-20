@@ -40,7 +40,7 @@ const CLOSED_STDOUT_RUN = fileURLToPath(new URL('./fixtures/held-run-to-closed-s
 const TWO_SETS = fileURLToPath(new URL('./fixtures/corpus-two-sets.json', import.meta.url));
 const ONE_OP = fileURLToPath(new URL('./fixtures/corpus-one-op.json', import.meta.url));
 const NON_ASCII = fileURLToPath(new URL('./fixtures/corpus-non-ascii.json', import.meta.url));
-const PHP_BRIDGE = fileURLToPath(new URL('../../../php/v1/bridge.php', import.meta.url));
+const PHP_BRIDGE = fileURLToPath(new URL('../../../php/openssl/v1/bridge.php', import.meta.url));
 
 const scratch = mkdtempSync(join(tmpdir(), 'dca-operation-bridge-'));
 after(() => rmSync(scratch, { recursive: true, force: true }));
@@ -97,7 +97,7 @@ async function run({
             // run reports `UNAVAILABLE` before `command` is ever read.
             go: {
                 script: ABSENT_BRIDGE,
-                command: 'go/v1/bridge/bridge',
+                command: 'go/stdlib/v1/bridge/bridge',
                 operations: OPERATIONS,
             },
         },
@@ -334,6 +334,7 @@ describe('the frozen corpus', () => {
         'ecdh/01 (ecdh-p256)',
         'ecdh/02 (ecdh-p256)',
         'ecdh/03 (p256-point)',
+        'ecdh/04 (ecdh-p256)',
         'encoding/01 (decode-base64url)',
         'encoding/02 (decode-base64url)',
         'encoding/03 (decode-base64url)',
@@ -750,6 +751,113 @@ describe('a reader that stops reading', () => {
     });
 });
 
+describe('a verdict followed by an output infrastructure failure', () => {
+    for (const [verdict, normalExit, streamName] of [
+        ['HELD', 0, 'stdout'],
+        ['DISAGREED', 1, 'stderr'],
+    ]) {
+        it(`keeps exit 2 instead of ${normalExit} after writing ${verdict}`, () => {
+            // Run the unchanged CLI with a fixture corpus and fake lane. This
+            // avoids installing any real bridge runtime to test output handling.
+            const root = join(scratch, `verdict-stream-${verdict}`);
+            const driver = join(root, '_shared', 'driver');
+            const cases = join(root, '_shared', 'cases', 'v1');
+            const lane = join(root, 'fake');
+            for (const dir of [driver, cases, lane]) mkdirSync(dir, { recursive: true });
+            for (const name of ['run.mjs', 'cases.mjs', 'protocol.mjs', 'validate-results.mjs']) {
+                writeFileSync(join(driver, name), readFileSync(new URL(`../${name}`, import.meta.url)));
+            }
+            writeFileSync(join(cases, 'cases.json'), readFileSync(TWO_SETS));
+            const launchLog = join(root, 'launches.log');
+            const requestLog = join(root, 'request.json');
+            const settings = {
+                answers: CORRECT, launchLog, requestLog,
+                ...(verdict === 'DISAGREED'
+                    ? { replaceObservation: { 'encoding/01': { bytesHex: 'ffffff' } } } : {}),
+            };
+            const bridge = join(lane, 'bridge.mjs');
+            writeFileSync(bridge, `#!${process.execPath}
+                process.argv[2] = ${JSON.stringify(JSON.stringify(settings))};
+                await import(${JSON.stringify(new URL('./fixtures/fake-bridge.mjs', import.meta.url).href)});
+            `);
+            chmodSync(bridge, 0o755);
+            writeFileSync(join(lane, 'bridge.json'), JSON.stringify({
+                script: bridge, command: bridge,
+                members: { lane: 'the fixture bridge' },
+                operations: Object.fromEntries(OPERATIONS.map((op) => [op, 'lane'])),
+            }));
+            const runner = join(driver, 'run.mjs');
+            const launcher = join(root, 'launch.mjs');
+            writeFileSync(launcher, `
+                import { pathToFileURL } from 'node:url';
+                process.argv = [process.execPath, ${JSON.stringify(runner)}, 'fake'];
+                const stream = process.${streamName};
+                const original = stream.write;
+                stream.write = function (...args) {
+                    const written = original.apply(this, args);
+                    if (String(args[0]).startsWith(${JSON.stringify(`${verdict}:`)})) {
+                        stream.write = original;
+                        throw new Error('injected failure after verdict');
+                    }
+                    return written;
+                };
+                await import(pathToFileURL(${JSON.stringify(runner)}));
+            `);
+            const result = spawnSync(process.execPath, [launcher], { encoding: 'utf8' });
+            assert.equal(result.signal, null);
+            assert.match(result[streamName], new RegExp(`^${verdict}:`, 'm'));
+            assert.match(result.stderr, /^INCOMPLETE:.*injected failure after verdict/m);
+            assert.equal(result.status, 2, result.stderr);
+            assert.equal(readFileSync(launchLog, 'utf8').trim().split('\n').length, 1);
+            const request = JSON.parse(readFileSync(requestLog, 'utf8'));
+            assert.deepEqual(request.requests.map(({ id }) => id), ALL_IDS);
+            assert.ok(request.requests.every((row) => !Object.hasOwn(row, 'expected')));
+        });
+    }
+});
+
+describe('unexpected CLI infrastructure failures', () => {
+    const failure = "new Error('injected CLI infrastructure failure')";
+    const scenarios = [
+        ['an unexpected driver throw', `process.argv[2] = { startsWith() { throw ${failure}; } };`],
+        ['a synchronous stream error', `
+            const original = process.stderr.write;
+            process.stderr.write = function () {
+                process.stderr.write = original;
+                throw ${failure};
+            };
+        `],
+        ['an asynchronous stream error', `
+            const original = process.stderr.write;
+            process.stderr.write = function () {
+                process.stderr.write = original;
+                queueMicrotask(() => process.stderr.emit('error', ${failure}));
+                return true;
+            };
+        `],
+    ];
+    for (const [index, [description, inject]] of scenarios.entries()) {
+        it(`exits 2 after ${description} before any comparison`, () => {
+            const runnerUrl = new URL('../run.mjs', import.meta.url).href;
+            const launcher = join(scratch, `cli-failure-${index}.mjs`);
+            // Inject before loading the real CLI. Stream failures restore the
+            // writer first so its incomplete diagnostic remains observable.
+            writeFileSync(launcher, `
+                import { fileURLToPath } from 'node:url';
+                process.argv[1] = fileURLToPath(${JSON.stringify(runnerUrl)});
+                process.argv[2] = 'no-such-lane';
+                ${inject}
+                await import(${JSON.stringify(runnerUrl)});
+            `);
+            const result = spawnSync(process.execPath, [launcher], { encoding: 'utf8' });
+            assert.equal(result.signal, null);
+            assert.equal(result.status, 2, result.stderr);
+            assert.equal(result.stdout, '', 'no bridge answer or comparison was produced');
+            assert.match(result.stderr, /^INCOMPLETE:.*injected CLI infrastructure failure/m);
+        });
+    }
+});
+
 // The php bridge's own reading of the request, checked here because the contract
 // calls these shapes closed and a closed shape nobody checks is a sentence in a
 // document. Each of these is a batch no harness would send, so each is a nonzero exit
@@ -824,9 +932,9 @@ describe('the php bridge on a request outside the contract', () => {
     }
 });
 
-// The driver holds no table of languages. A lane is an immediate child directory of
-// the conformance dir carrying a `bridge.json`, discovered rather than named here, the
-// same way `check` discovers a lane by its executable `check`.
+// The driver holds no table of languages. A lane is an immediate child or a
+// runtime/binding directory carrying a `bridge.json`, discovered the same way
+// `check` discovers a lane by its executable `check`.
 describe('discovering bridges from a manifest beside each lane', () => {
     const GOOD_TREE = fileURLToPath(new URL('./fixtures/bridge-manifests/', import.meta.url));
     // Malformed JSON has to live apart from a tree otherwise good, because
@@ -842,7 +950,25 @@ describe('discovering bridges from a manifest beside each lane', () => {
 
     it('discovers a lane by its bridge.json, in sorted order, and skips a dir without one', () => {
         const bridges = loadBridges(GOOD_TREE);
-        assert.deepEqual(Object.keys(bridges), ['alpha', 'beta'], 'gamma carries no manifest and sorted order holds');
+        assert.deepEqual(
+            Object.keys(bridges), ['alpha', 'beta', 'delta'], 'gamma carries no manifest and sorted order holds',
+        );
+    });
+
+    it('discovers a nested runtime/binding lane beside a flat lane', () => {
+        const root = join(scratch, 'nested-manifest-root');
+        mkdirSync(join(root, 'alpha'), { recursive: true });
+        mkdirSync(join(root, 'rust', 'rustcrypto'), { recursive: true });
+        mkdirSync(join(root, 'unused', 'child'), { recursive: true });
+        const manifest = JSON.stringify({
+            script: 'bridge',
+            command: 'bridge',
+            members: { lane: 'code written in this lane' },
+            operations: { 'decode-base64url': 'lane' },
+        });
+        writeFileSync(join(root, 'alpha', 'bridge.json'), manifest);
+        writeFileSync(join(root, 'rust', 'rustcrypto', 'bridge.json'), manifest);
+        assert.deepEqual(Object.keys(loadBridges(root)), ['alpha', 'rust/rustcrypto']);
     });
 
     it('builds an entry of the same shape the runner asks for, prepare included', () => {
@@ -851,6 +977,8 @@ describe('discovering bridges from a manifest beside each lane', () => {
             script: 'alpha/bridge.mjs',
             command: 'alpha/run.sh',
             operations: ['decode-base64url'],
+            members: { lane: 'code written in this lane' },
+            answeredBy: { 'decode-base64url': 'lane' },
             prepare: { command: 'alpha/prepare.sh', args: ['--go'] },
         });
     });
@@ -858,9 +986,23 @@ describe('discovering bridges from a manifest beside each lane', () => {
     it('carries no prepare key when a manifest omits it', () => {
         const bridges = loadBridges(GOOD_TREE);
         assert.deepEqual(bridges.beta, {
-            script: 'beta/bridge.mjs', command: 'beta/run.sh', operations: ['open-aes-gcm'],
+            script: 'beta/bridge.mjs',
+            command: 'beta/run.sh',
+            operations: ['open-aes-gcm'],
+            members: { openssl: 'a library standing in for OpenSSL' },
+            answeredBy: { 'open-aes-gcm': 'openssl' },
         });
         assert.ok(!('prepare' in bridges.beta), 'beta names no prepare step');
+    });
+
+    // An empty `members` beside an empty `operations` is an intentionally
+    // unavailable operation surface: every set is unsupported for it, and its
+    // record carries no operation row.
+    it('loads an empty members and operations pair as a lane that declares nothing', () => {
+        const bridges = loadBridges(GOOD_TREE);
+        assert.deepEqual(bridges.delta, {
+            script: 'delta/bridge.mjs', command: 'delta/run.sh', operations: [], members: {}, answeredBy: {},
+        });
     });
 
     it('refuses a malformed manifest by name through runConformance, and starts no bridge', async () => {
@@ -909,7 +1051,34 @@ describe('discovering bridges from a manifest beside each lane', () => {
     const invalid = [
         ['missing-script', /^lane lane: bridge\.json is missing a string "script"\.$/],
         ['missing-command', /^lane lane: bridge\.json is missing a string "command"\.$/],
-        ['missing-operations', /^lane lane: bridge\.json is missing an "operations" array\.$/],
+        ['missing-operations', /^lane lane: bridge\.json is missing an "operations" object\.$/],
+        // The shape changed from a list of names to a map naming who answers each
+        // one, and a manifest still in the old shape is told so rather than read.
+        [
+            'operations-array',
+            /^lane lane: bridge\.json's "operations" is an array; it is now an object naming the member that answers each operation\.$/,
+        ],
+        ['unknown-operation', /^lane lane: bridge\.json carries an unknown operation: "build-bind"\.$/],
+        [
+            'operation-undeclared-member',
+            /^lane lane: bridge\.json's operation hkdf-sha256 names member "hash", which "members" does not declare\.$/,
+        ],
+        ['missing-members', /^lane lane: bridge\.json is missing a "members" object\.$/],
+        ['members-not-object', /^lane lane: bridge\.json is missing a "members" object\.$/],
+        [
+            'member-bad-key',
+            /^lane lane: bridge\.json's member "open-ssl" is not a name of lowercase letters and digits\.$/,
+        ],
+        [
+            'member-empty-description',
+            /^lane lane: bridge\.json's member lane is not described: its value is one non-empty line\.$/,
+        ],
+        [
+            'member-two-line-description',
+            /^lane lane: bridge\.json's member lane is not described: its value is one non-empty line\.$/,
+        ],
+        ['member-answers-nothing', /^lane lane: bridge\.json's member openssl answers no operation\.$/],
+        ['members-idle-empty-operations', /^lane lane: bridge\.json's member lane answers no operation\.$/],
         ['not-an-object', /^lane lane: bridge\.json is not a JSON object\.$/],
         ['unknown-member', /^lane lane: bridge\.json carries a member this format does not name: "cwd"\.$/],
         ['prepare-not-object', /^lane lane: bridge\.json's "prepare" is not a JSON object\.$/],
@@ -961,16 +1130,20 @@ describe('discovering bridges from a manifest beside each lane', () => {
         assert.throws(() => loadBridges(root), throwsMessage(/^lane lane: bridge\.json could not be read: /));
     });
 
-    it('loads all six shipped lanes, each naming a script this checkout actually has', () => {
+    it('loads all ten shipped lanes, each naming a script this checkout actually has', () => {
         const bridges = loadBridges(REAL_CONFORMANCE_DIR);
-        assert.deepEqual(Object.keys(bridges), ['dotnet', 'go', 'jvm', 'node', 'php', 'python']);
+        assert.deepEqual(Object.keys(bridges), [
+            'bun/boringssl', 'deno/rustcrypto-awslc', 'dotnet/bcl', 'go/stdlib',
+            'jvm/jca-jackson', 'node/openssl', 'php/openssl', 'python/cryptography',
+            'rust/rustcrypto', 'workerd/boringssl',
+        ]);
         for (const [lane, entry] of Object.entries(bridges)) {
             const scriptPath = isAbsolute(entry.script) ? entry.script : join(REAL_CONFORMANCE_DIR, entry.script);
             assert.ok(existsSync(scriptPath), `${lane}'s script ${entry.script} is not on disk`);
-            // Every lane but go and node names a checked-in wrapper as its command.
-            // go's command is a build artifact `prepare` produces and .gitignore
-            // excludes, and node's is the bridge's own source, run directly. Asserting
-            // a wrapper here would fail a checkout that has not built go's yet.
+            // Every lane but go and rust names a checked-in wrapper as its command.
+            // Their commands are build artifacts `prepare` produces and .gitignore
+            // excludes. Asserting a wrapper here would fail a checkout that has not
+            // built them yet.
             const commandPath = isAbsolute(entry.command) ? entry.command : join(REAL_CONFORMANCE_DIR, entry.command);
             assert.ok(
                 existsSync(commandPath) || Boolean(entry.prepare),
@@ -983,5 +1156,39 @@ describe('discovering bridges from a manifest beside each lane', () => {
                 );
             }
         }
+    });
+
+    // The binding README repeats who answers each operation, so a reader who never
+    // opens bridge.json still sees it. One bullet per operation, `op`: `member`,
+    // keeps the two from drifting apart.
+    it('finds every shipped attribution repeated in its binding README', () => {
+        const bridges = loadBridges(REAL_CONFORMANCE_DIR);
+        for (const [lane, entry] of Object.entries(bridges)) {
+            const readme = readFileSync(join(REAL_CONFORMANCE_DIR, lane, 'README.md'), 'utf8');
+            for (const [operation, member] of Object.entries(entry.answeredBy)) {
+                assert.ok(
+                    readme.includes(`- \`${operation}\`: \`${member}\``),
+                    `${lane}/README.md does not say that ${member} answers ${operation}`,
+                );
+            }
+        }
+    });
+
+    // The shell folds these lines into the record, so what select-sets.mjs prints is
+    // the attribution a record carries: one line per operation, in manifest order,
+    // after the set lines.
+    it('prints each declared operation and its member after the set lines', () => {
+        const selector = fileURLToPath(new URL('../select-sets.mjs', import.meta.url));
+        const printed = spawnSync(process.execPath, [selector, 'php/openssl'], { encoding: 'utf8' });
+        assert.equal(printed.status, 0, printed.stderr);
+        const lines = printed.stdout.trim().split('\n');
+        const firstOperation = lines.findIndex((line) => line.startsWith('operation '));
+        assert.ok(firstOperation > 0, 'the set lines come first');
+        assert.ok(lines.slice(0, firstOperation).every((line) => line.split(' ').length === 2));
+        const answeredBy = loadBridges(REAL_CONFORMANCE_DIR)['php/openssl'].answeredBy;
+        assert.deepEqual(
+            lines.slice(firstOperation),
+            Object.entries(answeredBy).map(([operation, member]) => `operation ${operation} ${member}`),
+        );
     });
 });

@@ -1,0 +1,25 @@
+{
+  "provenance": {
+    "source": "src/crypto/hpke/testdata/rfc9180.json of Go 1.27.0, the toolchain verification/conformance-primitives/go/install-toolchain pins",
+    "sourceSha256": "908a08888ba7406f18a00dcfe13f4e068a892c3ed2ec1312cbf43945596741e7",
+    "selection": "every entry with mode 0, kem_id 16, kdf_id 1 and aead_id 2; that is entry 9 (zero-based) of 24, copied unchanged",
+    "format": "The Go file keeps the RFC 9180 test-vector members for keys and enc and replaces the per-encryption list with accumulated values. encryptions_accumulated is the first 16 octets of SHAKE128 over the concatenated ciphertexts of 1000 Seal calls on one sender context, at sequence numbers 0 to 999. Each call draws aad and then pt from one SHAKE128 stream over empty input; each draw reads one length octet n and then n octets. Go 1.27.0 src/crypto/hpke/hpke_test.go, testVectors and drawRandomInput, defines this procedure.",
+    "exports": "exports_accumulated is copied but not checked: this profile computes no exporter output."
+  },
+  "vectors": [
+    {
+      "mode": 0,
+      "kem_id": 16,
+      "kdf_id": 1,
+      "aead_id": 2,
+      "info": "4f6465206f6e2061204772656369616e2055726e",
+      "ikmE": "a90d3417c3da9cb6c6ae19b4b5dd6cc9529a4cc24efb7ae0ace1f31887a8cd6c",
+      "ikmR": "a0ce15d49e28bd47a18a97e147582d814b08cbe00109fed5ec27d1b4e9f6f5e3",
+      "skRm": "317f915db7bc629c48fe765587897e01e282d3e8445f79f27f65d031a88082b2",
+      "pkRm": "04abc7e49a4c6b3566d77d0304addc6ed0e98512ffccf505e6a8e3eb25c685136f853148544876de76c0f2ef99cdc3a05ccf5ded7860c7c021238f9e2073d2356c",
+      "enc": "04c06b4f6bebc7bb495cb797ab753f911aff80aefb86fd8b6fcc35525f3ab5f03e0b21bd31a86c6048af3cb2d98e0d3bf01da5cc4c39ff5370d331a4f1f7d5a4e0",
+      "encryptions_accumulated": "8d3263541fc1695b6e88ff3a1208577c",
+      "exports_accumulated": "038af0baa5ce3c4c5f371c3823b15217"
+    }
+  ]
+}

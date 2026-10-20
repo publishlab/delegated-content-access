@@ -4,7 +4,7 @@
 // import, which still validates the point before any key agreement.
 //
 // It follows the decoding sketch in
-// `../../../../docs/spec-proposal--compact-ecdh-envelope.md` line for line, over
+// `../README.md#decoding-sketch` line for line, over
 // `math/big`, and rejects everything that sketch rejects.
 package main
 

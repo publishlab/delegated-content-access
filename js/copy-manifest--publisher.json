@@ -1,0 +1,24 @@
+{
+  "root": "js",
+  "role": "publisher",
+  "layers": {
+    "core": {
+      "paths": [
+        "core-shared/*.js",
+        "core-shared--client-publisher/*.js",
+        "core-shared--publisher-issuer/*.js",
+        "core-publisher/*.js"
+      ]
+    },
+    "adapters": {
+      "paths": [
+        "adapter-publisher/*.js"
+      ]
+    },
+    "integration": {
+      "paths": [
+        "integration-publisher/*.js"
+      ]
+    }
+  }
+}

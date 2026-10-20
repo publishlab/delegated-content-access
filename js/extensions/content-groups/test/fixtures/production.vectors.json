@@ -1,0 +1,339 @@
+{
+  "provenance": "generate-production-vectors.mjs: node:crypto HKDF-SHA256, SHA-256, P-256 ECDH, ES256 and AES-GCM with a locally written F transcript, stock chain-key Root/Step/Leaf, seed, item pad, content AAD, envelope layout and wire objects. The stock derivation is checked against js/extensions/chain-keys/test/fixtures/dca-profile-chain-keys.vectors.json and verification/vectors/v1/profiles/dca-profile-chain-keys/chain-key-primitives.json on every run. The ES256 signature is stored once (ECDSA is randomized) and verified on every run. No code from the content-groups or chain-keys implementation.",
+  "inputs": {
+    "origin": "https://news.example",
+    "retainedSecretHex": "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f",
+    "periodGeometry": {
+      "chainsPerDay": 2,
+      "periodMinutes": 60
+    },
+    "issuedAt": "2026-10-14T15:05:00.000Z",
+    "renderPeriod": "261014T1500",
+    "windowStart": "261014T1200",
+    "renderId": "AAECAwQFBgcICQoLDA0ODw",
+    "resourceId": "story1",
+    "publisherKid": "publisher-k1",
+    "publisherSigningScalarHex": "6b0f29ecf61e14f56c6124a8e0c2513b5a171518e28c44811e6ba6b3129a003e",
+    "issuerName": "issuerA",
+    "issuerKeyId": "a1",
+    "issuerPrivateScalarHex": "a6989a7924dff08cf40f1bf7e5fab471e3c3b3bd1a53a987e6207e2eba56e00d",
+    "items": {
+      "bodytext": {
+        "contentType": "text/plain",
+        "contentKeyHex": "a0a1a2a3a4a5a6a7a8a9aaabacadaeaf",
+        "groups": [
+          "politics",
+          "sports"
+        ],
+        "plaintext": "body text"
+      },
+      "headline": {
+        "contentType": "text/plain",
+        "contentKeyHex": "b0b1b2b3b4b5b6b7b8b9babbbcbdbebf",
+        "groups": [
+          "politics"
+        ],
+        "plaintext": "head line"
+      },
+      "shoppingAd": {
+        "contentType": "text/plain",
+        "contentKeyHex": "c0c1c2c3c4c5c6c7c8c9cacbcccdcecf",
+        "groups": [
+          "shopping"
+        ],
+        "plaintext": "buy now"
+      }
+    },
+    "envelopes": {
+      "bodytext": {
+        "ephemeralPrivateScalarHex": "560297df2ad0367abb4291afdc2cdffe08d056dcc0e56c9d188f597583b09bae",
+        "nonceHex": "101112131415161718191a1b"
+      },
+      "headline": {
+        "ephemeralPrivateScalarHex": "543235b8ea4f5cd38fd3aa75faa581f3dcecaf296940f2a8b46d9d1c386caf0f",
+        "nonceHex": "202122232425262728292a2b"
+      },
+      "shoppingAd": {
+        "ephemeralPrivateScalarHex": "21da058854d29451faf7f18cd8ad01d28e481659a0b16d416681d4f6dcf67c49",
+        "nonceHex": "303132333435363738393a3b"
+      }
+    },
+    "narrowing": {
+      "requestedContentGroups": {
+        "bodytext": [
+          "politics"
+        ],
+        "headline": [
+          "politics"
+        ]
+      },
+      "requestedContentKeys": {
+        "shoppingAd": "shopping"
+      }
+    },
+    "grants": [
+      {
+        "kind": "chain",
+        "contentName": "bodytext",
+        "group": "politics",
+        "windowStart": "261014T1200",
+        "cutoffT": "261014T1800"
+      },
+      {
+        "kind": "period",
+        "contentName": "headline",
+        "group": "politics",
+        "t": "261014T1500"
+      },
+      {
+        "kind": "item",
+        "contentName": "shoppingAd"
+      }
+    ]
+  },
+  "expected": {
+    "publisherNamespace": "2d0a016473ff75fd2afa3cc1dac401896235215a4a61e06d11129ff3442837a7",
+    "issuer": {
+      "publicJwk": {
+        "kty": "EC",
+        "crv": "P-256",
+        "x": "5DzzhO-gXqNse5qcNQDa5aBbiw5m0Ty1-8E5mRBLufU",
+        "y": "8nCVnY-szbDnORCwYdMeOJ4hamv_U15xy39Y3r1S988"
+      },
+      "privateJwk": {
+        "kty": "EC",
+        "crv": "P-256",
+        "x": "5DzzhO-gXqNse5qcNQDa5aBbiw5m0Ty1-8E5mRBLufU",
+        "y": "8nCVnY-szbDnORCwYdMeOJ4hamv_U15xy39Y3r1S988",
+        "d": "ppiaeSTf8Iz0Dxv35fq0cePDs70aU6mH5iB-LrpW4A0"
+      }
+    },
+    "publisher": {
+      "publicJwk": {
+        "kty": "EC",
+        "crv": "P-256",
+        "x": "j0O2PccrlI5SovCP01tZTawFhS1dEloAQAPYBO46zb4",
+        "y": "GX24gemrrllGQ2y1Q4o7VKRpDhSuZbmE7sLxxigKInY"
+      },
+      "signingInput": "eyJhbGciOiJFUzI1NiIsInR5cCI6IkpXVCIsImtpZCI6InB1Ymxpc2hlci1rMSJ9.eyJyZW5kZXJJZCI6IkFBRUNBd1FGQmdjSUNRb0xEQTBPRHciLCJvcmlnaW4iOiJodHRwczovL25ld3MuZXhhbXBsZSIsImlzc3VlZEF0IjoiMjAyNi0xMC0xNFQxNTowNTowMC4wMDBaIiwicmVzb3VyY2VJZCI6InN0b3J5MSIsImRhdGEiOnt9fQ"
+    },
+    "seedEnvelopes": {
+      "bodytext": {
+        "windowStart": "261014T1200",
+        "ephemeralPublicJwk": {
+          "kty": "EC",
+          "crv": "P-256",
+          "x": "kXbBEZetkN_x6y9Tb4yorlVGJZi7mbWomskRS9h2064",
+          "y": "2yab9PqZL_0LxjJzXKHDzHAHD3uo0sVW7F6Sm5K9KUQ"
+        },
+        "nonceHex": "101112131415161718191a1b",
+        "sharedSecretHex": "8225d7db069d363fcfc97c0410f6e203e2fe9bda35303c32a17953ea9c6c9eb0",
+        "aadText": "[\"dca-bind-content-name-seed\",\"2d0a016473ff75fd2afa3cc1dac401896235215a4a61e06d11129ff3442837a7\",\"AAECAwQFBgcICQoLDA0ODw\",\"issuerA\",\"bodytext\",\"261014T1200\",2,60]",
+        "aadHex": "5b226463612d62696e642d636f6e74656e742d6e616d652d73656564222c2232643061303136343733666637356664326166613363633164616334303138393632333532313561346136316530366431313132396666333434323833376137222c2241414543417751464267634943516f4c4441304f4477222c2269737375657241222c22626f647974657874222c223236313031345431323030222c322c36305d",
+        "seedHex": "d9b1274900e75c2ddcf90b8015ffc87d4bd60eb8b84298d5ec9d57e26223a8f3",
+        "sealed": "BJF2wRGXrZDf8esvU2-MqK5VRiWYu5m1qJrJEUvYdtOu2yab9PqZL_0LxjJzXKHDzHAHD3uo0sVW7F6Sm5K9KUQQERITFBUWFxgZGhvO5i58Iziu1D73OkkjFKNvqX3rsST6FucdKm7sfKi_eL5hEyPgguQwGBAyCAipNYw"
+      },
+      "headline": {
+        "windowStart": "261014T1200",
+        "ephemeralPublicJwk": {
+          "kty": "EC",
+          "crv": "P-256",
+          "x": "X8rEWupo-AZZyoXqzkLVQXXCBPnrsgizXNehIQyaHa4",
+          "y": "2R-3Oc7sbI57PIWMAC51J02cg09OIoDQlElHHAJAxsE"
+        },
+        "nonceHex": "202122232425262728292a2b",
+        "sharedSecretHex": "3c2418874d2428bf79b1dc5e1959738b21bb10a0fcf6e9633ab5787a3cf8c5c3",
+        "aadText": "[\"dca-bind-content-name-seed\",\"2d0a016473ff75fd2afa3cc1dac401896235215a4a61e06d11129ff3442837a7\",\"AAECAwQFBgcICQoLDA0ODw\",\"issuerA\",\"headline\",\"261014T1200\",2,60]",
+        "aadHex": "5b226463612d62696e642d636f6e74656e742d6e616d652d73656564222c2232643061303136343733666637356664326166613363633164616334303138393632333532313561346136316530366431313132396666333434323833376137222c2241414543417751464267634943516f4c4441304f4477222c2269737375657241222c22686561646c696e65222c223236313031345431323030222c322c36305d",
+        "seedHex": "a37781481a359bd8eb12be8b5d603ba0fc9371ec70e189bc528ab0aed5ebec7b",
+        "sealed": "BF_KxFrqaPgGWcqF6s5C1UF1wgT567IIs1zXoSEMmh2u2R-3Oc7sbI57PIWMAC51J02cg09OIoDQlElHHAJAxsEgISIjJCUmJygpKisz8N4zd1yvqnJX2oBH91or7RyDxE68iOYL1pQeaxb4fYhlRkoXTDqP6lAOSdKl450"
+      },
+      "shoppingAd": {
+        "windowStart": "261014T1200",
+        "ephemeralPublicJwk": {
+          "kty": "EC",
+          "crv": "P-256",
+          "x": "qcl4VIDVER_UrDh70009SBZ9-VVelcXvO1XypqFCVHQ",
+          "y": "CHu8zvLx-JUs2KV1wvBIZmu-Cf2mZvNVgcFcGG0C7kY"
+        },
+        "nonceHex": "303132333435363738393a3b",
+        "sharedSecretHex": "b44eb4ccfa0a0e6f48f237bd4c7ad9e7eddfb99d388f47660418fac3fc1809ea",
+        "aadText": "[\"dca-bind-content-name-seed\",\"2d0a016473ff75fd2afa3cc1dac401896235215a4a61e06d11129ff3442837a7\",\"AAECAwQFBgcICQoLDA0ODw\",\"issuerA\",\"shoppingAd\",\"261014T1200\",2,60]",
+        "aadHex": "5b226463612d62696e642d636f6e74656e742d6e616d652d73656564222c2232643061303136343733666637356664326166613363633164616334303138393632333532313561346136316530366431313132396666333434323833376137222c2241414543417751464267634943516f4c4441304f4477222c2269737375657241222c2273686f7070696e674164222c223236313031345431323030222c322c36305d",
+        "seedHex": "b9e1f7cdee3659496716dc84789550450d2898c103f20bcff8d55a2cc12c5671",
+        "sealed": "BKnJeFSA1REf1Kw4e9NNPUgWfflVXpXF7ztV8qahQlR0CHu8zvLx-JUs2KV1wvBIZmu-Cf2mZvNVgcFcGG0C7kYwMTIzNDU2Nzg5Ojvy6-v_2ubZa7Y7TOIznwBW7-KoX5KiXmxv3mi3oPWXjA_a3xUdKIopf13Ub-pIkn8"
+      }
+    },
+    "items": {
+      "bodytext": {
+        "connectors": {
+          "politics": {
+            "periodKeyHex": "9d24cf2fc780660e0ca66294e4b161c1",
+            "itemPadInputText": "[\"item-pad\",\"AAECAwQFBgcICQoLDA0ODw\",\"bodytext\"]",
+            "itemPadHex": "d03d5057b4abe27013f14237373b7858",
+            "connector": "cJzy9BAORNe7WOicm5bW9w"
+          },
+          "sports": {
+            "periodKeyHex": "cdd6d737006034972a14a076ed026ecc",
+            "itemPadInputText": "[\"item-pad\",\"AAECAwQFBgcICQoLDA0ODw\",\"bodytext\"]",
+            "itemPadHex": "9ae8db1dd968de1c7f054826925b0119",
+            "connector": "Okl5vn3NeLvXrOKNPvavtg"
+          }
+        },
+        "contentAadHex": "0000001641414543417751464267634943516f4c4441304f447700000008626f647974657874"
+      },
+      "headline": {
+        "connectors": {
+          "politics": {
+            "periodKeyHex": "7f9ff114ef3e9e8f85ec8a55cab908d6",
+            "itemPadInputText": "[\"item-pad\",\"AAECAwQFBgcICQoLDA0ODw\",\"headline\"]",
+            "itemPadHex": "88b790d6d0748ca997dfecb3c52a7cd7",
+            "connector": "OAYiZWTBOh4vZlYIeZfCaA"
+          }
+        },
+        "contentAadHex": "0000001641414543417751464267634943516f4c4441304f447700000008686561646c696e65"
+      },
+      "shoppingAd": {
+        "connectors": {
+          "shopping": {
+            "periodKeyHex": "cd9ed7aee385d46e49080a98dc242c0a",
+            "itemPadInputText": "[\"item-pad\",\"AAECAwQFBgcICQoLDA0ODw\",\"shoppingAd\"]",
+            "itemPadHex": "f0234aa5ee58949645076e1cf8082fa7",
+            "connector": "MOKIZiqdUlGNzqTXNMXhaA"
+          }
+        },
+        "contentAadHex": "0000001641414543417751464267634943516f4c4441304f44770000000a73686f7070696e674164"
+      }
+    },
+    "publication": {
+      "dcaData": {
+        "version": "1",
+        "resource": {
+          "renderId": "AAECAwQFBgcICQoLDA0ODw",
+          "origin": "https://news.example",
+          "issuedAt": "2026-10-14T15:05:00.000Z",
+          "resourceId": "story1",
+          "data": {}
+        },
+        "resourceJWT": "eyJhbGciOiJFUzI1NiIsInR5cCI6IkpXVCIsImtpZCI6InB1Ymxpc2hlci1rMSJ9.eyJyZW5kZXJJZCI6IkFBRUNBd1FGQmdjSUNRb0xEQTBPRHciLCJvcmlnaW4iOiJodHRwczovL25ld3MuZXhhbXBsZSIsImlzc3VlZEF0IjoiMjAyNi0xMC0xNFQxNTowNTowMC4wMDBaIiwicmVzb3VyY2VJZCI6InN0b3J5MSIsImRhdGEiOnt9fQ.SF5CgH42d2O_4YAVn7OHBPFedUowNbS7bLdnuYrAvT17PA25wbLNH5EaWN5JBgb6I8AdQyseSb9aH3wh8RLjoQ",
+        "periodGeometry": {
+          "chainsPerDay": 2,
+          "periodMinutes": 60
+        },
+        "renderPeriod": "261014T1500",
+        "contentData": {
+          "bodytext": {
+            "contentType": "text/plain",
+            "connectors": {
+              "politics": "cJzy9BAORNe7WOicm5bW9w",
+              "sports": "Okl5vn3NeLvXrOKNPvavtg"
+            }
+          },
+          "headline": {
+            "contentType": "text/plain",
+            "connectors": {
+              "politics": "OAYiZWTBOh4vZlYIeZfCaA"
+            }
+          },
+          "shoppingAd": {
+            "contentType": "text/plain",
+            "connectors": {
+              "shopping": "MOKIZiqdUlGNzqTXNMXhaA"
+            }
+          }
+        },
+        "issuerData": {
+          "issuerA": {
+            "sealed": {
+              "contentWindowSeeds": {
+                "bodytext": {
+                  "261014T1200": "BJF2wRGXrZDf8esvU2-MqK5VRiWYu5m1qJrJEUvYdtOu2yab9PqZL_0LxjJzXKHDzHAHD3uo0sVW7F6Sm5K9KUQQERITFBUWFxgZGhvO5i58Iziu1D73OkkjFKNvqX3rsST6FucdKm7sfKi_eL5hEyPgguQwGBAyCAipNYw"
+                },
+                "headline": {
+                  "261014T1200": "BF_KxFrqaPgGWcqF6s5C1UF1wgT567IIs1zXoSEMmh2u2R-3Oc7sbI57PIWMAC51J02cg09OIoDQlElHHAJAxsEgISIjJCUmJygpKisz8N4zd1yvqnJX2oBH91or7RyDxE68iOYL1pQeaxb4fYhlRkoXTDqP6lAOSdKl450"
+                },
+                "shoppingAd": {
+                  "261014T1200": "BKnJeFSA1REf1Kw4e9NNPUgWfflVXpXF7ztV8qahQlR0CHu8zvLx-JUs2KV1wvBIZmu-Cf2mZvNVgcFcGG0C7kYwMTIzNDU2Nzg5Ojvy6-v_2ubZa7Y7TOIznwBW7-KoX5KiXmxv3mi3oPWXjA_a3xUdKIopf13Ub-pIkn8"
+                }
+              }
+            },
+            "keyId": "a1"
+          }
+        }
+      },
+      "sealedContent": {
+        "bodytext": "ORX8dw3hrMcRW-aFt9q_A546QCwp2m4GbA",
+        "headline": "GHBWDYgfJ-Qv_Wa7CFfDcdDo2wLnYAtUvA",
+        "shoppingAd": "6x9DkL_tpAnNAIUjX9bMlTHfVHcqK0c"
+      }
+    },
+    "request": {
+      "version": "1",
+      "issuerName": "issuerA",
+      "resourceJWT": "eyJhbGciOiJFUzI1NiIsInR5cCI6IkpXVCIsImtpZCI6InB1Ymxpc2hlci1rMSJ9.eyJyZW5kZXJJZCI6IkFBRUNBd1FGQmdjSUNRb0xEQTBPRHciLCJvcmlnaW4iOiJodHRwczovL25ld3MuZXhhbXBsZSIsImlzc3VlZEF0IjoiMjAyNi0xMC0xNFQxNTowNTowMC4wMDBaIiwicmVzb3VyY2VJZCI6InN0b3J5MSIsImRhdGEiOnt9fQ.SF5CgH42d2O_4YAVn7OHBPFedUowNbS7bLdnuYrAvT17PA25wbLNH5EaWN5JBgb6I8AdQyseSb9aH3wh8RLjoQ",
+      "keyId": "a1",
+      "sealed": {
+        "contentKeys": {},
+        "contentWindowSeeds": {
+          "bodytext": {
+            "261014T1200": "BJF2wRGXrZDf8esvU2-MqK5VRiWYu5m1qJrJEUvYdtOu2yab9PqZL_0LxjJzXKHDzHAHD3uo0sVW7F6Sm5K9KUQQERITFBUWFxgZGhvO5i58Iziu1D73OkkjFKNvqX3rsST6FucdKm7sfKi_eL5hEyPgguQwGBAyCAipNYw"
+          },
+          "headline": {
+            "261014T1200": "BF_KxFrqaPgGWcqF6s5C1UF1wgT567IIs1zXoSEMmh2u2R-3Oc7sbI57PIWMAC51J02cg09OIoDQlElHHAJAxsEgISIjJCUmJygpKisz8N4zd1yvqnJX2oBH91or7RyDxE68iOYL1pQeaxb4fYhlRkoXTDqP6lAOSdKl450"
+          },
+          "shoppingAd": {
+            "261014T1200": "BKnJeFSA1REf1Kw4e9NNPUgWfflVXpXF7ztV8qahQlR0CHu8zvLx-JUs2KV1wvBIZmu-Cf2mZvNVgcFcGG0C7kYwMTIzNDU2Nzg5Ojvy6-v_2ubZa7Y7TOIznwBW7-KoX5KiXmxv3mi3oPWXjA_a3xUdKIopf13Ub-pIkn8"
+          }
+        }
+      },
+      "renderPeriod": "261014T1500",
+      "periodGeometry": {
+        "chainsPerDay": 2,
+        "periodMinutes": 60
+      },
+      "requestedContentGroups": {
+        "bodytext": [
+          "politics"
+        ],
+        "headline": [
+          "politics"
+        ]
+      },
+      "requestedContentKeys": {
+        "shoppingAd": {
+          "group": "shopping",
+          "connector": "MOKIZiqdUlGNzqTXNMXhaA"
+        }
+      }
+    },
+    "response": {
+      "keys": {
+        "contentKeys": {}
+      },
+      "contentGroups": {
+        "chainKeys": {
+          "bodytext": {
+            "politics": {
+              "261014T1800": "y-W5pEt7JcGJXpTV_JNbug"
+            }
+          }
+        },
+        "periodKeys": {
+          "headline": {
+            "politics": {
+              "261014T1500": "f5_xFO8-no-F7IpVyrkI1g"
+            }
+          }
+        },
+        "contentKeys": {
+          "shoppingAd": "wMHCw8TFxsfIycrLzM3Ozw"
+        }
+      }
+    },
+    "jsonBytes": {
+      "publication": 1770,
+      "request": 1305,
+      "response": 258
+    }
+  }
+}

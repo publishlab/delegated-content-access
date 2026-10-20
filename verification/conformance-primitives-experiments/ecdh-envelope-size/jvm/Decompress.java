@@ -4,8 +4,8 @@
 // same KeyFactory that refused the compressed bytes. The decoder does the field
 // arithmetic and nothing else: point validation stays with the library.
 //
-// It follows the decoding sketch in docs/spec-proposal--compact-ecdh-envelope.md
-// section 4 line for line. p is 3 mod 4 on P-256, so the square root is one
+// It follows the decoding sketch in ../README.md#decoding-sketch
+// line for line. p is 3 mod 4 on P-256, so the square root is one
 // modular exponentiation, and the result is squared again before it is trusted.
 // Every refusal below throws an exception, which tells the caller that the
 // point never reached the library.

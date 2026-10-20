@@ -1,0 +1,3 @@
+# <token> <release the installer pins> <default|listed>; newest first. install-toolchain keeps the checksum per token.
+8.4 8.4.23 default
+8.3 8.3.32 listed

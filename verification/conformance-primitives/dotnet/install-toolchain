@@ -7,6 +7,7 @@
 # it by hand is optional.
 #
 #   ./install-toolchain                    # install if absent, then print BASE
+#   ./install-toolchain --version <token>  # the pin `versions` lists for <token>; default when absent
 #   ./install-toolchain --base <dir>       # use this SDK as is, download nothing
 #   ./install-toolchain --cache-root <dir> # put or find the SDK under this root
 #   ./install-toolchain --print-base       # print where BASE is or would be, install nothing
@@ -16,6 +17,11 @@
 #   ./install-toolchain --help             # this text
 #
 # Run it directly: the shebang names bash.
+#
+# The version comes from --version, else DCA_VERSION, else `default`, the first
+# default line of `versions` beside this script. A token that file does not
+# list is refused with exit 2. Each version installs into a directory of its
+# own, so two versions sit side by side in one cache.
 #
 # BASE is the unpacked SDK: the directory DOTNET_ROOT names, with the dotnet
 # binary at its root. A caller is given it, or the root the lanes live under;
@@ -38,12 +44,21 @@ set -euo pipefail
 # Pinned by exact SDK version. Microsoft publishes SHA-512 rather than the
 # SHA-256 the Go and JVM lanes verify, so this lane runs sha512sum; because of that
 # difference the three installers do not share one helper.
-# Bumping the pin means changing the version and both hashes together, from:
+# Each token's SDK version is the second field of its line in `versions`, and
+# its two hashes are below, keyed by token; the token is the .NET major, so 10
+# is .NET 10 LTS, whose support ends 2028-11-14. Bumping a pin means changing
+# the version there and both hashes here together, from:
 #   https://builds.dotnet.microsoft.com/dotnet/release-metadata/10.0/releases.json
 # reading .releases[] | select(.sdk.version=="<version>") | .sdk.files[].hash
-SDK_VERSION=10.0.400          # .NET 10 LTS, support ends 2028-11-14
-SHA512_x64=1033977dd837150e0814cf0c5d5b17ceb63925fda7ba2158b47258a4bd7c048cf82eac3bc1166f3146f53124a3f5fba09db1de1260d2ce96399860303b404b48
-SHA512_arm64=a1b45da58e5591fff909a6126ac6bfc1ef9c12bc72c0625f7815e83a82be1a902317ee96926cbbf81324a45c6abf2ed8102a216d0507879cc166159af78d1b77
+pin_checksums() {
+  case "$1" in
+    10) SHA512_x64=1033977dd837150e0814cf0c5d5b17ceb63925fda7ba2158b47258a4bd7c048cf82eac3bc1166f3146f53124a3f5fba09db1de1260d2ce96399860303b404b48
+        SHA512_arm64=a1b45da58e5591fff909a6126ac6bfc1ef9c12bc72c0625f7815e83a82be1a902317ee96926cbbf81324a45c6abf2ed8102a216d0507879cc166159af78d1b77 ;;
+    *) echo "versions lists $1, and this installer carries no checksum for it." >&2
+       echo "Add both hashes for its SDK to pin_checksums before the token can install." >&2
+       exit 2 ;;
+  esac
+}
 
 # Which pinned archive this host would download, resolved on the leg that
 # downloads one and nowhere else.
@@ -91,6 +106,7 @@ base=""
 cache_root=""
 print=""
 force=0
+version="${DCA_VERSION:-default}"
 while [ $# -gt 0 ]; do
   case "$1" in
     --base)
@@ -99,6 +115,9 @@ while [ $# -gt 0 ]; do
     --cache-root)
       [ $# -ge 2 ] || { echo "--cache-root needs a directory to hold the lanes" >&2; exit 2; }
       resolve_absolute_path "$2"; cache_root="$DCA_ABSOLUTE_PATH"; shift 2 ;;
+    --version)
+      [ $# -ge 2 ] || { echo "--version needs a token from $HERE/versions, or default" >&2; exit 2; }
+      version="$2"; shift 2 ;;
     --print-base)  print=base; shift ;;
     --print-bin)   print=bin; shift ;;
     --print-cache) print=cache; shift ;;
@@ -107,6 +126,12 @@ while [ $# -gt 0 ]; do
     *) echo "unknown argument: $1" >&2; exit 2 ;;
   esac
 done
+
+# The version first: an unlisted token refuses every action, print queries
+# included, so no caller is handed a path for a version nobody pinned.
+resolve_version_pin "$HERE/versions" "$version" || exit 2
+SDK_VERSION="$DCA_VERSION_RELEASE"
+pin_checksums "$DCA_VERSION_TOKEN"
 
 if [ -n "$cache_root" ]; then
   CACHE="$cache_root/dotnet"

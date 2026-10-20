@@ -1,236 +1,200 @@
-# Browser opened-content presentation sketch
+# Placing protected article content
 
 Status: Informative Draft
 
-This guide illustrates one possible JavaScript handoff. It makes the actor
-boundary concrete, but it is not a proposal, selected interface, DCA profile,
-normative browser API, or compatibility commitment.
+This guide covers publisher-owned browser placement and the optional
+[HTML content-map candidate](spec-proposal--html-content-map.md). The browser
+[content-handler contract](spec-proposal--browser-integration.md#5-content-handler)
+and the HTML map are proposals. The reference
+implements both for evaluation.
+This guide adds no baseline requirement. The [browser integration guide](guide--browser-integration.md)
+covers component discovery and session wiring.
 
-## Purpose
+## Choose the placement owner
 
-DCA ends content opening with authenticated, decoded bytes. A publisher still
-has to decide where those bytes belong in its page, how their representation
-is rendered, and whether trusted page behavior runs afterward. The publisher
-models the content and owns those decisions; an issuer-supplied or independent
-client script should not guess them from selectors or issuer responses.
+For an ordinary article, the content owner selects the handler that renders opened
+content. Use the site's existing renderer, or a rendering library supplied by its
+CMS, issuer or another chosen vendor. Supplying keys and supplying rendering code
+are separate roles, even when one vendor supplies both.
 
-The handoff sits after DCA opening and before application rendering:
+The application gives that handler opened content and a captured article destination.
+The handler applies the site's HTML policy, updates its DOM or framework state, and
+reports completion. It can then activate publisher-selected article behavior.
+Neither an issuer response nor a field inside opened content selects executable code.
 
-```text
-Publisher render
-  names and seals content as "bodytext_full"
-                    |
-                    v
-DCA browser client                     Issuer
-  reads the delivery
-  sends an unlock request ----------> authenticates and decides access
-  admits the response <-------------- returns granted key capability
-  resolves the content key
-  authenticates, decrypts and decodes the item
-                    |
-                    | { version, contentName, contentType, bytes, signal }
-                    v
-Publisher presentation callback
-  maps "bodytext_full" to publisher-owned targets and rendering
-  optionally runs publisher-registered activation code
-```
+A `contentMap` gives an independent client enough information to reconstruct the
+protected article slots without the owner's rendering scripts. A browser can explicitly
+select the map renderer too, where its host can maintain stable targets. Merely shipping
+a map does not execute it. Choose one placement owner for each destination; do not run
+both renderers or silently switch to the map after the chosen handler refuses.
 
-Each actor stops where another actor already owns the decision. The issuer
-does not select page targets or presentation behavior. The DCA client does not
-interpret the application meaning of item names or execute opened content. The
-publisher callback does not participate in authentication, entitlement, key
-selection, or cryptography; it receives the result only after those operations
-succeed.
+| Integration | Placement owner | What the map adds |
+| --- | --- | --- |
+| Ordinary publisher page | Owner-selected content handler | Optional independent reconstruction of the same article. |
+| Framework-managed article | Handler updates the framework's state or uses its rendering API | An independent HTML representation; no outside writer takes over framework nodes. |
+| Browser explicitly using the reference map renderer | Retained browser map session | Fixed-target HTML/plain-text placement and explicit continuation. |
+| Independent service terminating DCA | Its selected map implementation | Article reconstruction without loading publisher scripts. |
 
-The illustrated boundary uses one publisher-supplied presentation object:
+## Handoff between client and presenter
 
-```text
-presentation.version = "1"
-presentation.presentOpenedContent(item) -> void | Promise<void>
-```
+Use the direct connection shown in
+[one article, wired directly](guide--browser-integration.md#one-article-wired-directly).
+The configured callback receives the item name, required media type, opened value and
+a guarded commit operation. Content names belong to the captured delivery; `bodytext`
+is not a page-wide destination name. Content descriptions and schemas are unnecessary
+for ordinary HTML placement.
 
-The caller always awaits `presentOpenedContent(...)`; a synchronous presenter
-may return nothing. Return or promise fulfilment means the publisher finished
-its presentation work. Throwing or rejecting means presentation failed; it
-does not retroactively change the issuer decision or make the content
-unopened.
+The integration captures the article and output lifetime before awaiting key acquisition.
+Navigation, article replacement or a change in the owning context ends that lifetime
+before the destination is reused. The callback checks eligibility at the actual effect,
+including after its own asynchronous work. A successful unlock alone is not successful
+placement. The [core lifetime rule](spec--core-protocol.md#221-logical-client-contexts-and-pending-work)
+also applies when using a vendor's renderer. A remounted destination starts a new output
+lifetime and needs disposal and a fresh connection;
+[browser-integration Section 4.3](spec-proposal--browser-integration.md#43-association-replacement-and-end)
+owns retirement and successor association.
 
-## Callback record
+For a complete article body, replace the teaser's children with the full opened body.
+Do not append the full body to the teaser: teasers may already contain part of that
+body, may be rewritten, or may omit embedded elements. Keep the enclosing article slot
+stable. Remove its lock state and outside subscription prompt only after its required
+content has been placed successfully.
 
-| Member | Meaning |
-| --- | --- |
-| `version` | The callback-record version, currently the string `"1"`. |
-| `contentName` | The admitted DCA item name, such as `bodytext_full`. The publisher maps it to application meaning and targets. |
-| `contentType` | Publisher handling metadata. DCA v1 does not cryptographically authenticate this member, so the publisher must allow only the types configured for that content name. |
-| `bytes` | A fresh `Uint8Array` containing the opened and representation-decoded item. The presenter may copy it and must not use mutation to communicate with the client. |
-| `signal` | An `AbortSignal` for page disposal, navigation, or replacement. A presenter should stop before changing the page when it observes an aborted signal. |
+## Author a map with the template
 
-The illustrated callback record does not include content keys, reusable period
-capability, raw issuer responses, reader identity, an entitlement assertion,
-selectors, callback names, or a separately interpreted script-source field.
-The `bytes` remain opened content even when publisher code deliberately chooses
-to treat them as executable input.
+Generate rules beside the template that owns the destinations. Prefer a unique ID or
+stable `data-*` marker to a broad class shared by nested article elements. Every rule
+must match exactly one target in the locked document. Missing destinations are authoring
+errors, not an instruction to choose the first match.
 
-## Illustrated composition: explicit injection
-
-When the publisher starts a client built to evaluate this sketch, it passes
-the presentation object directly:
+This publisher-composition example uses an existing reference-publisher result `render` and the
+same full body string that was sealed as `bodytext`. The import path is relative to
+this guide's repository directory; an application bundles the corresponding module.
 
 ```js
-startClient({ presentation });
-```
+import { writeMappedDelivery } from "../js/extensions/html-content-map/adapter-publisher/writeMappedDelivery.js";
 
-`startClient` is illustrative; the current reference `createBrowserClient()`
-does not yet accept a presentation option. Today its host calls the presenter
-after `opener.open()`, as the exact-period integration guide demonstrates.
-Explicit injection is one possible later composition because it makes
-ownership and testing clear. In either illustrated composition, the client
-calls the object only after it has successfully opened the item:
-
-```js
-await presentation.presentOpenedContent({
+const contentMap = {
   version: "1",
-  contentName,
-  contentType,
-  bytes: Uint8Array.from(openedBytes),
-  signal,
-});
-```
-
-## Illustrated independent-script discovery
-
-When a publisher page and an independently loaded client script cannot share a
-constructor call, this sketch uses a versioned same-realm discovery key:
-
-```js
-const presentationKey = Symbol.for("delegated-content-access.presentation.v1");
-```
-
-The publisher refuses a duplicate registration and installs the same
-presentation object before loading or starting the client script:
-
-```js
-if (Object.prototype.hasOwnProperty.call(globalThis, presentationKey)) {
-  throw new Error("A DCA presentation object is already registered");
-}
-Object.defineProperty(globalThis, presentationKey, {
-  value: presentation,
-  configurable: true,
-});
-```
-
-An application that replaces its presenter first stops its client work,
-aborts outstanding presentation signals, deletes this configurable property,
-and then registers the replacement. It does not overwrite a live presenter.
-
-The client reads it, requires `version === "1"` and a callable
-`presentOpenedContent`, and otherwise reports that the page supplies no
-supported presenter. It must not silently choose a DOM target or fall back to
-executing opened markup.
-
-The global symbol is discovery, not a security boundary. Every script in the
-same JavaScript realm can discover, call, replace, or observe page objects
-subject to ordinary platform controls. A publisher that does not trust an
-issuer-supplied script with page privileges must not load it into that page
-realm.
-
-## Publisher mapping example
-
-The publisher keeps target selection and rendering in its own code:
-
-```js
-const articleTarget = document.querySelector("[data-article-body]");
-if (!articleTarget) throw new Error("The publisher page carries no article-body target");
-
-const operations = new Map([
-  [
-    "bodytext_full",
-    {
-      contentType: "text/html",
-      target: articleTarget,
-      render: renderArticleFragment,
-      activate: activateArticle,
-    },
+  rules: [
+    { item: "bodytext", op: "fill", target: "#article-body" },
+    { item: "bodytext", op: "removeClass", target: "#article-body", class: "locked" },
+    { item: "bodytext", op: "remove", target: "#article-subscribe" },
   ],
-]);
+};
 
-const presentation = Object.freeze({
-  version: "1",
-  async presentOpenedContent({ version, contentName, contentType, bytes, signal }) {
-    if (version !== "1") throw new Error("Unsupported presentation record version");
-    if (!(bytes instanceof Uint8Array)) throw new Error("Opened content must be bytes");
-    if (!(signal instanceof AbortSignal)) throw new Error("Presentation needs an AbortSignal");
-
-    const operation = operations.get(contentName);
-    if (!operation) throw new Error(`No publisher placement for ${contentName}`);
-    if (contentType !== operation.contentType) throw new Error("Unexpected content type");
-    if (signal.aborted) return;
-
-    await operation.render(operation.target, bytes, { signal });
-    if (!signal.aborted) await operation.activate?.(operation.target, { signal });
-  },
+const html = writeMappedDelivery({
+  dcaData: render.dcaData,
+  sealedContent: render.sealedContent,
+  contentMap,
+  items: { bodytext: fullBodyHtml },
+  page: carriers => `<!doctype html>
+<html><head><meta charset="utf-8"><title>Example article</title></head>
+<body>
+  <article><div id="article-body" class="locked"><p>Public teaser.</p></div></article>
+  <aside id="article-subscribe">Subscribe to read the article.</aside>
+  ${carriers}
+</body></html>`,
 });
 ```
 
-One item may update one target, several targets, a framework store, or no DOM
-at all. Repeating presentation should have publisher-defined replacement or
-idempotence behavior; the client does not infer it.
+`render.dcaData.contentData.bodytext.contentType` is `text/html`; the map has no type
+table. `writeMappedDelivery` embeds it in the existing `dca-data` JSON and returns the
+page after checking the rules, targets and author-time placement. Its `items` argument
+contains author-time text, never a second plaintext delivery carrier. Only the public
+teaser and encrypted content belong in the locked response. A publisher in another
+language emits the same member and checks its actual rendered page.
 
-## Rendering and activation
+A prompt inside the body slot disappears through `fill`; omit a separate `remove`
+rule for it. A lock class on an ancestor can have its own `removeClass` rule. Optional
+factboxes use separate items and slots, allowing one to remain locked while the body
+opens. One item can fill several disjoint slots. A shared gate that depends on several
+items opening together needs application handling; the map has no conditional program.
 
-Opening proves that the bytes match the protected item; it does not decide how
-the browser should interpret them. The publisher presenter may insert text,
-parse and schema-check JSON, create an admitted `Blob`, sanitize and place an
-HTML fragment, or update a framework component.
+Targets in templates, shadow roots or parsing-sensitive table/select contexts are not
+covered by this candidate. Put a whole rendered table inside a supported block slot,
+or keep the site's custom handler for that case. The map is HTML/plain-text placement,
+not a JSON-path language, a component renderer or a generic DOM patch language.
 
-Rendering and activation should remain separate inside publisher code. The
-ordinary pattern is to place content and then call a publisher-registered
-activation function such as `activateArticle`. Opened content does not name a
-callback and the client does not recreate script elements, evaluate source, or
-bypass CSP.
+## Use the reference map renderer explicitly
 
-A publisher may deliberately treat an opened item as executable code inside
-its own presenter. Doing so grants that item page-script authority and makes
-CSP, Trusted Types, module loading, lifecycle, and failure behavior the
-publisher's responsibility. This sketch carries bytes to that decision; it
-does not standardize or enable code execution by default.
+For a browser host choosing map placement, the document must use UTF-8. The
+reference checks the browser's selected `document.characterSet`; it does not refetch
+already-decoded HTML to inspect its original bytes. Source-reading adapters perform
+strict UTF-8 byte validation.
 
-## Open question: independent-script namespace
-
-The callback shape does not require one discovery mechanism when the publisher
-can inject the presentation object directly. Independently loaded scripts do
-need an agreed name. This draft currently illustrates:
+For explicit browser map placement:
 
 ```js
-Symbol.for("delegated-content-access.presentation.v1")
+import { createBrowserMapSession } from "../js/extensions/html-content-map/integration-client/reconstructBrowserPage.js";
+
+const placement = createBrowserMapSession({
+  document,
+  isEligible: () => articleContext.live, // captured article and owning context
+  ...trustedClientOptions, // issuer, transport and context-scoped client setup
+});
+const first = await placement.run();
+// Report first.report and retain placement for this eligible article/context.
 ```
 
-A conventional, inspectable alternative is:
+After a new grant in the same eligible context, call `placement.run()` again to retry
+still-locked items; add no automatic retry loop. A retained session refuses changed or
+replaced targets rather than looking them up again, and a failed session needs a fresh
+locked delivery. The required `isEligible` is checked again after asynchronous work and
+at each placement effect; it must describe the captured context, not whichever context
+is current later. The
+[extension README](../js/extensions/html-content-map/README.md#explicit-reconstruction)
+documents `run()`, `snapshot()`, `dispose()` and the server entry `createHtmlGateway`.
 
-```js
-globalThis.DelegatedContentAccess.presentation.v1
-```
+The reference checks the whole serialized document and element identities for external
+changes. That is intentionally conservative: unrelated DOM activity such as an ad refresh
+can also make a browser map run stale. For a dynamic customer page, use the owner's
+handler as the ordinary renderer and exercise the map on the independently fetched
+locked document. Do not broaden live-page ownership merely to make the map test pass.
 
-The named global is easier for implementers and browser tooling to discover,
-but it reserves a public string namespace and needs exact rules for creating
-parent objects without overwriting another integration. The symbol avoids a
-plain global property name but is less familiar and still provides no security
-boundary. Before settling the fallback, test both with a publisher-controlled
-page and an independently loaded client script. Whichever form is selected
-must define the exact name, version lookup, registration order, collision
-refusal, replacement lifecycle, and missing-presenter failure. Explicit
-injection is the simpler illustrated baseline and uses the same presentation
-object either way; whether it should be preferred remains open.
+## Completion, activation and serving
 
-## Relationship to DCA
+The map reports `complete` only after every mapped item and rule succeeds. `partial`
+means remaining items are locked, with their teasers and prompts intact; it does not
+assert why the issuer supplied no key. A defective item or placement failure is
+`failed`, and is not a reconstructed result. The browser content handler uses its own
+per-item `handled`, `refused`, `failed` and `stale` outcomes; do not treat those as
+issuer entitlement decisions or confuse them with the map report.
 
-Presentation occurs after key acquisition, response admission, content-key
-resolution, authenticated content opening, and representation decoding. It
-does not alter DCA messages, access decisions, profiles, cryptographic
-transcripts, or cache reach.
+Article markup may contain images, links and embeds. Filling that markup does not
+prove that lazy loading, consent-gated embeds, analytics or other widgets have been
+activated. The browser owner supplies those lifecycle hooks and observes its CSP and
+Trusted Types policy. The independent map claim covers the declared slot content and
+lock/prompt effects, not equivalent JavaScript execution or every interactive feature.
 
-The [exact-period integration guide](guide--integration--exact-period.md#opened-bytes-and-page-presentation)
-shows the operation that produces the callback inputs. The underlying design
-questions and the possible future content-slot convention remain exploratory.
-A future profile is justified only if independent publishers and clients need
-common markup discovery or observable placement behavior beyond this callback.
+Keep the source URL and report with exported HTML. Relative URLs must retain their
+meaning. A partial export is a terminal snapshot; retained DCA carriers must not cause
+a browser initializer to unlock and place the body again. A host serving reconstructed
+HTML chooses its output mode, script behavior and response-cache policy explicitly.
+The map engine does not sanitize arbitrary pages or supply a general URL rewriter.
+
+## Placement cases to exercise on an article integration
+
+Use actual rendered templates and compare the protected body with the publisher's
+intended full body. Include an ordinary article, an image/embedded-content article,
+a layout with lock classes and an outside prompt, and an optional independently gated
+factbox. Include mobile layouts, an empty teaser and nested body containers.
+Check denied and partial grants, repeated completion notifications, navigation
+while opening is pending, and missing or duplicate target markers.
+
+Run the owner-selected browser handler and the independent map client against the
+same sealed delivery. Compare body content and lock/prompt effects separately from
+activation behavior. A map defect must not be mistaken for an issuer denial, and a
+customer page must not acquire two placement owners. Start with templates whose
+rendering contract is known, retaining the existing handler for unsupported layouts.
+
+Record the template and actual selected handler, browser effects, independent
+output and known limits. Preserve inline images, body ordering and relative-URL
+meaning; later grants should place only still-locked items. The reference map's
+whole-document stale check may be too conservative for unrelated DOM churn.
+Measure article-size/repeated-placement costs against existing page budgets
+before adding machinery. JSON paths, append, arbitrary attributes, script
+execution, shadow-root traversal and a general template language are not part
+of this candidate. The integrating application owner selects customer validation;
+the specification maintainers decide promotion separately from the accepted
+publisher build.

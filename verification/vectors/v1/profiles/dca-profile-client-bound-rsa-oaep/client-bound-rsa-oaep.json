@@ -1,0 +1,76 @@
+{
+  "name": "client-bound-rsa-oaep",
+  "vectorFormat": "profile",
+  "profile": "dca-profile-client-bound-rsa-oaep",
+  "description": "A client-bound RSA-OAEP delivery profile open vector. The wire contract is the RSA-OAEP method in expected.transport, with no ephemeral public key or nonce, and each expected.deliveredKeys[].wrappedKey ({key}) carrying one RSA-OAEP-SHA256 ciphertext for the client public JWK: a contentKeys entry, a periodKeys entry and a chainKeys entry. Each ciphertext carries its kind context as the OAEP label: UTF-8 dca-bind-client-bound-key-kind, one zero octet, then UTF-8 of the kind its section fixes (kindContextBase64url). RSA-OAEP padding is randomized inside WebCrypto, so this is deliberately an open-only fixture: regeneration decrypts each recorded ciphertext and re-emits it verbatim rather than claiming a repeatable seal. The client opens a content or period key to a non-extractable AES-GCM handle and a chain key to its 16 raw octets; openedKeyBase64url states the raw 16-byte key an environment replayer must recover.",
+  "input": {
+    "client": {
+      "publicKeyJwk": {
+        "kty": "RSA",
+        "n": "tZqcXwvLYArS9n-wfbtSO9zNbSWBaPIV8rTOb8luS-g9UaRF1j3Av-R-5Yg1F_qQAH-pkOkV_MVYkuS2CCpa6gBsZFu76BVtvceOnFncJZdK6TBES9YCmX_Wu_kWN_dk-AeqPMf3ThxoEmI37OB1pRDjZeoR1ujzK2ogmb2314uv3Xh_u3XWca211AiAMqndd_JbgjCBSpTLicQmHu0WIuLBe2Px6RIHRZqWDcQQMOM56GeERwms728WU5kKg6pGEbssqTwaT_8vLbk_W28Gm6Cct4UGVTZr4P5_irno3155ALu3ngTKeowa7cuo7Z2AOppO140gRa0TK-iKQMi2VQ",
+        "e": "AQAB",
+        "alg": "RSA-OAEP-256"
+      },
+      "privateKeyJwk": {
+        "kty": "RSA",
+        "n": "tZqcXwvLYArS9n-wfbtSO9zNbSWBaPIV8rTOb8luS-g9UaRF1j3Av-R-5Yg1F_qQAH-pkOkV_MVYkuS2CCpa6gBsZFu76BVtvceOnFncJZdK6TBES9YCmX_Wu_kWN_dk-AeqPMf3ThxoEmI37OB1pRDjZeoR1ujzK2ogmb2314uv3Xh_u3XWca211AiAMqndd_JbgjCBSpTLicQmHu0WIuLBe2Px6RIHRZqWDcQQMOM56GeERwms728WU5kKg6pGEbssqTwaT_8vLbk_W28Gm6Cct4UGVTZr4P5_irno3155ALu3ngTKeowa7cuo7Z2AOppO140gRa0TK-iKQMi2VQ",
+        "e": "AQAB",
+        "d": "Abe1fWk-fyLMrBpFxTapmGY_xvKMUHDW6zP-SAyv0p94cjNIM5z9AioE1wjS0CGyTXlOCJ0WJ5ntOvxw47X7Pj9xRwGE6JtiE_t7pys3zt8Cs7hqMozSx8Vi0Ew5KdMMI5PQLofjC3XVnsDkXJ6JD-qpBlYW3TSLiKOJE3_5tmi4O3IbIzxXCX_7LiwL2nck74jQmQyjotgg3R2DZKIugRz383Z2FjzZ7KozPHyFaBuAtRnOv3amgDKkLx1iXtWLLBCXGPvU5EPDfO_U3YR5OTyYyxn9biGFzdplpD0YvVDredMlIU5MjIGDMdFq4Ky0VX5goTyjAiXm_96rDg_ziQ",
+        "p": "_SJfXspdbD9ZdN1QDDfhl-2yHSs9Ftp6rIQ81OkBrATWHal24CfppmJEH9yfVrR9Z_SncoIEgJxyNfw3HSURdHcnvGADTo1d7K3fJmJhG0TBJGyAJKMG2Q9Da997LOD3I-OBBX5trWFfYZ7Tad--ff8d49-HxvGTMe5-WJqt-bk",
+        "q": "t6juTp-T6fvjQ6WdyH7xvJjUamv_qtT42bjnxUlXVlYwDJC6egSAtv4XFf0KQQBJURf8LruqmH2NEC9quvRzBsD66VPNpwZxXvSEa04zF-CkcHehWvyGdHPv8YT8NWQKNB4ROm9JsbxzaL1W_bMfAADAkwYzYU5F-AyXLjALf30",
+        "dp": "jyOXsF9YUrTD3hyjfjU_QQ0tMedYZQroYZNpXq_fvSkC9sT0Lq8DJY3dnfLAu2PWoikrYsn4x80vnC1h8P4cD7Ktao0UcZ_o48QyMl9hL-1CFlmwYIc7gRRreJ1n5qnTtpyYQcYLOQady_Lm87CM5GyVt1yYR7wlExAcq_fTtyk",
+        "dq": "nUAN8tGdQt0BxFzcUNuoPPOaBBi-SlWZUEmKYJggKHMZJtkQYQLT9lpuB8ylZ-xH2iAwMw9JzNDK5A3FU5eTmTfIXdj8H0Nb9JJlgr7s7kfQY996Dz5iHPlbey6DB2_FcMRBugepUH3rTsW24vfn1gfO2tOXUHxFWlHla42Fer0",
+        "qi": "ND9CMV48VNCEayq4x0rAWYa1ZwPOofP2lefawlLja4A2IYo31s3AAtBUCMIwR3ZFDhKyUJN_hrrSdxdNfoO9RlxYTPddY6F36yFUA7spZKxZ1PuukqRdwS9TQnHU8BqZWIW59ofJxG6lXmXMG4k7rghLMNru9Y4zaD2X4BZVGo0",
+        "alg": "RSA-OAEP-256"
+      }
+    },
+    "deliveredKeys": [
+      {
+        "section": "contentKeys",
+        "keyKind": "contentKey",
+        "deliveryKeyBase64url": "HSo3RFFea3iFkp-sucbT4A"
+      },
+      {
+        "section": "periodKeys",
+        "keyKind": "periodKey",
+        "deliveryKeyBase64url": "UVRXWl1gY2ZpbG9ydXh7fg"
+      },
+      {
+        "section": "chainKeys",
+        "keyKind": "chainKey",
+        "deliveryKeyBase64url": "oqessba7wMXKz9TZ3uPo7Q"
+      }
+    ]
+  },
+  "expected": {
+    "transport": {
+      "method": "RSA-OAEP"
+    },
+    "deliveredKeys": [
+      {
+        "keyKind": "contentKey",
+        "kindContextBase64url": "ZGNhLWJpbmQtY2xpZW50LWJvdW5kLWtleS1raW5kAGNvbnRlbnRLZXk",
+        "wrappedKey": {
+          "key": "ODwwz8T-l46E7z9e9s1cgqnoRm2RCQncZYY6wH0KxJshpx5c-lVifsPTdxeCEvulcnIVjg2Lggu2_LOplBpICIZ6PtP8R_r3gZsnNoocGGJctHC1BITngxebCh0aX1D3UEdSKN0FQ7Y8f3aC8RR4hDqu698A0EmgC3xWsHZ-oSJJJKaJnBpV28a0B4lPyUOsWg8KGxJuoK5tVcAb3uYCW4z8DvmmAtIuSk9n7biERlO4VufOGtR5K1aWog94xG_rH70Q-Q6qYERPTbqzQ0YEk3KfQmZfdXJm8DV6IpCWNt5R--K5D96kOYltu5UsA2L3sNaybAYOp9A7br0vC_ZXsg"
+        },
+        "openedKeyBase64url": "HSo3RFFea3iFkp-sucbT4A"
+      },
+      {
+        "keyKind": "periodKey",
+        "kindContextBase64url": "ZGNhLWJpbmQtY2xpZW50LWJvdW5kLWtleS1raW5kAHBlcmlvZEtleQ",
+        "wrappedKey": {
+          "key": "N_pf39B9fSeSEWJj_cckWJMNOlrE2DevjT-Z8_a1KGbxfhvQ0p8AN5mdbguHx6JX2g_DhmZ_INJfWwA4xKMeSfr5lSkAZroOIVztowYge4sielhpa3Hmo3NVLJ_FmQY9-LQNayF1KgDyQFyaWVsZeRGIZt7SoD6Ye-F2qQ0lCWEyZTU7yyYJBqVoaU1UPmoG7vI7kw76YWKkSVSi6ctvgHd3rmT9PIWRXdMjNfmZATiH6XC22DObrh28HQFUS11M_8NOa3B9-AEXrjRUTaUTzVUlQXkH3MwBtIZOlhlMXJ97rAHSO3eZbKDmHza9mSVARJ1yfF_qgZvdHZfujAWtZA"
+        },
+        "openedKeyBase64url": "UVRXWl1gY2ZpbG9ydXh7fg"
+      },
+      {
+        "keyKind": "chainKey",
+        "kindContextBase64url": "ZGNhLWJpbmQtY2xpZW50LWJvdW5kLWtleS1raW5kAGNoYWluS2V5",
+        "wrappedKey": {
+          "key": "ehBxgxBv-qTX0jWbr3yHRdeIVEm8j15DXaLIsoIg6NZo8J-bvSTFdMemHzmZKgpK0KIkazuyyhQmaDKIfnDFR__-jOmQ0AkcufqWdmb1fqR28j1b09WnIfHbUz5Hhc2Pw30kwdzepEUs62gVBFcGjNNDJqPKxE39uF1hQMxqLP5AUEQdT2CgdrIunuyFnryNHQuQFyVy4sL-44nP3GMz3uUfnJs94AmIKSK6s1P7leQnWHu_cSi6fbKbGppKXhc6WkVKJi1LqYIK7Q7KQzjxulPrcCMLSeDKD-CJtFIr2hmDaxp7YRncRPV4HKB1XFKcZBsr1uSZ5DkzchLwjtUFWA"
+        },
+        "openedKeyBase64url": "oqessba7wMXKz9TZ3uPo7Q"
+      }
+    ]
+  }
+}

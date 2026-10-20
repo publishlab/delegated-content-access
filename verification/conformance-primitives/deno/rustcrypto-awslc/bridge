@@ -1,0 +1,97 @@
+#!/usr/bin/env bash
+# The Deno operation bridge, in the two shapes the runner starts it in.
+#
+#   ./bridge --prepare   # install the pinned Deno if absent, run one empty batch
+#   ./bridge             # read one batch on stdin, write one on stdout
+#
+# The runner installs first and answers later. `bridge.json` names both forms:
+# `--prepare` runs first, outside the batch's 10 second budget, and the runner
+# then starts the second form as a program that is already runnable.
+#
+# The version is DCA_VERSION, which the lane check sets to one token of
+# ../versions for each run, and both forms pass it to the installer as
+# --version, so the Deno that answers is the one that run selected and never a
+# `deno` on PATH, which may also run the driver.
+#
+# The wrapper does not know the protocol, the operations or what an observation
+# says. It resolves a deno binary and hands stdin and stdout to
+# `../../_source/js/v1/bridge.mjs`, the stdin entry of the JavaScript answer
+# source the JS lanes share; that entry runs `answer.mjs` beside it. The bridge
+# answers on stdout, so nothing here may write there: every line below goes to
+# stderr, where the runner reprints it beside a failure.
+#
+# The bridge downloads nothing while answering. `--prepare` installs the pinned
+# release when it is absent, and the answering form asks `--print-bin`, which
+# installs nothing.
+#
+# Deno runs the file with flags that keep the run independent of where it
+# starts. Deno looks up the directory tree for a `deno.json` on its own, and
+# one found there could change how the file runs: `--no-config` stops that.
+# `--no-prompt` turns a permission the file lacks into an error on stderr
+# rather than a prompt that waits out the batch budget; the file reads fd 0
+# and writes fd 1 and 2, which need no permission. DENO_DIR points Deno's own
+# module and code cache into this runtime's cache dir rather than the user's,
+# and DENO_NO_UPDATE_CHECK stops the release check on every start.
+set -euo pipefail
+
+HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+INSTALLER="$HERE/../install-toolchain"
+SOURCE="$HERE/../../_source/js/v1/bridge.mjs"
+VERSION="${DCA_VERSION:-default}"
+
+mode=answer
+case "${1:-}" in
+  --prepare) mode=prepare; shift ;;
+  --help|-h) awk 'NR>1 && /^#/ { sub(/^# ?/, ""); print; next } NR>1 { exit }' "${BASH_SOURCE[0]}"; exit 0 ;;
+esac
+if [ $# -gt 0 ]; then
+  echo "bridge takes --prepare or nothing, got: $1" >&2
+  exit 2
+fi
+
+# Exit 1 in the answering form, as for every other failure there, and 2 in
+# --prepare, as for every other failure there.
+if ! CACHE="$("$INSTALLER" --version "$VERSION" --print-cache)"; then
+  echo "bridge: no Deno cache dir could be resolved for version $VERSION." >&2
+  [ "$mode" = prepare ] && exit 2
+  exit 1
+fi
+export DENO_DIR="$CACHE/deno-dir"
+export DENO_NO_UPDATE_CHECK=1
+
+if [ "$mode" = prepare ]; then
+  [ -f "$SOURCE" ] || { echo "no $SOURCE; the JavaScript answer source has not landed yet" >&2; exit 2; }
+
+  if ! BASE="$("$INSTALLER" --version "$VERSION")"; then
+    echo "no Deno for version $VERSION, so the bridge was not prepared." >&2
+    exit 2
+  fi
+  BIN="$BASE/deno"
+  if [ ! -x "$BIN" ]; then
+    echo "install-toolchain named $BASE, which holds no executable deno." >&2
+    exit 2
+  fi
+
+  echo "== $("$BIN" --version | head -n 1) ==" >&2
+
+  # One empty batch proves that this binary starts and answers. The runner
+  # refuses an empty selection long before a bridge is started, so the only
+  # caller that ever sends one is this line.
+  empty='{"protocol":"dca-operation-bridge-v1","requests":[]}'
+  if ! printf '%s\n' "$empty" | "$BIN" run --no-config --no-prompt "$SOURCE" >/dev/null; then
+    echo "the bridge installed and did not answer an empty batch." >&2
+    exit 2
+  fi
+  exit 0
+fi
+
+if ! BIN="$("$INSTALLER" --version "$VERSION" --print-bin)"; then
+  echo "bridge: no Deno path could be resolved for version $VERSION." >&2
+  exit 1
+fi
+if [ ! -x "$BIN" ]; then
+  echo "bridge: no deno at $BIN. Run ./bridge --prepare, or install-toolchain." >&2
+  exit 1
+fi
+
+exec "$BIN" run --no-config --no-prompt "$SOURCE"
