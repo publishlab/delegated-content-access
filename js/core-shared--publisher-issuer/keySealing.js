@@ -18,7 +18,7 @@
 //
 //   ECDH P-256   the AES-256-GCM `additionalData`. Not transmitted: the issuer
 //                rebuilds it, and a wrong one fails the tag. It leaves the blob
-//                layout unchanged, at the same 109 bytes.
+//                layout unchanged, at 97 bytes.
 //   RSA-OAEP     the first bytes of the OAEP plaintext, ahead of the key. The
 //                ciphertext is one modulus wide whatever it carries, so a longer
 //                plaintext costs nothing; OAEP is non-malleable, so the prefix
@@ -39,10 +39,9 @@
 // ECDH P-256 blob, fixed-size fields, no length prefixes:
 //
 //     0    65 bytes   ephemeral public key, uncompressed P-256 point
-//     65   12 bytes   AES-256-GCM nonce
-//     77   remaining  ciphertext and 16-byte tag
+//     65   remaining  ciphertext and 16-byte tag (implicit twelve-zero nonce)
 //
-// For the canonical 16-byte payload that is 109 bytes, base64url to 146
+// For the canonical 16-byte payload that is 97 bytes, base64url to 130
 // characters. `open` refuses any other length before the key agreement.
 //
 // RSA-OAEP blob: the RSA ciphertext and nothing else. spec--sealed-key-envelopes.md
@@ -54,7 +53,7 @@
 // table budgets, whatever the plaintext holds.
 //
 // The two also differ in reproducibility. An ECDH seal is replayable once its
-// ephemeral keypair and nonce source are injected, which is what makes a render
+// ephemeral keypair is injected, which is what makes a render
 // byte-identical and a golden vector possible. OAEP draws its padding seed inside WebCrypto
 // with nothing to inject, so an RSA render is not reproducible and an RSA
 // vector can only pin an unseal, never a re-seal.
@@ -122,9 +121,9 @@ const RSA_MODULUS_BITS_FLOOR = 2048;
  */
 const SEALED_KEY_BYTES = 16;
 
-/** 65 ephemeral point, 12 nonce, the payload, 16 tag. */
+/** 65 ephemeral point, the payload, 16 tag; no carried nonce. */
 function ecdhEnvelopeBytes() {
-  return EPHEMERAL_BYTES + NONCE_BYTES + SEALED_KEY_BYTES + TAG_BYTES;
+  return EPHEMERAL_BYTES + SEALED_KEY_BYTES + TAG_BYTES;
 }
 
 /**
@@ -136,19 +135,15 @@ function ecdhEnvelopeBytes() {
  * @property {Binding} [binding] - the coordinate this blob is bound to.
  *   Required in both directions: a call that quietly omitted it would produce a
  *   wire that looks right and opens for anyone who asks under any name.
- * @property {{ bytes: (n: number) => Uint8Array }} [random] - required to seal
- *   ECDH, which carries a nonce. RSA-OAEP needs none: OAEP randomises itself.
- *   In production it is a cryptographic random-bit generator, so each
- *   envelope gets a fresh nonce. A fixed or deterministic source reproduces a
- *   test vector and is not a conforming production source
- *   (docs/spec--sealed-key-envelopes.md).
- * @property {CryptoKeyPair} [ephemeralKeyPair] - injectable with `random` for a replayed run.
- *   WebCrypto has no seeded key generation, so this is the only way an ECDH
- *   seal repeats; left out, a fresh pair is generated per seal. A caller may
- *   supply a pair in production only if it is freshly generated for this one
- *   envelope; a reused or fixed pair is test-vector material, and with a
- *   repeated nonce it exposes the XOR of two sealed keys. Refused for
- *   RSA-OAEP, which has no ephemeral key and cannot be made to repeat.
+ * @property {{ bytes: (n: number) => Uint8Array }} [random] - accepted for
+ *   existing callers but unused. ECDH uses an implicit twelve-zero nonce and
+ *   internally generated fresh ephemeral keypair; RSA-OAEP randomizes itself.
+ * @property {CryptoKeyPair} [ephemeralKeyPair] - trusted ECDH-only injection.
+ *   Omitted in ordinary use: a fresh pair is generated for each envelope. A
+ *   caller supplying one MUST generate it freshly for this one envelope.
+ *   Reusing a pair under one recipient repeats the AES key and zero nonce;
+ *   fixed pairs are for isolated test vectors only, never production sealing.
+ *   Refused for RSA-OAEP, which has no ephemeral key.
  */
 
 /**
@@ -334,7 +329,7 @@ function sealedBytes(blob) {
   if (bytes === null) {
     throw dcaError("unseal_failed", "sealed value is not base64url the wire could have carried");
   }
-  return bytes;
+  return Uint8Array.from(bytes);
 }
 
 /**
@@ -406,7 +401,7 @@ async function unsealRsa(blob, issuerPrivateKey, aad) {
   const bytes = sealedBytes(blob);
 
   // RSA takes exactly one modulus of ciphertext. Checking here is what turns
-  // a 109-octet ECDH envelope routed to an RSA issuer into a stated failure
+  // a 97-octet ECDH envelope routed to an RSA issuer into a stated failure
   // instead of a bare OperationError from inside WebCrypto.
   if (width !== null && bytes.length !== width) {
     throw dcaError(
@@ -471,32 +466,27 @@ async function agree(publicKey, privateKey) {
 export async function seal(keyBytes, issuerPublicKey, algorithm, options = {}) {
   const { aad } = checkSupport(algorithm, options);
   checkSealedKeyBytes(keyBytes);
+  const payload = Uint8Array.from(keyBytes);
 
   if (algorithm === "rsa-oaep") {
-    return sealRsa(keyBytes, issuerPublicKey, aad);
+    return sealRsa(payload, issuerPublicKey, aad);
   }
 
   checkEcdhKey(issuerPublicKey);
-
-  // ECDH needs an injected nonce source. RSA returned above without using one.
-  if (!options.random) {
-    throw dcaError("missing_random", "keySealing.seal needs a Random for the blob nonce");
-  }
 
   // docs/spec--sealed-key-envelopes.md §4
   const ephemeral = options.ephemeralKeyPair ?? (await generateEcdhKeyPair());
 
   const ephemeralPublic = new Uint8Array(await exportRawKey(ephemeral.publicKey));
-  const nonce = options.random.bytes(NONCE_BYTES);
+  const nonce = new Uint8Array(NONCE_BYTES);
 
   const wrappingKey = await agree(issuerPublicKey, ephemeral.privateKey);
   // docs/spec--sealed-key-envelopes.md §4
-  const ciphertext = await encrypt(wrappingKey, nonce, keyBytes, aad, 32);
+  const ciphertext = await encrypt(wrappingKey, nonce, payload, aad, 32);
 
-  const blob = new Uint8Array(ephemeralPublic.length + nonce.length + ciphertext.length);
+  const blob = new Uint8Array(ephemeralPublic.length + ciphertext.length);
   blob.set(ephemeralPublic, 0);
-  blob.set(nonce, ephemeralPublic.length);
-  blob.set(ciphertext, ephemeralPublic.length + nonce.length);
+  blob.set(ciphertext, ephemeralPublic.length);
 
   return base64urlEncode(blob);
 }
@@ -523,7 +513,7 @@ export async function open(blob, issuerPrivateKey, algorithm, options = {}) {
   checkConfiguredEcdhKey(issuerPrivateKey);
 
   const bytes = sealedBytes(blob);
-  if (bytes.length < EPHEMERAL_BYTES + NONCE_BYTES + TAG_BYTES) {
+  if (bytes.length < EPHEMERAL_BYTES + TAG_BYTES) {
     throw dcaError("unseal_failed", `sealed blob too short: ${bytes.length} bytes`);
   }
 
@@ -549,8 +539,8 @@ export async function open(blob, issuerPrivateKey, algorithm, options = {}) {
   if (ephemeralPublic[0] !== 0x04) {
     throw dcaError("unseal_failed", "ECDH ephemeral key is not an uncompressed P-256 point");
   }
-  const nonce = bytes.subarray(EPHEMERAL_BYTES, EPHEMERAL_BYTES + NONCE_BYTES);
-  const ciphertext = bytes.subarray(EPHEMERAL_BYTES + NONCE_BYTES);
+  const nonce = new Uint8Array(NONCE_BYTES);
+  const ciphertext = bytes.subarray(EPHEMERAL_BYTES);
 
   let opened;
   try {

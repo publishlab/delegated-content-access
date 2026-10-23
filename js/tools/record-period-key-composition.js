@@ -304,9 +304,12 @@ function guardScenario({ renders, exchanges, observations }) {
   const granted = exchanges.find((exchange) => exchange.step === 1);
   refuseUnless(
     granted?.status === 200 &&
-      JSON.stringify(Object.keys(granted.body.keys?.periodKeys?.[ACCESS_GROUP] ?? {})) ===
-        JSON.stringify([T_NOW]) &&
-      JSON.stringify(granted.body.keys?.contentKeys) === "{}",
+      JSON.stringify(
+        (granted.body.keys?.periodKeys ?? [])
+          .filter((/** @type {any} */ record) => record.accessGroup === ACCESS_GROUP)
+          .map((/** @type {any} */ record) => record.period),
+      ) === JSON.stringify([T_NOW]) &&
+      JSON.stringify(granted.body.keys?.contentKeys) === "[]",
     "step 1 must grant only the current period and no content key",
   );
   refuseUnless(
@@ -505,11 +508,12 @@ export async function recordComposition(options = {}) {
       label,
       clockIso: clock.now().toISOString(),
       publisherOrigin: ORIGIN,
-      coordinates: Object.fromEntries(
-        Object.entries(
-          /** @type {Record<string, object>} */ (dcaData.issuerData[ISSUER_NAME].sealed.periodKeys),
-        ).map(([group, byT]) => [group, Object.keys(byT)]),
-      ),
+      coordinates: dcaData.issuerData
+        .find((entry) => entry.issuerName === ISSUER_NAME)
+        .sealed.periodKeys.reduce((groups, { accessGroup, period }) => {
+          (groups[accessGroup] ??= []).push(period);
+          return groups;
+        }, {}),
       resourceJWT: dcaData.resourceJWT,
       markup,
     });

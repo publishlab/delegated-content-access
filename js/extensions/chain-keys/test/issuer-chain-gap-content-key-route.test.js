@@ -18,6 +18,12 @@ import { actorWorld } from "../../../demo/scenarios/world.js";
 import { rootFromPage } from "../../../demo/support/queryableRoot.js";
 import { ACCESS_GROUP, AT, CONTENT_NAME, ISSUER_NAME } from "../../../demo/scenarios/fixtures.js";
 import { utf8Decode } from "../../../core-shared/codec.js";
+import { issuerBlockOf } from "../../../test-lib/helpers/inspect.js";
+import {
+  contentKeyMap,
+  keyAt,
+  periodKeyMap,
+} from "../../../test-reference/support/namedRecords.js";
 import {
   chainBrowser,
   chainGeneration,
@@ -124,15 +130,15 @@ test("without article targets, a future chain horizon stops at the current suppl
   const browser = chainBrowserWithoutArticleTargets(world);
 
   const page = await world.render("A");
-  const sealed = page.asJson().issuerData[ISSUER_NAME].sealed;
+  const sealed = issuerBlockOf(page.asJson(), ISSUER_NAME).sealed;
   assert.deepEqual(
-    Object.keys(sealed.chainKeys[ACCESS_GROUP]).sort(),
+    Object.keys(periodKeyMap(sealed.chainKeys, "cutoff")[ACCESS_GROUP]).sort(),
     [RENDER_WINDOW_TERMINAL, LATER_WINDOW_TERMINAL],
     "the publisher supplies the render's window and the later one, with a gap between",
   );
   assert.equal(sealed.periodKeys, undefined, "and no period-key supply beside the chain");
   assert.equal(
-    typeof sealed.contentKeys[CONTENT_NAME],
+    typeof keyAt(sealed.contentKeys, { contentName: CONTENT_NAME }),
     "string",
     "and a content-key route for the item",
   );
@@ -152,7 +158,7 @@ test("without article targets, a future chain horizon stops at the current suppl
   assert.equal(exchanges.length, 1, "one issuer was asked once");
   const [exchange] = exchanges;
   assert.deepEqual(
-    Object.keys(exchange.request.sealed.chainKeys[ACCESS_GROUP]).sort(),
+    Object.keys(periodKeyMap(exchange.request.sealed.chainKeys, "cutoff")[ACCESS_GROUP]).sort(),
     [RENDER_WINDOW_TERMINAL, LATER_WINDOW_TERMINAL],
     "the client relayed both members, so the issuer held both windows to choose from",
   );
@@ -163,7 +169,7 @@ test("without article targets, a future chain horizon stops at the current suppl
     ["contentKeys"],
     "the answer carries the item key and no period key or chain capability from either window",
   );
-  assert.deepEqual(Object.keys(exchange.body.keys.contentKeys), [CONTENT_NAME]);
+  assert.deepEqual(Object.keys(contentKeyMap(exchange.body.keys.contentKeys)), [CONTENT_NAME]);
   assert.equal(exchange.body.errors, undefined, "a gap clamps the selection and is no error");
   assert.equal(world.servers.primary.stats().grants, 1);
 
@@ -220,7 +226,7 @@ test("an explicit old article target is served from its own window alongside cur
   const { exchanges } = await exchangesPosted(world.network, () => load.unlock());
   assert.equal(exchanges.length, 1);
   assert.deepEqual(
-    Object.keys(exchanges[0].body.keys.chainKeys[ACCESS_GROUP]).sort(),
+    Object.keys(periodKeyMap(exchanges[0].body.keys.chainKeys, "cutoff")[ACCESS_GROUP]).sort(),
     ["251023T1430", "251024T0015"],
     "article and future targets use their independently rooted windows",
   );
@@ -256,7 +262,10 @@ test("an explicit old article target stays unavailable when its old-window sourc
   const load = browser.load(rootFromPage(page));
   const { exchanges } = await exchangesPosted(world.network, () => load.unlock());
   assert.equal(exchanges.length, 1);
-  assert.deepEqual(Object.keys(exchanges[0].body.keys.chainKeys[ACCESS_GROUP]), ["251024T0015"]);
+  assert.deepEqual(
+    Object.keys(periodKeyMap(exchanges[0].body.keys.chainKeys, "cutoff")[ACCESS_GROUP]),
+    ["251024T0015"],
+  );
   assert.equal(await load.open(CONTENT_NAME).then(({ error }) => error), "no_key");
 });
 
@@ -291,7 +300,9 @@ test("a same-window returned chain key reaches an earlier item wrap", async () =
   const { exchanges } = await exchangesPosted(world.network, () => load.unlock());
   assert.equal(exchanges.length, 1);
   const keys = exchanges[0].body.keys;
-  assert.deepEqual(Object.keys(keys.chainKeys[ACCESS_GROUP]), ["251023T1500"]);
+  assert.deepEqual(Object.keys(periodKeyMap(keys.chainKeys, "cutoff")[ACCESS_GROUP]), [
+    "251023T1500",
+  ]);
   const opened = await load.open(CONTENT_NAME);
   assert.equal(opened.error, null);
 });

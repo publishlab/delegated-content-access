@@ -169,7 +169,10 @@ test("a manifest member with no file on disk fails membership", async () => {
 test("a changed byte fails the checksums and the regeneration", async () => {
   await withCopy(async (dir) => {
     const text = read(dir, "exchange.json");
-    const periodKey = JSON.parse(text).exchanges[0].body.keys.periodKeys.premium["251023T1400"];
+    const periodKey = JSON.parse(text).exchanges[0].body.keys.periodKeys.find(
+      (/** @type {any} */ record) =>
+        record.accessGroup === "premium" && record.period === "251023T1400",
+    ).key;
     const flipped = `${periodKey[0] === "A" ? "B" : "A"}${periodKey.slice(1)}`;
     writeFileSync(`${dir}exchange.json`, text.replace(`"${periodKey}"`, `"${flipped}"`));
     const result = await checkPackage(dir);

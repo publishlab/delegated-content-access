@@ -27,6 +27,7 @@ import {
   T_NOW,
   T_NEXT,
 } from "../demo/scenarios/fixtures.js";
+import { issuerBlockOf, wrapsOf } from "../test-lib/helpers/inspect.js";
 
 /** A period-only issuer: every group of the render and no item content key. */
 const periodOnly = (
@@ -36,6 +37,15 @@ const periodOnly = (
   contentKeyNames: [],
   suppliedAccessGroups: [...render.accessGroups],
 });
+
+/**
+ * The periods of a `{accessGroup, period, key}` record array under premium, in
+ * array order.
+ *
+ * @param {any[]} records
+ */
+const periodsOf = (records) =>
+  records.filter(({ accessGroup }) => accessGroup === "premium").map(({ period }) => period);
 
 /** @param {any} value */
 function hasChainMaterial(value) {
@@ -77,10 +87,10 @@ test(
 
     const pageA = await world.render("A");
     const deliveryA = pageA.asJson();
-    const issuerA = deliveryA.issuerData[ISSUER_NAME];
+    const issuerA = issuerBlockOf(deliveryA, ISSUER_NAME);
     assert.equal(Object.hasOwn(issuerA.sealed, "contentKeys"), false);
-    assert.ok(issuerA.sealed.periodKeys.premium);
-    assert.ok(deliveryA.contentData[CONTENT_NAME].keys.premium.length > 0);
+    assert.ok(issuerA.sealed.periodKeys.some(({ accessGroup }) => accessGroup === "premium"));
+    assert.ok(wrapsOf(deliveryA, CONTENT_NAME, "premium").length > 0);
     assert.equal(hasChainMaterial(deliveryA), false);
 
     const first = await readArticle(browser, pageA, [CONTENT_NAME]);
@@ -90,10 +100,10 @@ test(
 
     const [{ url, request, response }] = exchanges;
     assert.equal(url, UNLOCK_URL);
-    assert.deepEqual(request.sealed.contentKeys, {});
-    assert.ok(request.sealed.periodKeys.premium);
-    assert.deepEqual(response.keys.contentKeys, {});
-    assert.ok(response.keys.periodKeys.premium);
+    assert.deepEqual(request.sealed.contentKeys, []);
+    assert.ok(request.sealed.periodKeys.some(({ accessGroup }) => accessGroup === "premium"));
+    assert.deepEqual(response.keys.contentKeys, []);
+    assert.ok(response.keys.periodKeys.some(({ accessGroup }) => accessGroup === "premium"));
     assert.equal(hasChainMaterial(request), false);
     assert.equal(hasChainMaterial(response), false);
 
@@ -117,7 +127,11 @@ test("publisher material and client relay do not activate an unselected issuer",
   });
   const page = await world.render("A");
   const delivery = page.asJson();
-  assert.ok(delivery.issuerData[ISSUER_NAME].sealed.periodKeys.premium);
+  assert.ok(
+    issuerBlockOf(delivery, ISSUER_NAME).sealed.periodKeys.some(
+      ({ accessGroup }) => accessGroup === "premium",
+    ),
+  );
 
   const read = await readArticle(world.browser, page, [CONTENT_NAME]);
   assert.equal(read.unlock.ok, false);
@@ -193,17 +207,17 @@ test(
       },
     });
     const pageA = await world.render("A");
-    assert.equal(pageA.asJson().issuerData[ISSUER_NAME].sealed.contentKeys, undefined);
-    assert.deepEqual(
-      Object.keys(pageA.asJson().issuerData[ISSUER_NAME].sealed.periodKeys.premium),
-      [T_NOW, T_NEXT],
-    );
+    assert.equal(issuerBlockOf(pageA.asJson(), ISSUER_NAME).sealed.contentKeys, undefined);
+    assert.deepEqual(periodsOf(issuerBlockOf(pageA.asJson(), ISSUER_NAME).sealed.periodKeys), [
+      T_NOW,
+      T_NEXT,
+    ]);
     const first = await readArticle(browser, pageA, [CONTENT_NAME]);
     assert.equal(first.unlock.ok, true);
     assert.equal(first.texts[CONTENT_NAME], ARTICLES.A);
-    assert.deepEqual(Object.keys(exchanges[0].request.sealed.periodKeys.premium), [T_NOW, T_NEXT]);
-    assert.deepEqual(Object.keys(exchanges[0].response.keys.periodKeys.premium), [T_NOW]);
-    assert.deepEqual(exchanges[0].response.keys.contentKeys, {});
+    assert.deepEqual(periodsOf(exchanges[0].request.sealed.periodKeys), [T_NOW, T_NEXT]);
+    assert.deepEqual(periodsOf(exchanges[0].response.keys.periodKeys), [T_NOW]);
+    assert.deepEqual(exchanges[0].response.keys.contentKeys, []);
     assert.deepEqual(
       (await browser.cache.entries()).map(({ t }) => t),
       [T_NOW],
@@ -212,7 +226,7 @@ test(
     world.clock.advance(60 * 60 * 1000);
     const pageB = await world.render("B");
     assert.equal(
-      pageB.asJson().contentData[CONTENT_NAME].keys.premium.some(({ t }) => t === T_NOW),
+      wrapsOf(pageB.asJson(), CONTENT_NAME, "premium").some(({ period }) => period === T_NOW),
       false,
     );
     const second = await readArticle(browser, pageB, [CONTENT_NAME]);

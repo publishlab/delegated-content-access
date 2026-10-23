@@ -34,6 +34,8 @@ import {
   KEY_ID,
   UNLOCK_URL as SECOND_UNLOCK,
 } from "../../demo/scenarios/fixtures.js";
+import { issuerBlockOf } from "../../test-lib/helpers/inspect.js";
+import { periodKeyMap } from "../support/namedRecords.js";
 
 /**
  * The issuer the client asks first, named for where it stands in that order.
@@ -149,7 +151,7 @@ describe("A 200 that delivered nothing", () => {
     network.post = async (url, payload, options) => {
       const answer = await post(url, payload, options);
       return url === FIRST_UNLOCK
-        ? { status: 200, body: { errors: { [CONTENT_NAME]: {} } } }
+        ? { status: 200, body: { errors: [{ coordinate: CONTENT_NAME }] } }
         : answer;
     };
 
@@ -180,7 +182,11 @@ describe("A 200 that delivered nothing", () => {
             status: 200,
             body: {
               transport: { method: "client-bound-test" },
-              keys: { chainKeys: { premium: { "251023T15": { key: "wrapped-chain" } } } },
+              keys: {
+                chainKeys: [
+                  { accessGroup: "premium", cutoff: "251023T15", key: { key: "wrapped-chain" } },
+                ],
+              },
             },
           }
         : post(url, payload, options);
@@ -254,10 +260,18 @@ describe("A 200 carrying a non-base withholding outcome", () => {
     // comes off the page, leaving the forward overlap that has not started, and
     // the contentKey blob comes off with it - so the one thing the fallback has
     // to answer with is a group whose every period it withholds.
-    const sealed = load.dcaData.issuerData[FIRST].sealed;
-    const [current] = Object.keys(sealed.periodKeys[ACCESS_GROUP]);
-    delete sealed.periodKeys[ACCESS_GROUP][current];
-    delete sealed.contentKeys[CONTENT_NAME];
+    const sealed = issuerBlockOf(load.dcaData, FIRST).sealed;
+    // The first record in the group carries the render's own period.
+    const current = sealed.periodKeys.find(
+      (/** @type {any} */ record) => record.accessGroup === ACCESS_GROUP,
+    ).period;
+    sealed.periodKeys = sealed.periodKeys.filter(
+      (/** @type {any} */ record) =>
+        !(record.accessGroup === ACCESS_GROUP && record.period === current),
+    );
+    sealed.contentKeys = sealed.contentKeys.filter(
+      (/** @type {any} */ record) => record.contentName !== CONTENT_NAME,
+    );
 
     const unlock = await load.unlock();
 
@@ -281,16 +295,19 @@ describe("A 200 carrying a non-base withholding outcome", () => {
   for (const [name, body, outcome] of [
     [
       "a denied family report",
-      { keys: { contentKeys: {} }, notDelivered: { [ACCESS_GROUP]: { reason: "denied" } } },
+      {
+        keys: { contentKeys: [] },
+        notDelivered: [{ accessGroup: ACCESS_GROUP, reason: "denied" }],
+      },
       "denied",
     ],
     [
       "an unavailable family report without trusted retry configuration",
-      { keys: {}, notDelivered: { [ACCESS_GROUP]: { reason: "unavailable" } } },
+      { keys: {}, notDelivered: [{ accessGroup: ACCESS_GROUP, reason: "unavailable" }] },
       "unavailable",
     ],
-    ["a silent no-key result", { keys: { contentKeys: {} } }, "empty"],
-    ["a malformed family report", { keys: {}, notDelivered: {} }, "malformed_response"],
+    ["a silent no-key result", { keys: { contentKeys: [] } }, "empty"],
+    ["a malformed family report", { keys: {}, notDelivered: [] }, "malformed_response"],
   ]) {
     test(`${name} stays visible instead of advancing the walk`, async () => {
       const { network, browser, render } = await world();
@@ -433,28 +450,33 @@ async function scopedWorld({
       const answer = await post(url, actual, options);
       if (url !== FIRST_UNLOCK) {
         if (unsolicitedBackup)
-          answer.body.keys.contentKeys = { bodytext: "AAAAAAAAAAAAAAAAAAAAAA" };
+          answer.body.keys.contentKeys = [
+            { contentName: "bodytext", key: "AAAAAAAAAAAAAAAAAAAAAA" },
+          ];
         return answer;
       }
-      const contentKeys = {};
-      if (grant) contentKeys[CONTENT_NAME] = answer.body.keys.contentKeys[CONTENT_NAME];
-      if (openSummary) contentKeys.summary = answer.body.keys.contentKeys.summary;
+      const contentKeys = answer.body.keys.contentKeys.filter(
+        (/** @type {any} */ record) =>
+          (grant && record.contentName === CONTENT_NAME) ||
+          (openSummary && record.contentName === "summary"),
+      );
       return {
         status: 200,
         body: {
           keys: { contentKeys },
           ...(sourceError
             ? {
-                errors: {
-                  [`archive|${Object.keys(request.sealed.periodKeys.archive)[0]}`]: {
+                errors: [
+                  {
+                    coordinate: `archive|${request.sealed.periodKeys.find((/** @type {any} */ record) => record.accessGroup === "archive").period}`,
                     error: "unseal_failed",
                   },
-                },
+                ],
               }
             : {}),
           ...(reason === null || sourceError
             ? {}
-            : { notDelivered: malformed ? {} : { archive: { reason } } }),
+            : { notDelivered: malformed ? [] : [{ accessGroup: "archive", reason }] }),
         },
       };
     },
@@ -465,12 +487,15 @@ async function scopedWorld({
       const doc = base.build(data, issuerName, needed).toObject();
       if (unsupportedProjection) doc.extensions = ["invented-test-extension"];
       if (chainProjection) {
-        doc.sealed.chainKeys = {
-          premium: { "251023T1400": `${issuerName}-premium` },
-          archive: { "251023T1400": `${issuerName}-archive` },
-        };
+        doc.sealed.chainKeys = [
+          { accessGroup: "premium", cutoff: "251023T1400", key: `${issuerName}-premium` },
+          { accessGroup: "archive", cutoff: "251023T1400", key: `${issuerName}-archive` },
+        ];
         doc.periodGeometry = { chainsPerDay: 1, periodMinutes: 60 };
-        doc.requestedPeriodKeys = { premium: ["251023T1400"], archive: ["251023T1400"] };
+        doc.requestedPeriodKeys = [
+          { accessGroup: "premium", periods: ["251023T1400"] },
+          { accessGroup: "archive", periods: ["251023T1400"] },
+        ];
       }
       return { toObject: () => doc };
     },
@@ -498,17 +523,17 @@ describe("Scoped explicitly configured availability fallback", () => {
     assert.equal(calls[1].url, SECOND_UNLOCK);
     assert.deepEqual(
       backup.sealed.contentKeys,
-      {},
+      [],
       "silent summary content-key alternative is not retryable",
     );
-    assert.deepEqual(Object.keys(backup.sealed.periodKeys), ["archive"]);
+    assert.deepEqual(Object.keys(periodKeyMap(backup.sealed.periodKeys)), ["archive"]);
     assert.deepEqual(
-      backup.sealed.periodKeys.archive,
-      load.dcaData.issuerData[SECOND].sealed.periodKeys.archive,
+      periodKeyMap(backup.sealed.periodKeys).archive,
+      periodKeyMap(issuerBlockOf(load.dcaData, SECOND).sealed.periodKeys).archive,
     );
     assert.notDeepEqual(
-      backup.sealed.periodKeys.archive,
-      calls[0].request.sealed.periodKeys.archive,
+      periodKeyMap(backup.sealed.periodKeys).archive,
+      periodKeyMap(calls[0].request.sealed.periodKeys).archive,
       "the next issuer receives its own envelopes",
     );
     assert.equal(utf8Decode((await load.open(CONTENT_NAME)).bytes), ARTICLES.A);
@@ -529,8 +554,8 @@ describe("Scoped explicitly configured availability fallback", () => {
       split.calls[1].request.sealed.contentKeys,
     );
     assert.deepEqual(
-      Object.keys(batch.calls[1].request.sealed.periodKeys),
-      Object.keys(split.calls[1].request.sealed.periodKeys),
+      Object.keys(periodKeyMap(batch.calls[1].request.sealed.periodKeys)),
+      Object.keys(periodKeyMap(split.calls[1].request.sealed.periodKeys)),
     );
     assert.equal(utf8Decode((await splitLoad.open("summary")).bytes), "archive plaintext");
   });
@@ -561,10 +586,14 @@ test("chain family projection retains shared geometry and prunes article hints b
   await load.resolve([CONTENT_NAME, "summary"]);
   assert.equal((await load.unlock()).ok, true);
   const request = calls[1].request;
-  assert.deepEqual(request.sealed.chainKeys, { archive: { "251023T1400": `${SECOND}-archive` } });
-  assert.deepEqual(request.requestedPeriodKeys, { archive: ["251023T1400"] });
+  assert.deepEqual(request.sealed.chainKeys, [
+    { accessGroup: "archive", cutoff: "251023T1400", key: `${SECOND}-archive` },
+  ]);
+  assert.deepEqual(request.requestedPeriodKeys, [
+    { accessGroup: "archive", periods: ["251023T1400"] },
+  ]);
   assert.deepEqual(request.periodGeometry, { chainsPerDay: 1, periodMinutes: 60 });
-  assert.deepEqual(request.sealed.contentKeys, {});
+  assert.deepEqual(request.sealed.contentKeys, []);
   assert.equal(utf8Decode((await load.open("summary")).bytes), "archive plaintext");
 });
 
@@ -585,7 +614,7 @@ test("association ignores a backup's unsolicited item key while admitting its fa
   await load.resolve([CONTENT_NAME, "summary"]);
   await load.unlock();
   assert.equal(calls.length, 2);
-  assert.deepEqual(calls[1].request.sealed.contentKeys, {});
+  assert.deepEqual(calls[1].request.sealed.contentKeys, []);
   assert.equal(utf8Decode((await load.open("summary")).bytes), "archive plaintext");
   assert.equal(
     utf8Decode((await load.open(CONTENT_NAME)).bytes),

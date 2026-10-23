@@ -31,6 +31,7 @@ import {
   UNLOCK_URL as CLAIMS_UNLOCK,
 } from "../demo/scenarios/fixtures.js";
 import { requestFor } from "../test-lib/harnesses/issuer-endpoint.js";
+import { contentKeyMap, errorMap, periodKeyMap } from "../test-reference/support/namedRecords.js";
 
 /** The second publisher on this issuer's books. The fixtures name one host. */
 const OTHER_DOMAIN = "www.other-paper.example";
@@ -274,8 +275,11 @@ describe("A supplied legacy resource member, tampered in turn", () => {
     const baseline = await post(network, CLAIMS_UNLOCK, clean);
 
     assert.equal(baseline.status, 200);
-    assert.deepEqual(Object.keys(baseline.body.keys.contentKeys), NAMES);
-    assert.deepEqual(Object.keys(baseline.body.keys.periodKeys), [ARTICLE_GROUP, VAULT_GROUP]);
+    assert.deepEqual(Object.keys(contentKeyMap(baseline.body.keys.contentKeys)), NAMES);
+    assert.deepEqual(Object.keys(periodKeyMap(baseline.body.keys.periodKeys)), [
+      ARTICLE_GROUP,
+      VAULT_GROUP,
+    ]);
     assert.equal(baseline.body.errors, undefined);
     const baselineRequested = structuredClone(seen.at(-1).requested);
 
@@ -494,7 +498,7 @@ describe("The decision inputs that are not on the resource object at all", () =>
     assert.equal(versioned.status, 400);
     assert.equal(versioned.body.error, "bad_version");
 
-    // The accessGroups a decision runs over are the keys of
+    // The accessGroups a decision runs over are the groups named in
     // `sealed.periodKeys` - the client's own list, and this caller is
     // entitled to everything on it, so the policy says yes to the invented
     // group as readily as to the real ones. What the list cannot do is carry
@@ -502,16 +506,23 @@ describe("The decision inputs that are not on the resource object at all", () =>
     // are bound to `premium-vault`, and under `premium-vault-2` they open
     // nothing.
     const invented = structuredClone(clean);
-    invented.sealed.periodKeys["premium-vault-2"] = { ...clean.sealed.periodKeys[VAULT_GROUP] };
+    const vaultRecords = clean.sealed.periodKeys.filter(
+      (/** @type {any} */ record) => record.accessGroup === VAULT_GROUP,
+    );
+    for (const record of vaultRecords)
+      invented.sealed.periodKeys.push({ ...record, accessGroup: "premium-vault-2" });
 
     const widened = await post(network, CLAIMS_UNLOCK, invented);
     assert.equal(widened.status, 200);
-    assert.deepEqual(Object.keys(widened.body.keys.periodKeys), [ARTICLE_GROUP, VAULT_GROUP]);
+    assert.deepEqual(Object.keys(periodKeyMap(widened.body.keys.periodKeys)), [
+      ARTICLE_GROUP,
+      VAULT_GROUP,
+    ]);
     assert.deepEqual(
-      Object.keys(widened.body.errors),
-      Object.keys(clean.sealed.periodKeys[VAULT_GROUP]).map((t) => `premium-vault-2|${t}`),
+      Object.keys(errorMap(widened.body.errors)),
+      vaultRecords.map((/** @type {any} */ record) => `premium-vault-2|${record.period}`),
     );
-    for (const failure of Object.values(widened.body.errors)) {
+    for (const failure of Object.values(errorMap(widened.body.errors))) {
       assert.equal(/** @type {any} */ (failure).error, "unseal_failed");
     }
 
@@ -528,11 +539,13 @@ describe("The decision inputs that are not on the resource object at all", () =>
     // rather than being refused: a client that resolved the vault from its
     // cache sends the group it still needs.
     const fewer = structuredClone(clean);
-    delete fewer.sealed.periodKeys[VAULT_GROUP];
+    fewer.sealed.periodKeys = fewer.sealed.periodKeys.filter(
+      (/** @type {any} */ record) => record.accessGroup !== VAULT_GROUP,
+    );
 
     const narrowed = await post(network, CLAIMS_UNLOCK, fewer);
     assert.equal(narrowed.status, 200);
-    assert.deepEqual(Object.keys(narrowed.body.keys.periodKeys), [ARTICLE_GROUP]);
-    assert.deepEqual(Object.keys(narrowed.body.keys.contentKeys), NAMES);
+    assert.deepEqual(Object.keys(periodKeyMap(narrowed.body.keys.periodKeys)), [ARTICLE_GROUP]);
+    assert.deepEqual(Object.keys(contentKeyMap(narrowed.body.keys.contentKeys)), NAMES);
   });
 });

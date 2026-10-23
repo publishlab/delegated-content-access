@@ -5,6 +5,7 @@ import { ISSUER_NAME } from "../../demo/scenarios/fixtures.js";
 import { requestFor } from "../../test-lib/harnesses/issuer-endpoint.js";
 import { unlockThroughAdmission } from "../../test-lib/harnesses/unlockThroughAdmission.js";
 import { DOMAIN, world } from "../../test-lib/fixtures/wire-policy-world.js";
+import { contentKeyMap } from "../support/namedRecords.js";
 
 describe("exact publisher registration at the issuer endpoint", () => {
   test("the request kid selects the registered verification key", async () => {
@@ -17,7 +18,7 @@ describe("exact publisher registration at the issuer endpoint", () => {
       publisherRegistration,
     );
     assert.equal(status, 200);
-    assert.equal(typeof body.keys.contentKeys.bodytext, "string");
+    assert.equal(typeof contentKeyMap(body.keys.contentKeys).bodytext, "string");
   });
 
   test("a wrong registration refuses before opening any key", async () => {

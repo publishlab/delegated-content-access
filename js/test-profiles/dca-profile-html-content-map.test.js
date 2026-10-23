@@ -206,10 +206,12 @@ describe("server-side client: Section 12.3 and 12.4", () => {
     );
     assertComplete(/** @type {string} */ (result.html));
     assert.equal(world.unlocks.length, 1, "one base unlock for both items");
-    assert.deepEqual(Object.keys(world.unlocks[0].request.sealed.contentKeys).sort(), [
-      "bodytext",
-      "factbox",
-    ]);
+    assert.deepEqual(
+      world.unlocks[0].request.sealed.contentKeys
+        .map((/** @type {any} */ record) => record.contentName)
+        .sort(),
+      ["bodytext", "factbox"],
+    );
   });
 
   test("only factbox granted: partial, bodytext locked, its rules change nothing", async () => {

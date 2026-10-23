@@ -62,7 +62,7 @@ async function collect(readable) {
  * rejected half nobody awaited would surface later as an unhandled rejection.
  *
  * @param {Uint8Array} bytes
- * @param {{ readable: ReadableStream<Uint8Array>, writable: WritableStream<Uint8Array> }} transform
+ * @param {{ readable: ReadableStream<Uint8Array>, writable: WritableStream<BufferSource> }} transform
  * @param {string} what - for the message
  * @returns {Promise<Uint8Array>}
  */

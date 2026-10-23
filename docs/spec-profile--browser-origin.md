@@ -142,14 +142,25 @@ allow-origin header.
 
 ### 2.6. Avoiding repeated denied unlocks
 
-A browser integration SHOULD retain a short-lived private scheduling hint after
-an explicit access denial, so an equivalent request in the same access context
-does not reach the issuer on every page load. The issuer's integration chooses
-the interval and supplies invalidation on sign-in, sign-out, account switch or
-entitlement change. This profile fixes no duration or storage backend.
+A browser integration MAY opt into retaining short-lived private scheduling
+hints after explicit access denials. The deployment chooses whether to include
+this feature when assembling its client; this profile requires neither support
+for denial hints nor a runtime toggle. Without the feature, a later acquisition
+attempt may request missing capability again. Positive capability retention,
+including period-key and chain-key reuse, is independent of denial hints.
 
-The integration MUST scope the hint to the trusted issuer route, publisher and
-reader access context. It MUST NOT infer a broader denial from absent keys, a
+Denial hints can avoid repeated equivalent denied requests during their retained
+lifetime. Memory-only hints last within a live client; avoiding requests across
+page loads requires persistence. The integration chooses the interval and
+storage backend and supplies invalidation on sign-in, sign-out, account switch
+or observed entitlement change. An entitlement change may occur elsewhere
+without notification, so bounded expiry limits stale suppression. An integration
+using hints should provide an explicit retry that clears or bypasses them before
+acquiring keys again. These are choices about request scheduling and recovery;
+they do not change issuer authorization or wire compatibility.
+
+When hints are used, the integration MUST scope each hint to the trusted issuer
+route, publisher and reader access context. It MUST NOT infer a broader denial from absent keys, a
 partial grant, an unavailable report, an unreadable response or an operational
 failure. A refusal status alone does not distinguish access denial from request
 admission failure; an endpoint-specific contract may establish that distinction.

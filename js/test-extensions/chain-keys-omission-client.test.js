@@ -18,6 +18,7 @@ import {
   OMISSION_BIND_IDENTIFIER,
   omissionBindAad,
 } from "../extensions/content-key-seal-omission/core-shared/omissionBind.js";
+import { contentKeyWrapNonceOctets } from "../test-reference/support/contentKeyWrapNonceOctets.js";
 
 const PUB = "https://www.news-site.example";
 const ISSUER = "paywall_subscription_service";
@@ -41,24 +42,20 @@ test("omission AAD composes with the chain-key candidate source", async () => {
   });
   const periodKey = await generation.periodKey(GROUP, T);
   const contentKey = new Uint8Array(16).fill(9);
-  const nonce = new Uint8Array(12).fill(4);
-  const entry = {
-    bind: OMISSION_BIND_IDENTIFIER,
+  const aad = omissionBindAad({ renderId, contentName: NAME, accessGroup: GROUP, t: T });
+  // The bound wrap's nonce transcript carries the same AAD it encrypts under.
+  const nonce = contentKeyWrapNonceOctets({
+    renderId,
+    contentName: NAME,
+    accessGroup: GROUP,
     t: T,
-    nonce: base64urlEncode(nonce),
-    key: base64urlEncode(
-      await encrypt(
-        periodKey,
-        nonce,
-        contentKey,
-        omissionBindAad({
-          renderId,
-          contentName: NAME,
-          accessGroup: GROUP,
-          t: T,
-        }),
-      ),
-    ),
+    aad,
+  });
+  const entry = {
+    accessGroup: GROUP,
+    period: T,
+    key: base64urlEncode(await encrypt(periodKey, nonce, contentKey, aad)),
+    bind: OMISSION_BIND_IDENTIFIER,
   };
   const terminal = await generation.chainCapability(GROUP, TERMINAL_T);
   const dcaData = new DcaData(
@@ -66,16 +63,15 @@ test("omission AAD composes with the chain-key candidate source", async () => {
       version: "1",
       resourceJWT: resourceJwt(renderId),
       periodGeometry: GEOMETRY,
-      issuerData: {
-        [ISSUER]: {
+      issuerData: [
+        {
+          issuerName: ISSUER,
           sealed: {
-            chainKeys: {
-              [GROUP]: { [terminal.t]: "carrier-a" },
-            },
+            chainKeys: [{ accessGroup: GROUP, cutoff: terminal.t, key: "carrier-a" }],
           },
         },
-      },
-      contentData: { [NAME]: { keys: { [GROUP]: [entry] } } },
+      ],
+      contentData: [{ contentName: NAME, keys: [entry] }],
     },
     { publisherOrigin: PUB },
   );

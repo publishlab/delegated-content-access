@@ -40,6 +40,7 @@ import { periodFamilySupply } from "../core-publisher/periodFamilySupply.js";
 import { chainKeyIssuerEngine } from "../core-issuer/chainKeyIssuerEngine.js";
 import { chainKeyRequestInput } from "../core-issuer/chainKeyRequestInput.js";
 import { explicitChainKeyClientProfile } from "../referenceProfile.js";
+import { periodsOn } from "../../../test-lib/helpers/inspect.js";
 
 const { subtle } = globalThis.crypto;
 const PUB = "https://www.news-site.example";
@@ -222,7 +223,7 @@ test("one complete root pair relays both families", async () => {
 
 test("cached chain candidates require a complete root pair", async () => {
   const { page } = await world();
-  const t = page.contentData.bodytext.keys.premium[0].t;
+  const t = periodsOn(page, "bodytext", "premium")[0];
   const cache = { candidates: async () => [new Uint8Array(16).fill(9)] };
   const offered = async (data) => {
     const yielded = [];
@@ -319,7 +320,7 @@ for (const strategy of ["retain", "expand"]) {
             const answer = await unlockThroughAdmission(processor, endpoint, request, registration);
             if (entitled) {
               assert.ok(
-                Object.keys(answer.body.keys.chainKeys).length,
+                answer.body.keys.chainKeys.length,
                 "real issuer delivers a chain capability",
               );
               armed = true;

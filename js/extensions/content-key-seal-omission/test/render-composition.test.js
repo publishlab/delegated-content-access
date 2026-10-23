@@ -25,6 +25,55 @@ function payloadOf(token) {
   return token.split(".").slice(0, 2).join(".");
 }
 
+/**
+ * The page's issuer block for one issuer.
+ *
+ * @param {any} page @param {string} issuerName
+ */
+function issuerBlock(page, issuerName) {
+  const block = page.issuerData.find(
+    (/** @type {any} */ record) => record.issuerName === issuerName,
+  );
+  assert.ok(block, `no issuer block for ${issuerName}`);
+  return block;
+}
+
+/**
+ * The access groups a `periodKeys` collection covers, sorted: several periods
+ * of one group are several records, and record order carries no meaning.
+ *
+ * @param {any[]} records
+ */
+function groupsOf(records) {
+  return [...new Set(records.map((record) => record.accessGroup))].sort();
+}
+
+/**
+ * The content names a `contentKeys` collection carries, sorted and not
+ * deduplicated, so a second record for one name shows up as a rival.
+ *
+ * @param {any[]} records
+ */
+function contentNamesOf(records) {
+  return records.map((record) => record.contentName).sort();
+}
+
+/**
+ * The wraps of one item under one access group. A missing item or group fails
+ * here, as reading the old map's absent member did.
+ *
+ * @param {any} page @param {string} contentName @param {string} accessGroup
+ */
+function wrapsAt(page, contentName, accessGroup) {
+  const item = page.contentData.find(
+    (/** @type {any} */ record) => record.contentName === contentName,
+  );
+  assert.ok(item, `no contentData record for ${contentName}`);
+  const wraps = item.keys.filter((/** @type {any} */ entry) => entry.accessGroup === accessGroup);
+  assert.ok(wraps.length > 0, `no ${accessGroup} wrap for ${contentName}`);
+  return wraps;
+}
+
 /** @param {any} left @param {any} right */
 function assertSameRender(left, right) {
   const { resourceJWT: leftJwt, ...leftRest } = left;
@@ -88,25 +137,23 @@ describe("The composition is what the extension publishes", () => {
       ["sidebar", "free"],
     ]) {
       assert.deepEqual(
-        page.contentData[contentName].keys[accessGroup].map(
-          (/** @type {any} */ entry) => entry.bind,
-        ),
+        wrapsAt(page, contentName, accessGroup).map((/** @type {any} */ entry) => entry.bind),
         [OMISSION_BIND_IDENTIFIER, OMISSION_BIND_IDENTIFIER],
       );
     }
-    assert.equal(Object.hasOwn(page.issuerData[ISSUER_A].sealed, "contentKeys"), false);
-    assert.deepEqual(Object.keys(page.issuerData[ISSUER_A].sealed.periodKeys), ["premium", "free"]);
-    assert.deepEqual(Object.keys(page.issuerData[ISSUER_B].sealed.contentKeys), [
+    assert.equal(Object.hasOwn(issuerBlock(page, ISSUER_A).sealed, "contentKeys"), false);
+    assert.deepEqual(groupsOf(issuerBlock(page, ISSUER_A).sealed.periodKeys), ["free", "premium"]);
+    assert.deepEqual(contentNamesOf(issuerBlock(page, ISSUER_B).sealed.contentKeys), [
       "bodytext",
       "sidebar",
     ]);
-    assert.deepEqual(Object.keys(page.issuerData[ISSUER_B].sealed.periodKeys), ["premium", "free"]);
-    assert.equal(Object.hasOwn(page.issuerData[ISSUER_B], "extensions"), false);
+    assert.deepEqual(groupsOf(issuerBlock(page, ISSUER_B).sealed.periodKeys), ["free", "premium"]);
+    assert.equal(Object.hasOwn(issuerBlock(page, ISSUER_B), "extensions"), false);
   });
 
   test("an inactive issuer keeps the access groups it was configured for", async () => {
     const { issuerConfig, sealerConfig } = await world();
-    // Inactive means the ordinary `contentKeys` map and no marker. The issuer's
+    // Inactive means the ordinary `contentKeys` records and no marker. The issuer's
     // own configuration is still read: an issuer deployed for premium alone
     // covers premium alone, whichever route the render's other issuers take.
     const page = await render(
@@ -125,12 +172,12 @@ describe("The composition is what the extension publishes", () => {
       { items: ["bodytext", "sidebar"] },
     );
 
-    assert.deepEqual(Object.keys(page.issuerData[ISSUER_B].sealed.periodKeys), ["premium"]);
-    assert.deepEqual(Object.keys(page.issuerData[ISSUER_B].sealed.contentKeys), [
+    assert.deepEqual(groupsOf(issuerBlock(page, ISSUER_B).sealed.periodKeys), ["premium"]);
+    assert.deepEqual(contentNamesOf(issuerBlock(page, ISSUER_B).sealed.contentKeys), [
       "bodytext",
       "sidebar",
     ]);
-    assert.deepEqual(Object.keys(page.issuerData[ISSUER_A].sealed.periodKeys), ["premium"]);
+    assert.deepEqual(groupsOf(issuerBlock(page, ISSUER_A).sealed.periodKeys), ["premium"]);
   });
 
   test("an all-inactive render keeps each issuer access-group restriction", async () => {
@@ -144,14 +191,14 @@ describe("The composition is what the extension publishes", () => {
       { items: ["bodytext", "sidebar"] },
     );
 
-    assert.deepEqual(Object.keys(page.issuerData[ISSUER_A].sealed.periodKeys), ["premium"]);
-    assert.deepEqual(Object.keys(page.issuerData[ISSUER_A].sealed.contentKeys), [
+    assert.deepEqual(groupsOf(issuerBlock(page, ISSUER_A).sealed.periodKeys), ["premium"]);
+    assert.deepEqual(contentNamesOf(issuerBlock(page, ISSUER_A).sealed.contentKeys), [
       "bodytext",
       "sidebar",
     ]);
-    assert.deepEqual(Object.keys(page.issuerData[ISSUER_B].sealed.periodKeys), ["premium", "free"]);
-    assert.equal(Object.hasOwn(page.issuerData[ISSUER_A], "extensions"), false);
-    assert.equal(Object.hasOwn(page.issuerData[ISSUER_B], "extensions"), false);
+    assert.deepEqual(groupsOf(issuerBlock(page, ISSUER_B).sealed.periodKeys), ["free", "premium"]);
+    assert.equal(Object.hasOwn(issuerBlock(page, ISSUER_A), "extensions"), false);
+    assert.equal(Object.hasOwn(issuerBlock(page, ISSUER_B), "extensions"), false);
   });
 
   test("composition never widens the inner planner or either issuer restriction", async () => {
@@ -171,8 +218,8 @@ describe("The composition is what the extension publishes", () => {
       { items: ["bodytext", "sidebar"] },
     );
 
-    assert.deepEqual(Object.keys(page.issuerData[ISSUER_A].sealed.periodKeys), ["premium"]);
-    assert.deepEqual(Object.keys(page.issuerData[ISSUER_B].sealed.periodKeys), ["premium"]);
+    assert.deepEqual(groupsOf(issuerBlock(page, ISSUER_A).sealed.periodKeys), ["premium"]);
+    assert.deepEqual(groupsOf(issuerBlock(page, ISSUER_B).sealed.periodKeys), ["premium"]);
   });
 
   test("narrowing drops the delivery and source selections of every group it removes", async () => {
@@ -207,13 +254,15 @@ describe("The composition is what the extension publishes", () => {
 
     for (const issuerName of [ISSUER_A, ISSUER_B]) {
       assert.deepEqual(
-        Object.keys(page.issuerData[issuerName].sealed.periodKeys),
+        groupsOf(issuerBlock(page, issuerName).sealed.periodKeys),
         ["premium"],
         issuerName,
       );
       // The kept source selection still applies to the kept group.
       assert.deepEqual(
-        Object.keys(page.issuerData[issuerName].sealed.periodKeys.premium),
+        issuerBlock(page, issuerName)
+          .sealed.periodKeys.filter((/** @type {any} */ record) => record.accessGroup === "premium")
+          .map((/** @type {any} */ record) => record.period),
         [PERIODS[1]],
         issuerName,
       );
@@ -323,8 +372,8 @@ describe("The composition is what the extension publishes", () => {
       ["bodytext", "premium"],
       ["sidebar", "free"],
     ]) {
-      for (const entry of page.contentData[contentName].keys[accessGroup]) {
-        assert.deepEqual(Object.keys(entry), ["t", "nonce", "key"]);
+      for (const entry of wrapsAt(page, contentName, accessGroup)) {
+        assert.deepEqual(Object.keys(entry).sort(), ["accessGroup", "key", "period"]);
       }
     }
   });
@@ -350,15 +399,15 @@ describe("The composition is what the extension publishes", () => {
     );
 
     for (const page of [forward, reversed]) {
-      assert.deepEqual(page.issuerData[ISSUER_A].extensions, [EXTENSION_NAME]);
-      assert.equal(Object.hasOwn(page.issuerData[ISSUER_A].sealed, "contentKeys"), false);
-      assert.deepEqual(Object.keys(page.issuerData[ISSUER_A].sealed.periodKeys), ["premium"]);
-      assert.deepEqual(Object.keys(page.issuerData[ISSUER_B].sealed.contentKeys), items);
-      assert.deepEqual(Object.keys(page.issuerData[ISSUER_B].sealed.periodKeys), [
-        "premium",
+      assert.deepEqual(issuerBlock(page, ISSUER_A).extensions, [EXTENSION_NAME]);
+      assert.equal(Object.hasOwn(issuerBlock(page, ISSUER_A).sealed, "contentKeys"), false);
+      assert.deepEqual(groupsOf(issuerBlock(page, ISSUER_A).sealed.periodKeys), ["premium"]);
+      assert.deepEqual(contentNamesOf(issuerBlock(page, ISSUER_B).sealed.contentKeys), items);
+      assert.deepEqual(groupsOf(issuerBlock(page, ISSUER_B).sealed.periodKeys), [
         "free",
+        "premium",
       ]);
-      for (const entry of page.contentData.sidebar.keys.free) {
+      for (const entry of wrapsAt(page, "sidebar", "free")) {
         assert.equal(entry.bind, OMISSION_BIND_IDENTIFIER);
       }
     }

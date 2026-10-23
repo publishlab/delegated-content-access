@@ -1,7 +1,7 @@
 {
   "name": "open-ecdh-p256-leading-zero",
   "vectorFormat": "ecdh-p256-envelope-open/v1",
-  "description": "docs/spec--sealed-key-envelopes.md section 4 keeps the ECDH shared x-coordinate at 32 octets, including leading zeroes. This valid 109-octet envelope has an agreement beginning with 0x00 and opens to the recorded content key.",
+  "description": "docs/spec--sealed-key-envelopes.md section 4 keeps the ECDH shared x-coordinate at 32 octets, including leading zeroes. This valid 97-octet envelope has an agreement beginning with 0x00 and opens to the recorded content key.",
   "input": {
     "algorithm": "ecdh-p256",
     "binding": {
@@ -19,6 +19,6 @@
   },
   "expected": {
     "bind": "dca-bind-key-envelope|c|uUT576O34BoGKpgXpdMucw|bodytext",
-    "blob": "BC8n_T_0Yaclf4IgFWisUAPRKxYi0D7Ns3tJ6rJgQmPBJ9neOqYQCreKcyZ5kIxMO34kNS9zJvjwOT67XOc2fL6uwxjSEl0x69zcsjSM3bYHgPxWmt9DJB8STvHNksFSwWuyCkTw23xYgyuB3g"
+    "blob": "BC8n_T_0Yaclf4IgFWisUAPRKxYi0D7Ns3tJ6rJgQmPBJ9neOqYQCreKcyZ5kIxMO34kNS9zJvjwOT67XOc2fL7h5DTbp4QQAie20zPLa5Wsr9XEX0c_SX8547KN9nVjrg"
   }
 }

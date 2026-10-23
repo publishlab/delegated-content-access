@@ -3,7 +3,13 @@
 import { describe } from "node:test";
 import assert from "node:assert/strict";
 
-import { DcaRequest, parseDcaRequest } from "../../core-shared--client-issuer/DcaRequest.js";
+import {
+  DcaRequest,
+  SEALED_FIELDS,
+  parseDcaRequest,
+  sealedCandidates,
+  sealedRecordsAdmit,
+} from "../../core-shared--client-issuer/DcaRequest.js";
 import { test, portableTest } from "../support/portable-test.js";
 
 const objectCoreTest = portableTest("portable-object-core");
@@ -35,8 +41,8 @@ describe("The request document, and what reads it", () => {
       issuerName: "issuer.example",
       resourceJWT: "header.payload.signature",
       keyId: "k1",
-      contentKeys: { bodytext: "blob" },
-      periodKeys: { premium: { "251023T1500": "blob" } },
+      contentKeys: [{ contentName: "bodytext", key: "blob" }],
+      periodKeys: [{ accessGroup: "premium", period: "251023T1500", key: "blob" }],
     });
 
     const document = request.toObject();
@@ -51,8 +57,10 @@ describe("The request document, and what reads it", () => {
     assert.equal(parsed.issuerName, "issuer.example");
     assert.equal(parsed.keyId, "k1");
     assert.equal(parsed.resourceJWT, "header.payload.signature");
-    assert.deepEqual(parsed.sealedContentKeys, { bodytext: "blob" });
-    assert.deepEqual(parsed.sealedPeriodKeys, { premium: { "251023T1500": "blob" } });
+    assert.deepEqual(parsed.sealedContentKeys, [{ contentName: "bodytext", key: "blob" }]);
+    assert.deepEqual(parsed.sealedPeriodKeys, [
+      { accessGroup: "premium", period: "251023T1500", key: "blob" },
+    ]);
   });
 
   test("an optional member the client cannot fill sends no member in its place", () => {
@@ -61,8 +69,8 @@ describe("The request document, and what reads it", () => {
       issuerName: "issuer.example",
       resourceJWT: 17,
       keyId: null,
-      contentKeys: { bodytext: "blob" },
-      periodKeys: {},
+      contentKeys: [{ contentName: "bodytext", key: "blob" }],
+      periodKeys: [],
     }).toObject();
 
     assert.deepEqual(Object.keys(document), ["version", "issuerName", "sealed"]);
@@ -78,7 +86,7 @@ describe("The request document, and what reads it", () => {
     const offered = DcaRequest.fromParts({
       version: "1",
       issuerName: "issuer.example",
-      contentKeys: {},
+      contentKeys: [],
       clientPublicKey: { kty: "EC" },
     }).toObject();
     assert.deepEqual(Object.keys(offered), ["version", "issuerName", "sealed", "clientPublicKey"]);
@@ -105,15 +113,42 @@ describe("The request document, and what reads it", () => {
     assert.equal(new DcaRequest("a string is not a request").sealed, undefined);
   });
 
-  test("a sealed section that is not a map contributes no coordinates", () => {
-    // An array has index names, so walking one would rebuild bindings for
-    // coordinates nobody sealed. The raw container stays raw, because
-    // admission counting reads it and a cap should refuse the malformed.
-    const request = new DcaRequest({ sealed: { contentKeys: ["blob"], periodKeys: "not a map" } });
+  test("a sealed section that is not an array contributes no records", () => {
+    // A map keyed by name is the retired shape; walking its member names
+    // would rebuild coordinates no record states. The raw container stays
+    // raw, because admission counting reads it and refuses the malformed.
+    const request = new DcaRequest({
+      sealed: { contentKeys: { bodytext: "blob" }, periodKeys: "not a collection" },
+    });
 
     assert.equal(request.sealedContentKeys, undefined);
     assert.equal(request.sealedPeriodKeys, undefined);
-    assert.deepEqual(request.sealed, { contentKeys: ["blob"], periodKeys: "not a map" });
+    assert.equal(request.sealedChainKeys, undefined);
+    assert.deepEqual(request.sealed, {
+      contentKeys: { bodytext: "blob" },
+      periodKeys: "not a collection",
+    });
+  });
+
+  test("the sealed accessors hand back every record as it arrived, rivals included", () => {
+    // Several records at one coordinate are candidate alternatives. The
+    // accessor neither merges nor drops them; admission and the engine decide.
+    const records = [
+      { contentName: "bodytext", key: "blobA" },
+      { contentName: "bodytext", key: "blobB" },
+      "not a record",
+    ];
+    const request = new DcaRequest({
+      sealed: {
+        contentKeys: records,
+        chainKeys: [{ accessGroup: "premium", cutoff: "251023T1500", key: "blobC" }],
+      },
+    });
+
+    assert.strictEqual(request.sealedContentKeys, records);
+    assert.deepEqual(request.sealedChainKeys, [
+      { accessGroup: "premium", cutoff: "251023T1500", key: "blobC" },
+    ]);
   });
 
   test("reading a request establishes nothing about it", () => {
@@ -125,12 +160,12 @@ describe("The request document, and what reads it", () => {
         version: "1",
         issuerName: "issuer.example",
         resourceJWT: "not.a.token",
-        sealed: { contentKeys: { bodytext: "blob" } },
+        sealed: { contentKeys: [{ contentName: "bodytext", key: "blob" }] },
       }),
     );
 
     assert.equal(request.resourceJWT, "not.a.token");
-    assert.deepEqual(request.sealedContentKeys, { bodytext: "blob" });
+    assert.deepEqual(request.sealedContentKeys, [{ contentName: "bodytext", key: "blob" }]);
   });
 
   test("a document that is not JSON, and a document that is not a document", () => {
@@ -164,5 +199,62 @@ describe("The request document, and what reads it", () => {
       () => parseDcaRequest(/** @type {any} */ ({ version: "1" })),
       (/** @type {any} */ e) => e.code === "bad_config",
     );
+  });
+
+  test("a sealed collection is admitted whole, on its records and their identities", () => {
+    const fields = SEALED_FIELDS.periodKeys;
+    const grammars = { accessGroup: (/** @type {string} */ name) => /^[a-z]+$/.test(name) };
+    assert.equal(sealedRecordsAdmit([], fields, grammars), true);
+    assert.equal(
+      sealedRecordsAdmit(
+        [
+          { accessGroup: "premium", period: "251023T1500", key: 7 },
+          { accessGroup: "premium", period: "251023T1500", key: "blob" },
+        ],
+        fields,
+        grammars,
+      ),
+      true,
+      "a bad key value is its own scope's to judge",
+    );
+    for (const collection of [
+      { premium: { "251023T1500": "blob" } },
+      ["blob"],
+      [{ accessGroup: "premium", key: "blob" }],
+      [{ accessGroup: "Premium!", period: "251023T1500", key: "blob" }],
+      [
+        { accessGroup: "premium", period: "251023T1500", key: "blob" },
+        { accessGroup: "premium", period: 1500, key: "blob" },
+      ],
+    ]) {
+      assert.equal(
+        sealedRecordsAdmit(collection, fields, grammars),
+        false,
+        JSON.stringify(collection),
+      );
+    }
+  });
+
+  test("sealed candidates keep each distinct value at its coordinate, in order", () => {
+    const candidates = sealedCandidates(
+      [
+        { accessGroup: "premium", period: "251023T1500", key: "blobB" },
+        { accessGroup: "premium", period: "251023T1500", key: "blobA" },
+        { accessGroup: "premium", period: "251023T1500", key: "blobB" },
+        { accessGroup: "premium", period: "251023T1515", key: "blobC" },
+        { accessGroup: "__proto__", period: "251023T1500", key: "blobD" },
+        { accessGroup: "premium", key: "no period" },
+      ],
+      SEALED_FIELDS.periodKeys,
+    );
+    assert.deepEqual([...candidates.keys()], ["premium", "__proto__"]);
+    assert.deepEqual(candidates.get("premium").get("251023T1500"), ["blobB", "blobA"]);
+    assert.deepEqual(candidates.get("premium").get("251023T1515"), ["blobC"]);
+    assert.deepEqual(candidates.get("__proto__").get("251023T1500"), ["blobD"]);
+    assert.deepEqual(
+      [...sealedCandidates([{ contentName: "a", key: "x" }], SEALED_FIELDS.contentKeys)],
+      [["a", ["x"]]],
+    );
+    assert.equal(sealedCandidates({ a: "x" }, SEALED_FIELDS.contentKeys).size, 0);
   });
 });

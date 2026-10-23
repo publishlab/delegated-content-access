@@ -25,8 +25,17 @@ in all capitals.
 
 ## 2. Common JSON rules
 
-A DCA document and each map defined by this document is a JSON object, not an
-array.
+The current unreleased version-1 draft requires the named-record collection
+grammar in this document. Indexed-map collections from earlier unreleased v1
+drafts are incompatible and MUST NOT be accepted as an alternate form. Peers
+agree on the draft revision outside the protocol; this rule introduces no new
+wire selector. The version-change requirements in
+[core Section 5.1](spec--core-protocol.md#51-version) still govern incompatible
+changes beyond this unreleased draft transition.
+
+A DCA document, each fixed section and each record defined by this document is
+a JSON object, not an array. Each collection is a JSON array of records
+(Section 2.3).
 
 When a carrier enters as octets, it MUST be one well-formed UTF-8 JSON value.
 A producer MUST NOT emit a byte order mark. A consumer MUST ignore exactly one
@@ -76,10 +85,16 @@ An `accessGroup` is a publisher-scoped policy-family coordinate. Its spelling
 MAY use business vocabulary, but carries no entitlement and MUST NOT encode or
 be interpreted as a per-article map of granting issuers.
 
-These identifiers occur as JSON member names. A producer MUST emit only names
-that satisfy this section. When a consumer processes a map keyed by one of
-these identifiers, it MUST reject that map if any member name violates this
-section. It MUST NOT ignore the invalid name while accepting its siblings.
+These identifiers occur as identity fields of collection records
+(Section 2.3). A producer MUST emit only values that satisfy this section. When
+a consumer processes a collection whose records carry one of these identifiers,
+it MUST reject that collection if a record's identifier is missing, is not a
+string or violates this section. It MUST NOT ignore the invalid record while
+accepting its siblings, except for response `keys.contentKeys`,
+`keys.periodKeys` and selected `keys.chainKeys`: these admit identifiers per
+record as specified in [response binding Section 3](spec--response-binding.md#3-inputs-and-common-response-form).
+The clause that defines a collection states how a consumer treats an element
+that is not a non-array object.
 
 ### 2.2. Binary strings
 
@@ -103,6 +118,61 @@ binary member makes its item record unusable, an invalid cached-wrap or sealed
 envelope entry makes only that candidate unavailable, and an invalid ciphertext
 entry supplies no ciphertext for that item.
 
+### 2.3. Collections of named records
+
+A collection holds records of one kind in a JSON array. Each record is a
+non-array object that carries its identity and coordinates as named fields,
+such as `contentName`, `accessGroup`, `issuerName` or `period`. Array position
+carries no identity, coordinate or authority, and no cryptographic input uses
+it. Fixed sections, such as `keys`, `sealed` and `periodGeometry`, stay objects.
+
+This distinction describes the protocol schema: an object has fields defined
+by its specification; an array holds a collection of entries of the specified
+type. Each record is itself an object. Lists of scalar values, such as group
+names, retain the element type their defining clause specifies.
+Publisher-defined metadata inside `resourceJWT` is not constrained to this
+record-collection convention.
+
+Examples place identity and coordinate fields before the carried value to make
+records easier to read. JSON object member order has no significance: a
+consumer MUST NOT infer identity or uniqueness from the first member. A
+collection's definition identifies the fields that together identify a record
+or key coordinate and states how repetitions are handled. One field may
+suffice, such as `contentName`; key coordinates may require several fields.
+An identity field is not a promise that its value occurs only once.
+
+Consumers may iterate records or build internal indexes for lookup. An index
+must preserve the collection's repetition rules below; indexing by coordinate
+must not overwrite distinct material candidates.
+
+A producer emits a required collection as an array even when it holds no
+record, for example `"contentKeys": []`. It omits an optional collection under
+that collection's own omission rule and does not emit an empty optional
+collection for symmetry.
+
+The clause that defines a collection states how a consumer treats several
+records with the same identity. This document and the core protocol use two
+rules; a profile that adds a collection states its own:
+
+- **Descriptor and status records:** the consumer uses the last whole record
+  for that identity. It does not merge fields from several records, and "last"
+  does not mean chronologically newer. Identical records give the same result.
+  The consumer admits the identity of every record and the remaining members
+  of the selected record only.
+- **Material and connector records:** several records at one complete
+  coordinate are candidate alternatives. They are not several grants, a
+  precedence order or added authority. A consumer keeps distinct candidates and
+  MAY drop an identical copy; it does not select the first or last record by
+  overwriting a lookup entry.
+
+A consumer counts raw records, before it drops copies or selects a record,
+against every limit that applies to the collection.
+
+A repeated record is not a duplicate member name. Section 2 still governs a
+JSON object that repeats a member name, including a record that repeats one of
+its own fields. A repeated record is an ordinary array element and changes
+nothing in that rule.
+
 ## 3. Markup delivery
 
 The markup delivery is the carrier of the optional `dca-profile-html-carrier`
@@ -120,6 +190,12 @@ A markup delivery carries one DCA instance in the HTML `body`:
 
 The two carriers have no ordering, sibling or depth requirement.
 
+For this profile, consumers MUST use the HTML document parsing and tree
+construction rules in [HTML](https://html.spec.whatwg.org/multipage/parsing.html),
+with scripting enabled for parsing. In particular, a `noscript` element in the
+body is parsed as text rather than as an additional carrier subtree. This
+parsing requirement does not require executing scripts.
+
 A producer MUST use inert `script` elements with
 `type="application/json"`. It MUST serialize each JSON value so embedded data
 cannot terminate or alter the HTML script-data element. Parsing the carrier
@@ -128,7 +204,7 @@ contain `<`.
 
 A consumer parses the carrier text as JSON. A missing or non-object `dca-data`
 value is a structural failure. A present `dca-sealed-content` value that is not
-a non-array object is a structural failure.
+an array is a structural failure.
 
 A consumer MUST inspect every element in `body` carrying either reserved class
 token. There MUST be exactly one `dca-data` element and at most one
@@ -152,8 +228,8 @@ The `dca-data` object contains:
 | `version` | string | Required; value `"1"` in this version |
 | `resource` | object | Optional readable publisher metadata |
 | `resourceJWT` | string | Required opaque publisher assertion |
-| `contentData` | object | Required item inventory |
-| `issuerData` | object | Required non-empty issuer map |
+| `contentData` | array | Required item collection |
+| `issuerData` | array | Required non-empty issuer collection |
 | `periodGeometry` | object | Complete geometry for selected chain processing; chain keys Section 12.1 |
 
 The publisher emits `resource` for diagnostics only. This document does not
@@ -170,8 +246,8 @@ belong to the core protocol specification.
 
 Before exposing a delivery to request construction or content-key resolution,
 a consumer MUST admit the outer object and each required member with its type:
-`version` exactly `"1"`, `resourceJWT` a string, `contentData` a non-array
-object and `issuerData` a non-empty non-array object. A present `resource` MUST
+`version` exactly `"1"`, `resourceJWT` a string, `contentData` an array and
+`issuerData` a non-empty array. A present `resource` MUST
 be a non-array object. Failure of an outer requirement is a delivery-wide
 structural failure. A consumer MUST complete an item record's or issuer
 block's admission before deriving a request from it or using its key or
@@ -179,33 +255,46 @@ ciphertext material.
 
 ### 4.1. `contentData`
 
-`contentData` maps `contentName` to item records. Each record is a non-array
+`contentData` is a collection of item records. Each record is a non-array
 object with these members:
 
 | Member | Type | Requirement |
 | --- | --- | --- |
+| `contentName` | string | Required item identity |
 | `contentType` | string | Required content-handling metadata |
 | `contentEncodings` | array of strings | Optional ordered representation layers |
-| `keys` | object | Optional cached-wrap map |
+| `keys` | array | Optional cached-wrap collection |
+
+A publisher emits one record per `contentName`. When several records carry one
+`contentName`, the consumer uses the last whole record for that item
+(Section 2.3). An element that is not a non-array object names no item: the
+consumer skips it, and its siblings stay usable. A record whose `contentName`
+is missing, is not a string or is not a valid `contentName` rejects the
+collection (Section 2.1).
 
 [spec--content-protection.md](spec--content-protection.md) defines content
-encryption, nonce sizes, the content AAD built from the delivery and unwrap
-processing.
+encryption, nonce sizes, the content AAD built from the delivery, the wrap
+nonce derived from each wrap entry's context and unwrap processing.
 
 A producer MUST omit `aad` and `nonce` from an item record. A consumer MUST
 ignore either carried item member under the unknown-member rule, regardless
 of its type. Neither member selects an AAD, nonce procedure or legacy retry.
-Wrap-entry `nonce` members below retain their required meaning.
+The same holds for wrap entries below: a producer MUST omit `nonce` from a
+wrap entry, and a consumer MUST ignore a carried one under the unknown-member
+rule, regardless of its type or value
+([content protection Section 4.1](spec--content-protection.md#41-wrap-nonce)).
 
 If `keys` is absent, the item offers no period-key-wrap candidates. If present, it
-MUST be a non-empty non-array object mapping `accessGroup` to a non-empty array.
-Each array member MUST be a non-array object with string members `t`, `nonce`
-and `key`. An own `bind` member on such an entry is reserved;
+MUST be a non-empty array of wrap entries. Each wrap entry MUST be a non-array
+object with an `accessGroup` identifier and string members `period` and `key`.
+Several entries at one `(accessGroup, period)` are candidate alternatives
+(Section 2.3). An own `bind` member on such an entry is reserved;
 [content protection Section 4](spec--content-protection.md#4-base-period-key-content-key-wrapping)
-defines its effect.
+defines its effect. A carried `nonce` member is an unknown member and does not
+affect admission.
 
-When a named record is missing, the publisher declared no such protected item.
-A non-object record or a missing or malformed required `contentType`
+When no record names an item, the publisher declared no such protected item.
+A missing or malformed required `contentType`
 member is an item record failure when that item is used, not a
 cached-candidate miss.
 
@@ -223,38 +312,48 @@ content-key identity, BIND, issuer selection, authorization or the meaning of
 `contentType`. The content tag does not authenticate this list or `contentType`;
 content protection Section 8.1 defines the resulting handling boundary.
 
-A present malformed `keys` container, or a `keys` map rejected under
-Section 2.1, supplies no period-key-wrap candidates for that item; an
-otherwise valid issuer-mediated item content-key alternative remains. Within
-an admitted `keys` map, an access-group value that is not a non-empty array
-supplies no candidates for that group, and an array member that is not a
-non-array object with string `t`, `nonce` and `key` members supplies no
-candidate.
+A present malformed `keys` container, including an empty array, or a `keys`
+collection rejected under Section 2.1, supplies no period-key-wrap candidates
+for that item; an otherwise valid issuer-mediated item content-key alternative
+remains. Within an admitted `keys` collection, an element that is not a
+non-array object, or an entry without string `period` and `key` members,
+supplies no candidate.
 
-An empty `contentData` object is structurally valid at this layer. The core
+An empty `contentData` array is structurally valid at this layer. The core
 protocol requires at least one protected item. A producer MUST NOT emit an
 empty inventory unless its selected profile defines its meaning.
 
-At this structural layer, `t` is an opaque string; the period-key
-specification owns its grammar. The `key` member is a content-key wrap under
-the period key at that `(accessGroup, t)`; content protection Section 4 defines
-it.
+At this structural layer, `period` is an opaque string; the period-key
+specification owns its grammar and calls the label `t`. The `key` member is a
+content-key wrap under the period key at that `(accessGroup, t)`; content
+protection Section 4 defines it, including the nonce that publisher and client
+derive for it.
 
 ### 4.2. `issuerData`
 
-`issuerData` maps `issuerName` to issuer blocks. A producer MUST emit each block
+`issuerData` is a collection of issuer blocks. A producer MUST emit each block
 as a non-array object containing:
 
 | Member | Type | Requirement |
 | --- | --- | --- |
+| `issuerName` | string | Required issuer identity |
 | `keyId` | string | Required |
 | `envelope` | string | Optional procedure selector; [compact ECDH profile](spec-profile--compact-ecdh.md#3-wire-selector-and-client-relay) |
 | `sealed` | object | Required |
-| `sealed.chainKeys` | object | Optional extension member; chain keys Section 12.1 |
+| `sealed.chainKeys` | array | Optional extension member; chain keys Section 12.1 |
 
-If present, `sealed.contentKeys` is an object mapping `contentName` to a sealed
-binary string. If present, `sealed.periodKeys` is an object mapping
-`accessGroup` to an object that maps `t` to a sealed binary string.
+If present, `sealed.contentKeys` is a collection of records
+`{contentName, key}` whose `key` is a sealed binary string. If present,
+`sealed.periodKeys` is a collection of records `{accessGroup, period, key}`
+whose `period` is the label `t` and whose `key` is a sealed binary string.
+
+A publisher emits one block per `issuerName`. When several blocks carry one
+`issuerName`, the consumer uses the last whole block (Section 2.3). It MUST
+NOT combine one block's `keyId` or `envelope` with another block's sealed
+material. An element that is not a non-array object names no issuer: the
+consumer skips it, and its siblings stay usable. A block whose `issuerName` is
+missing, is not a string or is not a valid `issuerName` rejects the collection
+(Section 2.1).
 
 For a consumer, a selected issuer block is usable only when the block and its
 `sealed` member are non-array objects and its `keyId` is a non-empty string.
@@ -271,31 +370,37 @@ configuration for the operation's publisher/deployment context and `issuerName`,
 as required by [core Section 9](spec--core-protocol.md#9-delegation-completeness)
 and [HTTPS binding Section 3.1](spec--http-binding.md#31-endpoint-and-channel).
 
-If present, `sealed.contentKeys` and `sealed.periodKeys` MUST be non-array
-objects, and every `sealed.periodKeys[accessGroup]` value a non-empty
-non-array object. The consumer admits identifier-keyed maps under Section 2.1
-before relaying their entries. A malformed or rejected sealed-key map supplies
-no candidates of that kind; a malformed or empty access-group value supplies no
-candidate for that group; an invalid sealed entry supplies no candidate at its
-coordinate. A client applies these scopes before constructing its issuer
-request.
+If present, `sealed.contentKeys` and `sealed.periodKeys` MUST be arrays. The
+consumer admits their identity fields under Section 2.1 before relaying their
+records. A malformed or rejected sealed-key collection supplies no candidates
+of that kind; an element that is not a non-array object, or a
+`sealed.periodKeys` record without a string `period`, supplies no candidate;
+an invalid sealed `key` supplies no candidate at its coordinate. Several
+records at one coordinate are candidate alternatives (Section 2.3), and a
+client relays each one it selects. A client applies these scopes before
+constructing its issuer request.
 
 If no usable issuer-mediated key-acquisition alternative remains for the
 requested item and no applicable cached capability opens it, opening fails.
 
 ## 5. Sealed-content carrier
 
-The optional `dca-sealed-content` object maps `contentName` to ciphertext binary
-strings.
+The optional `dca-sealed-content` value is a collection of records
+`{contentName, content}` whose `content` is a ciphertext binary string.
 
-An item declared by `contentData` may have no member in this object; its
+An item declared by `contentData` may have no record in this collection; its
 ciphertext is then absent from this delivery, and this document defines no
 retrieval mechanism.
 
-A grammar-valid member not declared by `contentData` is ignored by the core
-client. Section 2.1 still rejects the carrier when a member name is not a valid
-`contentName`. A missing member, a value that is not a string, or a string that
-is not canonical base64url supplies no ciphertext for that item.
+A publisher emits one record per `contentName`. When several records carry one
+`contentName`, the consumer uses the last whole record (Section 2.3). A
+grammar-valid record not declared by `contentData` is ignored by the core
+client. Section 2.1 rejects the entire enclosing delivery with `bad_page` when
+a record's own `contentName` is missing, is not a string or is not a valid
+`contentName`. This scope applies to both markup and object deliveries. An element
+that is not a non-array object names no item; the consumer skips it, and its siblings
+stay usable. A missing record, a `content` value that is not a string, or a string
+that is not canonical base64url supplies no ciphertext for that item.
 
 ## 6. Object delivery
 
@@ -304,10 +409,11 @@ object and adds:
 
 | Member | Type | Requirement |
 | --- | --- | --- |
-| `sealedContent` | object | Optional; same map as `dca-sealed-content` |
+| `sealedContent` | array | Optional; same collection as `dca-sealed-content` |
 
-An object reader obtains ciphertext from `sealedContent[contentName]`; a markup
-reader obtains it from the separate carrier. All other member names, types and
+An object reader obtains ciphertext from the `sealedContent` record that names
+the item; a markup reader obtains it from the separate carrier.
+All other member names, types and
 structural rules are identical.
 
 The **JSON delivery** is the serialized form of this object: the octets of
@@ -322,15 +428,14 @@ This document defines no media type, file name, discovery or retrieval
 mechanism for the JSON delivery. The publisher's deployment establishes how
 its clients obtain the document.
 
-A present `sealedContent` value that is not a non-array object is a structural
-failure.
+A present `sealedContent` value that is not an array is a structural failure.
 
 <a id="7-structural-processing"></a>
 ## 7. Failure scope
 
 A structural failure is delivery-wide unless this document, or the focused
 specification that defines the failing member, states a narrower scope. A
-failure at a narrower scope (issuer block, map, access group, entry or item)
+failure at a narrower scope (issuer block, collection, access group, record or item)
 supplies nothing from that unit and MUST NOT suppress a valid sibling, unless a
 focused specification states a wider failure for that unit. A structural
 failure releases no key material through the affected scope. Error codes, HTTP
@@ -357,8 +462,8 @@ Section 4.1 is defined by content protection Section 4.
 
 Page input remains untrusted until the applicable authentication and issuer
 processing verify the publisher assertion. `resource`, identifier spellings,
-`keyId`, ciphertext placement and sealed maps do not grant access. A page-carried
-URL supplies no endpoint selection authority.
+`keyId`, ciphertext placement, sealed collections and array positions do not
+grant access. A page-carried URL supplies no endpoint selection authority.
 
 This format does not authenticate or bind `contentData` to a page location;
 [security model Section 8.5](spec--security-model.md#what-opening-proves)
@@ -368,6 +473,7 @@ states what each boundary proves.
 
 - [BCP 14](https://www.rfc-editor.org/info/bcp14), incorporating RFC 2119 and
   RFC 8174 requirements-language interpretation.
+- [HTML](https://html.spec.whatwg.org/multipage/), document parsing and tree construction.
 - [RFC 4648](https://www.rfc-editor.org/rfc/rfc4648.html), Base-N Encodings.
 - [DCA core protocol](spec--core-protocol.md).
 - [DCA content protection](spec--content-protection.md).

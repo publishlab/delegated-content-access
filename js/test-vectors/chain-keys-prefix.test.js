@@ -47,6 +47,7 @@ import { ChainKeyCache } from "../extensions/chain-keys/core-client/ChainKeyCach
 import { ChainKeyRequestBuilder } from "../extensions/chain-keys/core-client/ChainKeyRequestBuilder.js";
 import { referenceChainKeyProfile } from "../extensions/chain-keys/referenceProfile.js";
 import { contentAadOctets } from "../test-reference/support/contentAadOctets.js";
+import { wrapNonceOf } from "../test-reference/support/contentKeyWrapNonceOctets.js";
 
 const DIR = fileURLToPath(
   new URL(
@@ -81,6 +82,30 @@ const toBase64url = (bytes) => Buffer.from(bytes).toString("base64url");
 const sha256Hex = async (bytes) =>
   Buffer.from(await subtle.digest("SHA-256", bytes)).toString("hex");
 
+/**
+ * The one record of a named collection whose `member` is `name`.
+ *
+ * @param {any[]} records
+ * @param {string} member
+ * @param {string} name
+ * @returns {any}
+ */
+function recordNamed(records, member, name) {
+  const found = records.filter((record) => record[member] === name);
+  assert.equal(found.length, 1, `one record with ${member} ${name}`);
+  return found[0];
+}
+
+/**
+ * The records of one accessGroup in a key collection, in record order.
+ *
+ * @param {any[]} records
+ * @param {string} accessGroup
+ * @returns {any[]}
+ */
+const ofGroup = (records, accessGroup) =>
+  records.filter((record) => record.accessGroup === accessGroup);
+
 /** @param {string} t @returns {any} */
 const renderAt = (t) => renders.find((/** @type {any} */ render) => render.t === t);
 
@@ -89,7 +114,7 @@ const renderAt = (t) => renders.find((/** @type {any} */ render) => render.t ===
  * client's reader finds them.
  *
  * @param {any} render
- * @returns {{ root: any, dcaData: any, sealedContent: Record<string, string> }}
+ * @returns {{ root: any, dcaData: any, sealedContent: { contentName: string, content: string }[] }}
  */
 function delivered(render) {
   const root = domOver(render.markup, { publisherOrigin: render.publisherOrigin });
@@ -345,7 +370,7 @@ test(
       const { root, dcaData } = delivered(render);
       assert.equal(dcaData.resourceJWT, render.resourceJWT);
       // Chain keys only, one wrap at the render's own coordinate.
-      const block = dcaData.issuerData[issuerName];
+      const block = recordNamed(dcaData.issuerData, "issuerName", issuerName);
       assert.equal(
         Object.hasOwn(block.sealed, "contentKeys"),
         false,
@@ -356,9 +381,14 @@ test(
         false,
         `${read.t}: no period-key member`,
       );
-      assert.deepEqual(Object.keys(block.sealed.chainKeys[ACCESS_GROUP]), render.suppliedChain);
       assert.deepEqual(
-        dcaData.contentData[name].keys[ACCESS_GROUP].map((/** @type {any} */ wrap) => wrap.t),
+        ofGroup(block.sealed.chainKeys, ACCESS_GROUP).map(({ cutoff }) => cutoff),
+        render.suppliedChain,
+      );
+      assert.deepEqual(
+        ofGroup(recordNamed(dcaData.contentData, "contentName", name).keys, ACCESS_GROUP).map(
+          ({ period }) => period,
+        ),
         [read.t],
       );
 
@@ -400,9 +430,12 @@ test(
 
     // Relay: the render's chain member and geometry, unchanged; nothing else to answer from.
     const { dcaData: unlocked } = delivered(renderAt(expected.witness.cutoff));
-    assert.deepEqual(request.sealed.contentKeys, {});
+    assert.deepEqual(request.sealed.contentKeys, []);
     assert.equal(Object.hasOwn(request.sealed, "periodKeys"), false);
-    assert.deepEqual(request.sealed.chainKeys, unlocked.issuerData[issuerName].sealed.chainKeys);
+    assert.deepEqual(
+      request.sealed.chainKeys,
+      recordNamed(unlocked.issuerData, "issuerName", issuerName).sealed.chainKeys,
+    );
     assert.deepEqual(request.periodGeometry, unlocked.periodGeometry);
 
     // Result form: a chain result at the witness cutoff, under the request geometry.
@@ -411,9 +444,13 @@ test(
     assert.equal(expected.response.periodKeys, "absent");
     assert.equal(Object.hasOwn(body.keys, "periodKeys"), false);
     assert.deepEqual(body.keys.chainKeys, expected.response.chainKeys);
-    assert.deepEqual(expected.response.chainKeys, {
-      [ACCESS_GROUP]: { [expected.witness.cutoff]: expected.witness.cutoffChainKey },
-    });
+    assert.deepEqual(expected.response.chainKeys, [
+      {
+        accessGroup: ACCESS_GROUP,
+        cutoff: expected.witness.cutoff,
+        key: expected.witness.cutoffChainKey,
+      },
+    ]);
     assert.equal(Object.hasOwn(body, "periodGeometry"), false);
     const { accessGroups, ...documentWide } = request.periodGeometry;
     assert.deepEqual(
@@ -512,27 +549,32 @@ test("stock WebCrypto confirms the witness, the recorded prefix period keys and 
   /** @param {any} render */
   const itemOf = (render) => {
     const { dcaData, sealedContent } = delivered(render);
-    const item = dcaData.contentData.bodytext;
+    const item = recordNamed(dcaData.contentData, "contentName", "bodytext");
     assert.equal(Object.hasOwn(item, "aad"), false, "the item record carries no aad");
     // The hand-built transcript over this render's token and item, not the reference module.
     const aad = contentAadOctets(dcaData, "bodytext");
-    const [wrap] = item.keys[ACCESS_GROUP];
-    return { item, aad, wrap, ciphertext: fromBase64url(sealedContent.bodytext) };
+    const [wrap] = ofGroup(item.keys, ACCESS_GROUP);
+    // The wrap nonce is not on the wire: it derives from this render's coordinate.
+    const iv = wrapNonceOf(dcaData, "bodytext", ACCESS_GROUP, wrap.period);
+    const { content } = recordNamed(sealedContent, "contentName", "bodytext");
+    return { item, aad, wrap, iv, ciphertext: fromBase64url(content) };
   };
   /** @param {Uint8Array} periodKey @param {any} render */
   const openWith = async (periodKey, render) => {
-    const { aad, wrap, ciphertext } = itemOf(render);
+    const { aad, wrap, iv, ciphertext } = itemOf(render);
     // Content-key wraps under a period key use the empty AAD.
-    const contentKey = await openGcm(periodKey, fromBase64url(wrap.nonce), fromBase64url(wrap.key));
+    const contentKey = await openGcm(periodKey, iv, fromBase64url(wrap.key));
     const plaintext = await openGcm(contentKey, new Uint8Array(12), ciphertext, aad);
     return utf8Decode(plaintext);
   };
 
   // Walk the cutoff key the issuer returned back to the window start: Leaf at
   // each position, then Step to the one below, as §6.5 and §6.6 state them.
-  let chainKey = fromBase64url(
-    exchanges[0].body.keys.chainKeys[ACCESS_GROUP][expected.witness.cutoff],
+  const returned = ofGroup(exchanges[0].body.keys.chainKeys, ACCESS_GROUP).filter(
+    ({ cutoff }) => cutoff === expected.witness.cutoff,
   );
+  assert.equal(returned.length, 1, "one returned chain key at the witness cutoff");
+  let chainKey = fromBase64url(returned[0].key);
   /** @type {Uint8Array[]} */
   const prefixPeriodKeys = [];
   for (let position = expected.witness.position; position >= 0; position--) {

@@ -108,8 +108,51 @@ function wireRequest(vector) {
     issuerName: issuerFixture.issuerName,
     resourceJWT: dcaData.resourceJWT,
     keyId: issuerFixture.keyId,
-    sealed: dcaData.issuerData[issuerFixture.issuerName].sealed,
+    sealed: dcaData.issuerData.find(
+      (/** @type {any} */ record) => record.issuerName === issuerFixture.issuerName,
+    ).sealed,
   });
+}
+
+/**
+ * The delivered keys of a wire answer by coordinate, `contentKeys.<name>` and
+ * `periodKeys.<group>.<period>`. A repeated coordinate fails: a map would keep
+ * one record, and a rival must never disappear inside an assertion.
+ *
+ * @param {any} body
+ * @returns {Map<string, string>}
+ */
+function answerCoordinates(body) {
+  /** @type {Map<string, string>} */
+  const coordinates = new Map();
+  /** @param {string} coordinate @param {string} key */
+  const put = (coordinate, key) => {
+    assert.equal(coordinates.has(coordinate), false, `the answer carries ${coordinate} once`);
+    coordinates.set(coordinate, key);
+  };
+  for (const { contentName, key } of body?.keys?.contentKeys ?? []) {
+    put(`contentKeys.${contentName}`, key);
+  }
+  for (const { accessGroup, period, key } of body?.keys?.periodKeys ?? []) {
+    put(`periodKeys.${accessGroup}.${period}`, key);
+  }
+  return coordinates;
+}
+
+/**
+ * A complete answer: the success status, a body of `keys` alone, the content
+ * and period sections only, and exactly the expected keys at their coordinates
+ * in any record order.
+ *
+ * @param {{ status: number, body: any }} response
+ * @param {Map<string, string>} expected
+ */
+function assertCompleteAnswer(response, expected) {
+  assert.deepEqual(Object.keys(response).sort(), ["body", "status"]);
+  assert.equal(response.status, endpointStatuses.success);
+  assert.deepEqual(Object.keys(response.body), ["keys"]);
+  assert.deepEqual(Object.keys(response.body.keys).sort(), ["contentKeys", "periodKeys"]);
+  assert.deepEqual([...answerCoordinates(response.body)].sort(), [...expected].sort());
 }
 
 /**
@@ -124,15 +167,13 @@ export function issuerEndpointContract(binding, target, vector) {
   const driver = binding.targets["issuer-endpoint"].driver;
   const rawRequest = wireRequest(vector);
 
-  const expectedResponse = {
-    status: endpointStatuses.success,
-    body: {
-      keys: {
-        contentKeys: { bodytext: vector.expected.contentKeys.bodytext },
-        periodKeys: { premium: vector.expected.periodKeys.premium },
-      },
-    },
-  };
+  /** @type {Map<string, string>} */
+  const expectedAnswer = new Map([
+    ["contentKeys.bodytext", vector.expected.contentKeys.bodytext],
+    ...Object.entries(vector.expected.periodKeys.premium).map(
+      ([period, key]) => /** @type {[string, string]} */ ([`periodKeys.premium.${period}`, key]),
+    ),
+  ]);
 
   describe("portable issuer-endpoint contract", () => {
     test("the binding declares the direct v1 issuer-endpoint target", () => {
@@ -145,8 +186,7 @@ export function issuerEndpointContract(binding, target, vector) {
       const issuer = driver.createIssuerEndpoint(base);
       const response = await issuer.unlock(rawRequest, { principal, policyContext });
 
-      assert.deepEqual(Object.keys(response).sort(), ["body", "status"]);
-      assert.deepEqual(response, expectedResponse);
+      assertCompleteAnswer(response, expectedAnswer);
     });
 
     test("untrusted JWS header keys never replace the registered verification key", async () => {
@@ -168,7 +208,7 @@ export function issuerEndpointContract(binding, target, vector) {
           assert.equal(openings, 0, "unverified publisher input reaches no private opening key");
           assert.equal(Object.hasOwn(result.body, "keys"), false);
         } else {
-          assert.deepEqual(result, expectedResponse);
+          assertCompleteAnswer(result, expectedAnswer);
           assert.ok(openings > 0, "the registered-signature control reaches its provisioned key");
         }
       }
@@ -193,7 +233,7 @@ export function issuerEndpointContract(binding, target, vector) {
       const response = await driver
         .createIssuerEndpoint(base)
         .unlock(rawRequest, { principal, policyContext });
-      assert.deepEqual(response, expectedResponse);
+      assertCompleteAnswer(response, expectedAnswer);
       assert.equal(JSON.stringify(response).includes("not-present"), false);
     });
   });
@@ -216,21 +256,6 @@ export function issuerEndpointRejectVectorContract(binding, rejectVectors, sealV
     for (const [accessGroup, periods] of Object.entries(expected.keys.periodKeys ?? {})) {
       for (const t of /** @type {string[]} */ (periods)) {
         coordinates.add(`periodKeys.${accessGroup}.${t}`);
-      }
-    }
-    return coordinates;
-  }
-
-  /** @param {any} body @returns {Map<string, string>} */
-  function answerCoordinates(body) {
-    /** @type {Map<string, string>} */
-    const coordinates = new Map();
-    for (const [contentName, key] of Object.entries(body?.keys?.contentKeys ?? {})) {
-      coordinates.set(`contentKeys.${contentName}`, /** @type {string} */ (key));
-    }
-    for (const [accessGroup, periods] of Object.entries(body?.keys?.periodKeys ?? {})) {
-      for (const [t, key] of Object.entries(/** @type {any} */ (periods))) {
-        coordinates.set(`periodKeys.${accessGroup}.${t}`, /** @type {string} */ (key));
       }
     }
     return coordinates;
@@ -339,11 +364,18 @@ export function issuerEndpointRejectVectorContract(binding, rejectVectors, sealV
           if (!expected.has(coordinate)) assert.equal(serialized.includes(key), false);
         }
 
-        const errors = body.errors ?? {};
-        assert.deepEqual(Object.keys(errors).sort(), Object.keys(vector.expected.errors).sort());
-        for (const [coordinate, code] of Object.entries(vector.expected.errors)) {
-          assert.equal(errors[coordinate]?.error, code);
+        /** @type {Map<string, string>} */
+        const errors = new Map();
+        for (const { coordinate, error } of body.errors ?? []) {
+          assert.equal(errors.has(coordinate), false, `the answer reports ${coordinate} once`);
+          errors.set(coordinate, error);
         }
+        assert.deepEqual(
+          Object.fromEntries([...errors].sort(([a], [b]) => a.localeCompare(b))),
+          Object.fromEntries(
+            Object.entries(vector.expected.errors).sort(([a], [b]) => a.localeCompare(b)),
+          ),
+        );
       });
     }
   });

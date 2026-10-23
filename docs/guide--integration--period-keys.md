@@ -242,8 +242,8 @@ capabilities can open the sealed bytes. Issuer supply bounds which capabilities
 that issuer can grant. Reader policy chooses grants within that supply. A
 later denial cannot repair an overbroad publisher assignment.
 
-The client can find group selectors in
-`contentData[contentName].keys[accessGroup]`. No extra descriptive wire field is
+The client can find group selectors in the `accessGroup` fields of an item's
+`contentData` record `keys`. No extra descriptive wire field is
 needed, and an ordinary unlock request does not automatically carry all of
 `contentData`. Client hints are unsigned candidate requests, not authority.
 Neither a copied `contentData` object nor an envelope's valid group BIND proves
@@ -570,21 +570,24 @@ each operation above.
 
 ## The JSON path
 
-The [worked data-format example](design--data-format--example.md#dca-data-json)
-shows all of these members with readable placeholders.
+The [worked HTML delivery example](design--data-format--example.md#period-keys--chains--html-delivery)
+shows the metadata and exchange members with readable placeholders.
 
-- `contentData[contentName].keys[accessGroup][]` carries candidate item-key
-  wraps. Each candidate names `t`; its `nonce` and `key` wrap that item's
-  `contentKey` under the `periodKey[t]`.
-- `issuerData[issuerName].sealed.periodKeys[accessGroup][t]` carries the same
-  period key sealed for that issuer.
-- `issuerData[issuerName].sealed.contentKeys[contentName]` is the independent
-  baseline item content-key alternative: through it the issuer can return that
-  item's content key. Its presence does not select or disable the
-  period-key-wrap alternative.
-- A successful period-key result places granted period keys under
-  `keys.periodKeys[accessGroup][t]`. The client associates the response with
-  its request before retaining or using any returned key.
+- An item record's `keys` collection carries candidate item-key wraps as
+  `{accessGroup, period, key}` records. Each candidate names its label `t` in
+  `period`; its `key` wraps that item's `contentKey` under the `periodKey[t]`,
+  with a nonce that publisher and client derive from the render ID and the
+  candidate's coordinate instead of carrying it.
+- An issuer block's `sealed.periodKeys` carries the same period key sealed for
+  that issuer, as `{accessGroup, period, key}` records.
+- An issuer block's `sealed.contentKeys` carries `{contentName, key}` records,
+  the independent baseline item content-key alternative: through it the issuer
+  can return that item's content key. Its presence does not select or disable
+  the period-key-wrap alternative.
+- A successful period-key result places granted period keys in
+  `keys.periodKeys` as `{accessGroup, period, key}` records. The client
+  associates the response with its request before retaining or using any
+  returned key.
 
 Keys and ciphertexts remain base64url strings on the wire. Do not infer
 authority from object names, array order, the client clock, or mere member
@@ -702,7 +705,7 @@ The `flow` value has this shape:
 {
   "publisherDelivery": {
     "dcaData": {},
-    "sealedContent": {},
+    "sealedContent": [],
     "markup": "..."
   },
   "unlockRequest": {
@@ -735,7 +738,7 @@ To print the full diagnostic event history instead:
 node --input-type=module -e 'const { run } = await import("./js/demo/browser/scenario.js"); console.log(JSON.stringify(await run(), null, 2))'
 ```
 
-That output includes each render's `dcaData`, sealed-content map, markup and
+That output includes each render's `dcaData`, sealed-content collection, markup and
 decoded `resourceJWT`, followed by the unlock request, unlock response, cache
 observations and opened plaintext. The page's two markup JSON carriers are at
 `flow.publisherDelivery.dcaData` and `.sealedContent`; they are the exact
@@ -789,4 +792,4 @@ These are JavaScript implementation tests, not independent conformance proof.
 The [profile-test index](../js/test-profiles/README.md#dca-profile-period-keys)
 defines what the profile scenario proves and points to the focused suites that
 own its detailed rules. Run all profile scenarios with
-`corepack pnpm@10.23.0 --dir js run test:reference:profiles`.
+`(cd js && corepack pnpm run test:reference:profiles)`.

@@ -17,6 +17,8 @@ import { encrypt } from "../../core-shared/aead.js";
 import { base64urlEncode, utf8Decode, utf8Encode } from "../../core-shared/codec.js";
 import { dcaError } from "../../core-shared/errors.js";
 import { contentAadOctets } from "../support/contentAadOctets.js";
+import { wrapNonceOf } from "../support/contentKeyWrapNonceOctets.js";
+import { issuerBlockOf } from "../../test-lib/helpers/inspect.js";
 
 const PUB = "https://www.news-site.example";
 const UNLOCK_URL = "https://api.example.com/unlock";
@@ -59,8 +61,8 @@ async function fixture(groupOf, options = {}) {
   const periodKeys = {};
   /** @type {Record<string, string>} */
   const contentKeys = {};
-  /** @type {Record<string, any>} */
-  const contentData = {};
+  /** @type {any[]} */
+  const contentData = [];
   const ciphertexts = new Map();
   let seed = 40;
   const resource = { origin: PUB, resourceId: "article", renderId: "AAAAAAAAAAAAAAAAAAAAAA" };
@@ -69,19 +71,24 @@ async function fixture(groupOf, options = {}) {
     periodKeys[group] ??= new Uint8Array(16).fill(seed++);
     const contentKey = new Uint8Array(16).fill(seed++);
     contentKeys[name] = encoded(contentKey);
-    contentData[name] = {
+    contentData.push({
+      contentName: name,
       contentType: "text/plain",
       nonce: encoded(nonce),
-      keys: {
-        [group]: [
-          {
-            t: T_NOW,
-            nonce: encoded(nonce),
-            key: encoded(await encrypt(periodKeys[group], nonce, contentKey)),
-          },
-        ],
-      },
-    };
+      keys: [
+        {
+          accessGroup: group,
+          period: T_NOW,
+          key: encoded(
+            await encrypt(
+              periodKeys[group],
+              wrapNonceOf({ resourceJWT: jwt }, name, group, T_NOW),
+              contentKey,
+            ),
+          ),
+        },
+      ],
+    });
     const aad = contentAadOctets({ resourceJWT: jwt, contentData }, name);
     ciphertexts.set(
       name,
@@ -92,10 +99,12 @@ async function fixture(groupOf, options = {}) {
   const sealedFor = (issuer) => {
     const names = only[issuer] ?? Object.keys(groupOf);
     return {
-      contentKeys: Object.fromEntries(names.map((name) => [name, "AA"])),
-      periodKeys: Object.fromEntries(
-        [...new Set(names.map((name) => groupOf[name]))].map((group) => [group, { [T_NOW]: "AA" }]),
-      ),
+      contentKeys: names.map((name) => ({ contentName: name, key: "AA" })),
+      periodKeys: [...new Set(names.map((name) => groupOf[name]))].map((group) => ({
+        accessGroup: group,
+        period: T_NOW,
+        key: "AA",
+      })),
     };
   };
   const raw = {
@@ -103,12 +112,12 @@ async function fixture(groupOf, options = {}) {
     resource,
     resourceJWT: jwt,
     contentData,
-    issuerData: Object.fromEntries(
-      issuers.map((issuer) => [
-        issuer,
-        { keyId: "kid", unlockUrl: UNLOCK_URL, sealed: sealedFor(issuer) },
-      ]),
-    ),
+    issuerData: issuers.map((issuer) => ({
+      issuerName: issuer,
+      keyId: "kid",
+      unlockUrl: UNLOCK_URL,
+      sealed: sealedFor(issuer),
+    })),
   };
   mutate?.(raw, ciphertexts);
   return {
@@ -288,8 +297,12 @@ test("the walk reports each attempt with one token from the finite outcome vocab
     issuer_fault: () => ({ status: 500 }),
     issuer_denies: () => ({ status: 403 }),
     issuer_unavailable: () =>
-      ok({ keys: { contentKeys: {} }, notDelivered: { premium: { reason: "unavailable" } } }),
-    issuer_grants: () => ok({ keys: { contentKeys: { teaser: fx.contentKeys.teaser } } }),
+      ok({
+        keys: { contentKeys: [] },
+        notDelivered: [{ accessGroup: "premium", reason: "unavailable" }],
+      }),
+    issuer_grants: () =>
+      ok({ keys: { contentKeys: [{ contentName: "teaser", key: fx.contentKeys.teaser }] } }),
   };
   const posts = [];
   const client = createDeliveryClient({
@@ -376,7 +389,7 @@ test("a later independent indeterminate outcome clears only the identities it ad
         if (request.issuerName === A) throw Object.assign(new Error("off"), { code: "offline" });
         if (request.issuerName === B)
           throw Object.assign(new Error("opaque"), { code: "indeterminate_transport" });
-        return ok({ keys: { contentKeys: { third: fx.contentKeys.third } } });
+        return ok({ keys: { contentKeys: [{ contentName: "third", key: fx.contentKeys.third }] } });
       },
     },
   });
@@ -392,9 +405,20 @@ test("a later independent indeterminate outcome clears only the identities it ad
     posts.map((request) => request.issuerName),
     [A, B, C],
   );
-  assert.deepEqual(Object.keys(posts[1].sealed.contentKeys), ["teaser"], "B addressed teaser only");
-  assert.deepEqual(Object.keys(posts[2].sealed.contentKeys), ["third"], "teaser lost eligibility");
-  assert.deepEqual(Object.keys(posts[2].sealed.periodKeys ?? {}), ["sport"]);
+  assert.deepEqual(
+    posts[1].sealed.contentKeys.map((record) => record.contentName),
+    ["teaser"],
+    "B addressed teaser only",
+  );
+  assert.deepEqual(
+    posts[2].sealed.contentKeys.map((record) => record.contentName),
+    ["third"],
+    "teaser lost eligibility",
+  );
+  assert.deepEqual(
+    (posts[2].sealed.periodKeys ?? []).map((record) => record.accessGroup),
+    ["sport"],
+  );
   assert.deepEqual(result.missing, ["teaser"]);
   assert.deepEqual(
     result.attempts.map((attempt) => attempt.outcome),
@@ -473,8 +497,8 @@ describe("a route-level family report activates only its permitted continuation"
     [
       "an empty family beside unavailable, retry selected",
       {
-        keys: { contentKeys: {}, periodKeys: { premium: {} } },
-        notDelivered: { premium: { reason: "unavailable" } },
+        keys: { contentKeys: [], periodKeys: [] },
+        notDelivered: [{ accessGroup: "premium", reason: "unavailable" }],
       },
       true,
       { posts: [A, B], outcome: "unavailable" },
@@ -482,23 +506,26 @@ describe("a route-level family report activates only its permitted continuation"
     [
       "the same report without the retry choice",
       {
-        keys: { contentKeys: {}, periodKeys: { premium: {} } },
-        notDelivered: { premium: { reason: "unavailable" } },
+        keys: { contentKeys: [], periodKeys: [] },
+        notDelivered: [{ accessGroup: "premium", reason: "unavailable" }],
       },
       false,
       { posts: [A], outcome: "answered" },
     ],
     [
       "a denied family, retry selected",
-      { keys: { contentKeys: {} }, notDelivered: { premium: { reason: "denied" } } },
+      { keys: { contentKeys: [] }, notDelivered: [{ accessGroup: "premium", reason: "denied" }] },
       true,
       { posts: [A], outcome: "answered" },
     ],
     [
       "a keyed family beside the report",
       {
-        keys: { contentKeys: {}, periodKeys: { premium: { [T_NOW]: "!!" } } },
-        notDelivered: { premium: { reason: "unavailable" } },
+        keys: {
+          contentKeys: [],
+          periodKeys: [{ accessGroup: "premium", period: T_NOW, key: "!!" }],
+        },
+        notDelivered: [{ accessGroup: "premium", reason: "unavailable" }],
       },
       true,
       { posts: [A], outcome: "answered" },
@@ -519,7 +546,11 @@ describe("a route-level family report activates only its permitted continuation"
             posts.push(request);
             if (request.issuerName === A) return ok(firstAnswer);
             return ok({
-              keys: { periodKeys: { premium: { [T_NOW]: encoded(fx.periodKeys.premium) } } },
+              keys: {
+                periodKeys: [
+                  { accessGroup: "premium", period: T_NOW, key: encoded(fx.periodKeys.premium) },
+                ],
+              },
             });
           },
         },
@@ -539,8 +570,11 @@ describe("a route-level family report activates only its permitted continuation"
       if (expected.posts.length === 2) {
         // The report qualifies its family only: no item coordinate and no
         // unreported sibling family travels to the conditional route.
-        assert.deepEqual(posts[1].sealed.contentKeys, {});
-        assert.deepEqual(Object.keys(posts[1].sealed.periodKeys), ["premium"]);
+        assert.deepEqual(posts[1].sealed.contentKeys, []);
+        assert.deepEqual(
+          posts[1].sealed.periodKeys.map((record) => record.accessGroup),
+          ["premium"],
+        );
         assert.deepEqual(result.missing, ["third"]);
       } else {
         assert.deepEqual(result.missing, ["teaser", "third"]);
@@ -554,8 +588,8 @@ describe("a route-level family report activates only its permitted continuation"
     [
       "a malformed item key beside an admitted unavailable report, retry selected",
       () => ({
-        keys: { contentKeys: { third: "!!" } },
-        notDelivered: { premium: { reason: "unavailable" } },
+        keys: { contentKeys: [{ contentName: "third", key: "!!" }] },
+        notDelivered: [{ accessGroup: "premium", reason: "unavailable" }],
       }),
       ["teaser", "third"],
       ["third"],
@@ -563,8 +597,8 @@ describe("a route-level family report activates only its permitted continuation"
     [
       "an unsolicited item key beside an admitted unavailable report, retry selected",
       (/** @type {any} */ fx) => ({
-        keys: { contentKeys: { third: fx.contentKeys.third } },
-        notDelivered: { premium: { reason: "unavailable" } },
+        keys: { contentKeys: [{ contentName: "third", key: fx.contentKeys.third }] },
+        notDelivered: [{ accessGroup: "premium", reason: "unavailable" }],
       }),
       ["teaser"],
       [],
@@ -585,7 +619,11 @@ describe("a route-level family report activates only its permitted continuation"
             posts.push(request);
             if (request.issuerName === A) return ok(firstAnswer(fx));
             return ok({
-              keys: { periodKeys: { premium: { [T_NOW]: encoded(fx.periodKeys.premium) } } },
+              keys: {
+                periodKeys: [
+                  { accessGroup: "premium", period: T_NOW, key: encoded(fx.periodKeys.premium) },
+                ],
+              },
             });
           },
         },
@@ -599,8 +637,11 @@ describe("a route-level family report activates only its permitted continuation"
         [A, B],
       );
       assert.equal(result.attempts[0].outcome, "unavailable");
-      assert.deepEqual(posts[1].sealed.contentKeys, {});
-      assert.deepEqual(Object.keys(posts[1].sealed.periodKeys), ["premium"]);
+      assert.deepEqual(posts[1].sealed.contentKeys, []);
+      assert.deepEqual(
+        posts[1].sealed.periodKeys.map((record) => record.accessGroup),
+        ["premium"],
+      );
       assert.deepEqual(result.missing, missing);
       assert.equal(utf8Decode((await client.openLocal("teaser")).bytes), "teaser");
     });
@@ -620,10 +661,18 @@ test("an admitted wrong key does not turn family unavailability into conditional
         posts.push(request.issuerName);
         return request.issuerName === A
           ? ok({
-              keys: { contentKeys: { teaser: encoded(new Uint8Array(16).fill(99)) } },
-              notDelivered: { premium: { reason: "unavailable" } },
+              keys: {
+                contentKeys: [{ contentName: "teaser", key: encoded(new Uint8Array(16).fill(99)) }],
+              },
+              notDelivered: [{ accessGroup: "premium", reason: "unavailable" }],
             })
-          : ok({ keys: { periodKeys: { premium: { [T_NOW]: encoded(fx.periodKeys.premium) } } } });
+          : ok({
+              keys: {
+                periodKeys: [
+                  { accessGroup: "premium", period: T_NOW, key: encoded(fx.periodKeys.premium) },
+                ],
+              },
+            });
       },
     },
   });
@@ -654,9 +703,9 @@ test("unlock hands the host a report kept beside a rejected client-bound transpo
     transport: {
       async post() {
         return ok({
-          keys: { contentKeys: { teaser: { key: "wrapped" } } },
+          keys: { contentKeys: [{ contentName: "teaser", key: { key: "wrapped" } }] },
           transport: { method: "ECDH-P256" },
-          notDelivered: { premium: { reason: "unavailable" } },
+          notDelivered: [{ accessGroup: "premium", reason: "unavailable" }],
         });
       },
     },
@@ -684,7 +733,12 @@ test("a rejected whole-response transport is unusable and does not activate cond
       async post(_url, request) {
         posted.push(request.issuerName);
         return ok({
-          keys: { contentKeys: { teaser: fx.contentKeys.teaser, third: { key: "wrapped" } } },
+          keys: {
+            contentKeys: [
+              { contentName: "teaser", key: fx.contentKeys.teaser },
+              { contentName: "third", key: { key: "wrapped" } },
+            ],
+          },
         });
       },
     },
@@ -711,7 +765,7 @@ describe("a configured issuer the page carries no usable route for", () => {
       {
         issuers: [A, B],
         mutate: (raw) => {
-          raw.issuerData[A].unlockUrl = "http://api.example.com/unlock";
+          issuerBlockOf(raw, A).unlockUrl = "http://api.example.com/unlock";
         },
       },
     );
@@ -730,8 +784,10 @@ describe("a configured issuer the page carries no usable route for", () => {
           posts.push({ url, issuerName: request.issuerName });
           return ok({
             keys: {
-              contentKeys: {},
-              periodKeys: { premium: { [T_NOW]: encoded(fx.periodKeys.premium) } },
+              contentKeys: [],
+              periodKeys: [
+                { accessGroup: "premium", period: T_NOW, key: encoded(fx.periodKeys.premium) },
+              ],
             },
           });
         },
@@ -839,10 +895,12 @@ test("a malformed family report preserves real item opening but no reusable key 
         assert.equal(request.issuerName, A, "a contradictory report authorizes no fallback");
         return ok({
           keys: {
-            contentKeys: { granted: fx.contentKeys.granted },
-            periodKeys: { premium: { [T_NOW]: encoded(fx.periodKeys.premium) } },
+            contentKeys: [{ contentName: "granted", key: fx.contentKeys.granted }],
+            periodKeys: [
+              { accessGroup: "premium", period: T_NOW, key: encoded(fx.periodKeys.premium) },
+            ],
           },
-          notDelivered: { premium: { reason: "unavailable" } },
+          notDelivered: [{ accessGroup: "premium", reason: "unavailable" }],
         });
       },
     },
@@ -872,7 +930,10 @@ test("an invalid optional report does not clear previously held period capabilit
     cache,
     transport: {
       async post() {
-        return ok({ keys: { contentKeys: { granted: fx.contentKeys.granted } }, notDelivered: [] });
+        return ok({
+          keys: { contentKeys: [{ contentName: "granted", key: fx.contentKeys.granted }] },
+          notDelivered: [],
+        });
       },
     },
   });
@@ -904,7 +965,7 @@ test("reset during an independent issuer answer retires its walk before a later 
         posts.push(request.issuerName);
         if (request.issuerName === A) return { status: 403 };
         const response = entitled
-          ? ok({ keys: { contentKeys: { teaser: fx.contentKeys.teaser } } })
+          ? ok({ keys: { contentKeys: [{ contentName: "teaser", key: fx.contentKeys.teaser }] } })
           : { status: 401 };
         if (hold) {
           hold = false;
@@ -928,5 +989,50 @@ test("reset during an independent issuer answer retires its walk before a later 
   assert.deepEqual(posts, [A, B, B], "the retired walk never contacts C");
   entitled = true;
   await client.unlockRoutes(["teaser"], [route(B)]);
+  assert.equal(utf8Decode((await client.openLocal("teaser")).bytes), "teaser");
+});
+
+test("a failed recovered guess preserves configured unavailable retry", async () => {
+  const fx = await fixture({ teaser: "premium" });
+  const posts = [];
+  const client = createDeliveryClient({
+    reader: fx.reader,
+    issuerName: A,
+    unlockUrl: UNLOCK_URL,
+    relayPeriodKeys: true,
+    recoverySources: [
+      {
+        maxTrialsPerItem: 4,
+        async *candidates() {
+          yield { contentKey: new Uint8Array(16).fill(99), origin: { source: "stale-guess" } };
+        },
+        async clearReaderContext() {},
+      },
+    ],
+    transport: {
+      async post(_url, request) {
+        posts.push(request.issuerName);
+        return request.issuerName === A
+          ? ok({ keys: {}, notDelivered: [{ accessGroup: "premium", reason: "unavailable" }] })
+          : ok({
+              keys: {
+                periodKeys: [
+                  { accessGroup: "premium", period: T_NOW, key: encoded(fx.periodKeys.premium) },
+                ],
+              },
+            });
+      },
+    },
+  });
+  const result = await client.unlockRoutes(
+    ["teaser"],
+    [
+      { issuerName: A, unlockUrl: UNLOCK_URL, retryUnavailable: true },
+      { issuerName: B, unlockUrl: UNLOCK_URL },
+    ],
+  );
+  assert.deepEqual(posts, [A, B]);
+  assert.equal(result.attempts[0].outcome, "unavailable");
+  assert.deepEqual(result.missing, []);
   assert.equal(utf8Decode((await client.openLocal("teaser")).bytes), "teaser");
 });

@@ -162,8 +162,10 @@ async function unlock(render, network) {
  * @returns {string[]|null}
  */
 function grantedPeriods(body) {
-  const periods = body?.keys?.periodKeys?.[ACCESS_GROUP];
-  return periods ? Object.keys(periods) : null;
+  const periods = (body?.keys?.periodKeys ?? [])
+    .filter((/** @type {any} */ record) => record.accessGroup === ACCESS_GROUP)
+    .map((/** @type {any} */ record) => record.period);
+  return periods.length > 0 ? periods : null;
 }
 
 describe("a fallback issuer and a client whose clocks straddle a period boundary", () => {

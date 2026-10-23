@@ -54,6 +54,12 @@ import {
   article,
 } from "../demo/scenarios/fixtures.js";
 import { held } from "../test-lib/helpers/inspect.js";
+import {
+  contentKeyMap,
+  errorMap,
+  keyAt,
+  periodKeyMap,
+} from "../test-reference/support/namedRecords.js";
 import { seededRandom } from "../test-reference/support/keys.js";
 import { requestFor } from "../test-lib/harnesses/issuer-endpoint.js";
 import { unlockThroughAdmission } from "../test-lib/harnesses/unlockThroughAdmission.js";
@@ -387,7 +393,12 @@ describe("the naive issuer, run rather than described", () => {
       ...request,
       sealed: {
         ...request.sealed,
-        contentKeys: { [BODYTEXT]: request.sealed.contentKeys[PREMIUM] },
+        contentKeys: [
+          {
+            contentName: BODYTEXT,
+            key: keyAt(request.sealed.contentKeys, { contentName: PREMIUM }),
+          },
+        ],
       },
     };
     // One bad blob, answered as one: an error at the coordinate it was presented
@@ -400,8 +411,8 @@ describe("the naive issuer, run rather than described", () => {
       naivePublisherRegistration,
     );
     assert.equal(relabeledAnswer.status, 200);
-    assert.deepEqual(relabeledAnswer.body.keys.contentKeys, {});
-    assert.equal(relabeledAnswer.body.errors[BODYTEXT].error, "unseal_failed");
+    assert.deepEqual(relabeledAnswer.body.keys.contentKeys, []);
+    assert.equal(errorMap(relabeledAnswer.body.errors)[BODYTEXT].error, "unseal_failed");
 
     // Every grant on both sides was a policy decision, never an integrity one.
     assert.equal(servers.strict.stats().denials, 0);
@@ -513,8 +524,8 @@ describe("the naive issuer, run rather than described", () => {
     // unlock, and it carries premium and its vault alone.
     assert.equal(wire.posted.length - posts, 1, "one unlock for the remainder");
     const { request } = wire.posted.at(-1);
-    assert.deepEqual(Object.keys(request.sealed.contentKeys), [PREMIUM]);
-    assert.deepEqual(Object.keys(request.sealed.periodKeys), [VAULT_GROUP]);
+    assert.deepEqual(Object.keys(contentKeyMap(request.sealed.contentKeys)), [PREMIUM]);
+    assert.deepEqual(Object.keys(periodKeyMap(request.sealed.periodKeys)), [VAULT_GROUP]);
 
     assert.equal(second.unlock.ok, true);
     assert.equal(
@@ -691,7 +702,10 @@ describe("Two readers, one period", () => {
     // same keys: this issuer keeps no per-request state, so what a captured
     // request buys is whatever it bought the first time.
     assert.equal(replayed.status, 200);
-    assert.deepEqual(Object.keys(replayed.body.keys.periodKeys[ACCESS_GROUP]), [T_NOW, T_NEXT]);
+    assert.deepEqual(Object.keys(periodKeyMap(replayed.body.keys.periodKeys)[ACCESS_GROUP]), [
+      T_NOW,
+      T_NEXT,
+    ]);
 
     // The key itself crossing, which is the other way a period reaches a
     // second reader: one entry, filed at the coordinate it was granted at -
@@ -765,14 +779,15 @@ describe("Two readers, one period", () => {
 describe("Metering", () => {
   test("a delivered own inherited-name coordinate debits its metered grant", async () => {
     // `constructor` is an inherited member name that the identifier grammar
-    // admits, and a reader can present it. Seal a real key under that exact
-    // coordinate so delivery, rather than a failed unseal, decides whether
-    // the pending view is applied. A plain read of the map would answer out
-    // of Object.prototype with a function here, which is why every map off
-    // the wire is read with own-property lookup.
+    // admits, and a reader can present it as a record's contentName. Seal a
+    // real key under that exact coordinate so delivery, rather than a failed
+    // unseal, decides whether the pending view is applied. Any lookup that
+    // indexed a plain object by that name would answer out of Object.prototype
+    // with a function here.
     //
-    // `__proto__` is the neighbouring name the grammar refuses, and the
-    // second half of this test is that it never reaches a decision at all.
+    // `__proto__` is the neighbouring name the grammar refuses, and a record
+    // with a bad contentName refuses the whole request: the second half of
+    // this test is that it never reaches a decision at all.
     const meter = {
       decide(claims, requested, input) {
         return {
@@ -800,8 +815,7 @@ describe("Metering", () => {
         random: seededRandom(26),
       },
     );
-    request.sealed.contentKeys = JSON.parse('{"constructor":""}');
-    request.sealed.contentKeys.constructor = blob;
+    request.sealed.contentKeys = [{ contentName: "constructor", key: blob }];
 
     const answer = await network.post(servers.strict.unlockUrl, request, {
       credential: "reader",
@@ -810,8 +824,8 @@ describe("Metering", () => {
 
     assert.equal(answer.status, 200);
     assert.equal(
-      Object.hasOwn(answer.body.keys.contentKeys, "constructor"),
-      true,
+      typeof keyAt(answer.body.keys.contentKeys, { contentName: "constructor" }),
+      "string",
       JSON.stringify(answer.body),
     );
     assert.equal(servers.strict.stats().grants, 1, "an own delivered coordinate is a grant");
@@ -822,11 +836,10 @@ describe("Metering", () => {
     );
 
     // The name beside it. `__proto__` is not letter-initial, so identifier
-    // admission refuses the map it arrived in, and the meter sees nothing:
-    // no second grant, no second view, and no response map to write it into.
+    // admission refuses the record and with it the whole request, and the
+    // meter sees nothing: no second grant and no second view.
     const hostile = requestFor(page, STRICT, [BODYTEXT]);
-    hostile.sealed.contentKeys = JSON.parse('{"__proto__":""}');
-    hostile.sealed.contentKeys.__proto__ = blob;
+    hostile.sealed.contentKeys.push({ contentName: "__proto__", key: blob });
 
     const refused = await network.post(servers.strict.unlockUrl, hostile, {
       credential: "reader",
@@ -1137,7 +1150,7 @@ describe("A policy that does not answer", () => {
     );
 
     assert.equal(answer.status, 200);
-    assert.deepEqual(Object.keys(answer.body.keys.contentKeys), [BODYTEXT]);
+    assert.deepEqual(Object.keys(contentKeyMap(answer.body.keys.contentKeys)), [BODYTEXT]);
     assert.equal(
       answer.body.keys.periodKeys,
       undefined,

@@ -34,6 +34,7 @@
 
 import { DcaError, dcaError } from "../../core-shared/errors.js";
 import { own } from "../../core-shared/wire.js";
+import { contentRecordOf } from "../helpers/inspect.js";
 
 /**
  * @typedef {object} SealedPage
@@ -91,7 +92,7 @@ export async function openAndPlace(config) {
     // contentType is the page's own metadata beside the blob, read after the
     // decrypt rather than carried through it: it tells the placement script
     // text from binary and decides nothing about the crypto.
-    const record = own(own(page.dcaData, "contentData"), contentName);
+    const record = contentRecordOf(page.dcaData, contentName);
     place(contentName, decryptedData, own(record, "contentType"));
     placed.push(contentName);
   }

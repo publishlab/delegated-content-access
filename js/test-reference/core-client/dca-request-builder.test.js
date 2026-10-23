@@ -44,48 +44,98 @@ function pageData() {
     resource: { origin: "https://news.example", resourceId: "123456", renderId: "r-1" },
     resourceJWT: "header.payload.signature",
     periodGeometry: { chainsPerDay: 1, periodMinutes: 60 },
-    issuerData: {
-      [ISSUER_NAME]: {
+    issuerData: [
+      {
+        issuerName: ISSUER_NAME,
         keyId: KEY_ID,
         unlockUrl: UNLOCK_URL,
         sealed: {
-          contentKeys: { bodytext: "AQ", premium: "Ag" },
-          periodKeys: {
-            article: { "251023T1400": "Aw", "251023T1500": "BA" },
-            vault: { "251023T1500": "BQ" },
-          },
+          contentKeys: [
+            { contentName: "bodytext", key: "AQ" },
+            { contentName: "premium", key: "Ag" },
+          ],
+          periodKeys: [
+            { accessGroup: "article", period: "251023T1400", key: "Aw" },
+            { accessGroup: "article", period: "251023T1500", key: "BA" },
+            { accessGroup: "vault", period: "251023T1500", key: "BQ" },
+          ],
           // Canonical but inert: a relaying builder would carry these, so
           // the base builder's omission of them is observable.
-          chainKeys: {
-            article: { "251023T2300": "Bw", "251024T1100": "CA" },
-            vault: { "251023T2300": "CQ" },
-          },
+          chainKeys: [
+            { accessGroup: "article", cutoff: "251023T2300", key: "Bw" },
+            { accessGroup: "article", cutoff: "251024T1100", key: "CA" },
+            { accessGroup: "vault", cutoff: "251023T2300", key: "CQ" },
+          ],
         },
       },
-      [OTHER]: {
+      {
+        issuerName: OTHER,
         keyId: "k9",
         unlockUrl: "https://other.example/unlock",
-        sealed: { contentKeys: { bodytext: "Bg" } },
+        sealed: { contentKeys: [{ contentName: "bodytext", key: "Bg" }] },
       },
-    },
-    contentData: {
-      bodytext: {
+    ],
+    contentData: [
+      {
+        contentName: "bodytext",
         contentType: "text/html",
         nonce: "n1",
         aad: "123456|1|bodytext",
-        keys: {
-          article: [{ t: "251023T1400", nonce: "w-n1", key: "w1" }],
-          vault: [{ t: "251023T1500", nonce: "w-n2", key: "w2" }],
-        },
+        keys: [
+          { accessGroup: "article", period: "251023T1400", nonce: "w-n1", key: "w1" },
+          { accessGroup: "vault", period: "251023T1500", nonce: "w-n2", key: "w2" },
+        ],
       },
-      premium: {
+      {
+        contentName: "premium",
         contentType: "text/html",
         nonce: "n3",
         aad: "123456|1|premium",
-        keys: { vault: [{ t: "251023T1500", nonce: "w-n3", key: "w3" }] },
+        keys: [{ accessGroup: "vault", period: "251023T1500", nonce: "w-n3", key: "w3" }],
       },
-    },
+    ],
   };
+}
+
+/**
+ * The sealed member of one issuer block in a written-out page.
+ *
+ * @param {any} data
+ * @param {string} issuerName
+ * @returns {any}
+ */
+function sealedOf(data, issuerName) {
+  return data.issuerData.find((/** @type {any} */ block) => block.issuerName === issuerName).sealed;
+}
+
+/**
+ * The request's records for one section, keyed for comparison, in order.
+ *
+ * @param {any} records
+ * @param {string} [accessGroup] - keep only this family's records
+ * @returns {[string, string][]}
+ */
+function pairs(records, accessGroup) {
+  return (records ?? [])
+    .filter(
+      (/** @type {any} */ record) =>
+        accessGroup === undefined || record.accessGroup === accessGroup,
+    )
+    .map((/** @type {any} */ record) => [record.contentName ?? record.period, record.key]);
+}
+
+/**
+ * The distinct accessGroups the request's period records name, in order.
+ *
+ * @param {any} request
+ * @returns {string[]}
+ */
+function groupsOf(request) {
+  return [
+    ...new Set(
+      (request.sealed.periodKeys ?? []).map((/** @type {any} */ record) => record.accessGroup),
+    ),
+  ];
 }
 
 /** Build one request through the component that owns the selection. */
@@ -121,12 +171,12 @@ describe("What the client asks one issuer for", () => {
 
     const baseline = new DcaRequestBuilder().build(page, ISSUER_NAME, ["bodytext"]).toObject();
     assert.equal(Object.hasOwn(baseline.sealed, "periodKeys"), false);
-    assert.deepEqual(Object.keys(baseline.sealed.contentKeys), ["bodytext"]);
+    assert.deepEqual(pairs(baseline.sealed.contentKeys), [["bodytext", "AQ"]]);
 
     const withPeriodKeys = new DcaRequestBuilder({ relayPeriodKeys: true })
       .build(page, ISSUER_NAME, ["bodytext"])
       .toObject();
-    assert.deepEqual(Object.keys(withPeriodKeys.sealed.periodKeys), ["article", "vault"]);
+    assert.deepEqual(groupsOf(withPeriodKeys), ["article", "vault"]);
 
     assert.throws(
       () => new DcaRequestBuilder(/** @type {any} */ ({ relayPeriodKeys: "yes" })),
@@ -137,13 +187,12 @@ describe("What the client asks one issuer for", () => {
   test("only the requested contentNames are copied", () => {
     const built = build(pageData(), ISSUER_NAME, ["bodytext"]);
 
-    assert.deepEqual(Object.keys(built.sealed.contentKeys), ["bodytext"]);
-    assert.equal(built.sealed.contentKeys.bodytext, "AQ");
+    assert.deepEqual(built.sealed.contentKeys, [{ contentName: "bodytext", key: "AQ" }]);
 
-    // A name the page does not seal for this issuer carries no member,
-    // rather than a member holding undefined.
+    // A name the page does not seal for this issuer carries no record,
+    // rather than a record holding undefined.
     const missing = build(pageData(), ISSUER_NAME, ["no-such-item"]);
-    assert.deepEqual(missing.sealed.contentKeys, {});
+    assert.deepEqual(missing.sealed.contentKeys, []);
   });
 
   test("every accessGroup a requested item is wrapped under is included", () => {
@@ -151,14 +200,18 @@ describe("What the client asks one issuer for", () => {
     // either opens it, so both go and the issuer decides which it grants.
     const built = build(pageData(), ISSUER_NAME, ["bodytext"]);
 
-    assert.deepEqual(Object.keys(built.sealed.periodKeys), ["article", "vault"]);
+    assert.deepEqual(groupsOf(built), ["article", "vault"]);
 
     // One item in one family asks for one family.
     const one = build(pageData(), ISSUER_NAME, ["premium"]);
-    assert.deepEqual(Object.keys(one.sealed.periodKeys), ["vault"]);
+    assert.deepEqual(groupsOf(one), ["vault"]);
+
+    // Two items in one family relay that family once.
+    const both = build(pageData(), ISSUER_NAME, ["bodytext", "premium"]);
+    assert.deepEqual(pairs(both.sealed.periodKeys, "vault"), [["251023T1500", "BQ"]]);
   });
 
-  test("the whole period-key t map for an included group is copied, while extension carriers are not", () => {
+  test("the whole period-key family for an included group is copied, while extension carriers are not", () => {
     // The whole map goes: the client cannot tell which period the article it
     // reads next was rendered in, and the overlap key covers the boundary.
     const built = build(pageData(), ISSUER_NAME, ["bodytext"]);
@@ -169,17 +222,14 @@ describe("What the client asks one issuer for", () => {
     // and not a value filter dropping them.
     const page = pageData();
     assert.ok(page.periodGeometry);
-    for (const accessGroup of ["article", "vault"]) {
-      const family = page.issuerData[ISSUER_NAME].sealed.chainKeys[accessGroup];
-      for (const value of Object.values(family)) {
-        assert.notEqual(binaryStringBytes(value), null, `${accessGroup} ${value}`);
-      }
+    for (const { accessGroup, key } of sealedOf(page, ISSUER_NAME).chainKeys) {
+      assert.notEqual(binaryStringBytes(key), null, `${accessGroup} ${key}`);
     }
 
-    assert.deepEqual(built.sealed.periodKeys.article, {
-      "251023T1400": "Aw",
-      "251023T1500": "BA",
-    });
+    assert.deepEqual(pairs(built.sealed.periodKeys, "article"), [
+      ["251023T1400", "Aw"],
+      ["251023T1500", "BA"],
+    ]);
     assert.equal(Object.hasOwn(built.sealed, "chainKeys"), false);
     assert.equal(Object.hasOwn(built, "periodGeometry"), false);
 
@@ -189,43 +239,67 @@ describe("What the client asks one issuer for", () => {
     const request = new DcaRequestBuilder({ relayPeriodKeys: true })
       .build(new DcaData(data), ISSUER_NAME, ["bodytext"])
       .toObject();
-    request.sealed.periodKeys.article["251023T1400"] = "tampered";
-    assert.equal(data.issuerData[ISSUER_NAME].sealed.periodKeys.article["251023T1400"], "Aw");
+    request.sealed.periodKeys[0].key = "tampered";
+    assert.equal(sealedOf(data, ISSUER_NAME).periodKeys[0].key, "Aw");
+  });
+
+  test("rival records at one coordinate are all relayed, in page order", () => {
+    // Several records at one coordinate are candidate alternatives: the
+    // issuer opens each, so the builder drops none and picks no winner.
+    const data = pageData();
+    const sealed = sealedOf(data, ISSUER_NAME);
+    sealed.contentKeys.push({ contentName: "bodytext", key: "Dw" });
+    sealed.periodKeys.push({ accessGroup: "article", period: "251023T1400", key: "EA" });
+
+    const built = build(data, ISSUER_NAME, ["bodytext"]);
+    assert.deepEqual(pairs(built.sealed.contentKeys), [
+      ["bodytext", "AQ"],
+      ["bodytext", "Dw"],
+    ]);
+    assert.deepEqual(pairs(built.sealed.periodKeys, "article"), [
+      ["251023T1400", "Aw"],
+      ["251023T1500", "BA"],
+      ["251023T1400", "EA"],
+    ]);
+    // Asking for one item twice relays its records once each.
+    assert.deepEqual(build(data, ISSUER_NAME, ["bodytext", "bodytext"]).sealed, built.sealed);
   });
 
   test("lexically invalid period-key labels are not relayed and valid siblings remain", () => {
     const data = pageData();
-    data.issuerData[ISSUER_NAME].sealed.periodKeys.article = {
-      "251023T1400": "CA",
-      "251023T1415": "CQ",
-      "251023T14": "invalid-hour-alias",
-      "251023T1400ZZ|junk": "delimited",
-      "251023T1415bad": "AQ",
-      notadate: "text",
-    };
+    const sealed = sealedOf(data, ISSUER_NAME);
+    sealed.periodKeys = [
+      ...[
+        ["251023T1400", "CA"],
+        ["251023T1415", "CQ"],
+        ["251023T14", "AQ"],
+        ["251023T1400ZZ|junk", "AQ"],
+        ["251023T1415bad", "AQ"],
+        ["notadate", "AQ"],
+      ].map(([period, key]) => ({ accessGroup: "article", period, key })),
+      { accessGroup: "vault", period: "251023T1500", key: "BQ" },
+    ];
 
     const built = build(data, ISSUER_NAME, ["bodytext"]);
 
-    assert.deepEqual(built.sealed.periodKeys.article, {
-      "251023T1400": "CA",
-      "251023T1415": "CQ",
-    });
-    assert.deepEqual(built.sealed.periodKeys.vault, { "251023T1500": "BQ" });
+    assert.deepEqual(pairs(built.sealed.periodKeys, "article"), [
+      ["251023T1400", "CA"],
+      ["251023T1415", "CQ"],
+    ]);
+    assert.deepEqual(pairs(built.sealed.periodKeys, "vault"), [["251023T1500", "BQ"]]);
   });
 
   test("noncanonical sealed binary entries supply no request candidate", () => {
     const data = pageData();
-    data.issuerData[ISSUER_NAME].sealed.contentKeys.bodytext = "AQ==";
-    data.issuerData[ISSUER_NAME].sealed.periodKeys.article = {
-      "251023T1400": "AQ==",
-      "251023T1500": "BA",
-    };
+    const sealed = sealedOf(data, ISSUER_NAME);
+    sealed.contentKeys[0].key = "AQ==";
+    sealed.periodKeys[0].key = "AQ==";
 
     const built = build(data, ISSUER_NAME, ["bodytext"]);
 
-    assert.equal(Object.hasOwn(built.sealed.contentKeys, "bodytext"), false);
-    assert.deepEqual(built.sealed.periodKeys.article, { "251023T1500": "BA" });
-    assert.deepEqual(built.sealed.periodKeys.vault, { "251023T1500": "BQ" });
+    assert.deepEqual(built.sealed.contentKeys, []);
+    assert.deepEqual(pairs(built.sealed.periodKeys, "article"), [["251023T1500", "BA"]]);
+    assert.deepEqual(pairs(built.sealed.periodKeys, "vault"), [["251023T1500", "BQ"]]);
   });
 
   test("a group this issuer sealed no family for carries no member", () => {
@@ -239,13 +313,15 @@ describe("What the client asks one issuer for", () => {
       false,
       "an empty periodKeys is no periodKeys",
     );
-    assert.equal(built.sealed.contentKeys.bodytext, "Bg");
+    assert.deepEqual(pairs(built.sealed.contentKeys), [["bodytext", "Bg"]]);
     assert.equal(built.keyId, "k9");
   });
 
   test("a malformed selected block is unknown_issuer and the sibling issuer still builds", () => {
     // The format derives a request only from a block that is a non-array
-    // object with a `sealed` container and string `unlockUrl` and `keyId`.
+    // object with a `sealed` container and non-empty string `keyId`.
+    // The page may carry an unlockUrl hint; trusted route configuration
+    // supplies endpoint authority.
     // A page carrying one that is not asks that issuer nothing, and the
     // sibling block beside it builds its own request as it always did.
     const builder = new DcaRequestBuilder();
@@ -258,7 +334,11 @@ describe("What the client asks one issuer for", () => {
       { keyId: KEY_ID, unlockUrl: UNLOCK_URL, sealed: [] },
     ]) {
       const data = pageData();
-      data.issuerData[ISSUER_NAME] = /** @type {any} */ (block);
+      data.issuerData[0] = /** @type {any} */ (
+        block !== null && typeof block === "object" && !Array.isArray(block)
+          ? { issuerName: ISSUER_NAME, ...block }
+          : block
+      );
       const label = JSON.stringify(block);
 
       assert.throws(
@@ -266,39 +346,52 @@ describe("What the client asks one issuer for", () => {
         (/** @type {any} */ e) => e.code === "unknown_issuer",
         label,
       );
-      assert.equal(build(data, OTHER, ["bodytext"]).sealed.contentKeys.bodytext, "Bg", label);
+      assert.deepEqual(
+        pairs(build(data, OTHER, ["bodytext"]).sealed.contentKeys),
+        [["bodytext", "Bg"]],
+        label,
+      );
     }
   });
 
   test("no name the grammar refuses reaches the request", () => {
-    // The maps are admitted by the view, so what the builder relays is what
-    // the format admits: a rejected route map carries no member, a rejected
-    // cached-wrap map selects no accessGroup, and a name the caller asks
-    // about that no admitted map carries is simply absent.
+    // The collections are admitted by the view, so what the builder relays
+    // is what the format admits: a rejected route collection carries no
+    // record, a rejected cached-wrap collection selects no accessGroup, and a
+    // name the caller asks about that no admitted record carries is simply
+    // absent.
     const rejectedRouteMap = pageData();
-    rejectedRouteMap.issuerData[ISSUER_NAME].sealed.contentKeys = /** @type {any} */ ({
-      "2bad": "blob",
-      bodytext: "AQ",
-    });
+    sealedOf(rejectedRouteMap, ISSUER_NAME).contentKeys = [
+      { contentName: "2bad", key: "AQ" },
+      { contentName: "bodytext", key: "AQ" },
+    ];
     const withoutRoutes = build(rejectedRouteMap, ISSUER_NAME, ["bodytext"]);
-    assert.deepEqual(withoutRoutes.sealed.contentKeys, {}, "the rejected map carries no member");
+    assert.deepEqual(
+      withoutRoutes.sealed.contentKeys,
+      [],
+      "the rejected collection relays nothing",
+    );
 
     const rejectedWraps = pageData();
-    rejectedWraps.contentData.bodytext.keys = /** @type {any} */ ({
-      "bad|group": [{ t: "251023T1400", nonce: "w-n1", key: "w1" }],
-    });
+    rejectedWraps.contentData[0].keys = /** @type {any} */ ([
+      { accessGroup: "bad|group", period: "251023T1400", nonce: "w-n1", key: "w1" },
+    ]);
     const withoutGroups = build(rejectedWraps, ISSUER_NAME, ["bodytext"]);
     assert.equal(
       Object.hasOwn(withoutGroups.sealed, "periodKeys"),
       false,
       "and selects no accessGroup",
     );
-    assert.equal(withoutGroups.sealed.contentKeys.bodytext, "AQ", "while the item still asks");
+    assert.deepEqual(
+      pairs(withoutGroups.sealed.contentKeys),
+      [["bodytext", "AQ"]],
+      "while the item still asks",
+    );
 
     // A name the caller hands in that the grammar refuses finds nothing in
-    // an admitted map, so it carries no member either.
+    // an admitted collection, so it carries no record either.
     const asked = build(pageData(), ISSUER_NAME, ["bad|name", "__proto__", "bodytext"]);
-    assert.deepEqual(Object.keys(asked.sealed.contentKeys), ["bodytext"]);
+    assert.deepEqual(pairs(asked.sealed.contentKeys), [["bodytext", "AQ"]]);
   });
 
   test("the client key is offered when the client has one, and never otherwise", async () => {
@@ -313,7 +406,10 @@ describe("What the client asks one issuer for", () => {
 
   test("an issuer the page does not carry is unknown_issuer, as before", () => {
     const builder = new DcaRequestBuilder();
-    const withoutIssuer = { ...pageData(), issuerData: { [ISSUER_NAME]: null } };
+    const withoutIssuer = {
+      ...pageData(),
+      issuerData: [{ issuerName: ISSUER_NAME, keyId: null, sealed: {} }],
+    };
 
     for (const data of [pageData(), withoutIssuer]) {
       assert.throws(
@@ -369,11 +465,12 @@ describe("What the client asks one issuer for", () => {
     // member a builder could be tempted by - including a member invented to
     // look like a grant - leaves the request it built identical.
     const edited = pageData();
-    edited.contentData.bodytext.contentType = "application/json";
-    edited.contentData.bodytext.aad = "anything|1|else";
-    /** @type {any} */ (edited.contentData.bodytext).grant = "article";
-    edited.contentData.bodytext.keys.article[0].key = "moved";
-    edited.contentData.bodytext.keys.article[0].t = "251023T2300";
+    const item = /** @type {any} */ (edited.contentData[0]);
+    item.contentType = "application/json";
+    item.aad = "anything|1|else";
+    item.grant = "article";
+    item.keys[0].key = "moved";
+    item.keys[0].period = "251023T2300";
 
     assert.equal(
       JSON.stringify(build(edited, ISSUER_NAME, ["bodytext"])),
@@ -384,9 +481,7 @@ describe("What the client asks one issuer for", () => {
     // It does select with the item's own group membership: an item in one
     // family asks about one family, and the second item's record does not
     // join the first item's request.
-    assert.deepEqual(Object.keys(build(pageData(), ISSUER_NAME, ["premium"]).sealed.periodKeys), [
-      "vault",
-    ]);
+    assert.deepEqual(groupsOf(build(pageData(), ISSUER_NAME, ["premium"])), ["vault"]);
   });
 
   test("the optional readable resource mirror does not participate in the request", () => {
@@ -422,9 +517,12 @@ describe("What the client asks one issuer for", () => {
     );
     assert.throws(
       () =>
-        delegate(origin, { ...pageData(), issuerData: { [ISSUER_NAME]: null } }, ISSUER_NAME, [
-          "bodytext",
-        ]),
+        delegate(
+          origin,
+          { ...pageData(), issuerData: [{ issuerName: ISSUER_NAME, keyId: null, sealed: {} }] },
+          ISSUER_NAME,
+          ["bodytext"],
+        ),
       (/** @type {any} */ e) => e.code === "unknown_issuer",
     );
   });

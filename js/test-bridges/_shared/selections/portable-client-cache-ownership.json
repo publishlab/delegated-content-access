@@ -1,0 +1,21 @@
+{
+  "version": 1,
+  "testCount": 1,
+  "tests": [{ "file": "test-reference/core-client/cache-ownership.test.js" }],
+  "constructors": [
+    { "module": "adapter-client/PeriodKeyCache.js", "class": "PeriodKeyCache" },
+    { "module": "core-client/ContentKeyResolver.js", "class": "ContentKeyResolver" }
+  ],
+  "required": [
+    {
+      "module": "adapter-client/PeriodKeyCache.js",
+      "class": "PeriodKeyCache",
+      "members": ["put", "candidatesAt"]
+    },
+    {
+      "module": "core-client/ContentKeyResolver.js",
+      "class": "ContentKeyResolver",
+      "members": ["clearReaderContext"]
+    }
+  ]
+}

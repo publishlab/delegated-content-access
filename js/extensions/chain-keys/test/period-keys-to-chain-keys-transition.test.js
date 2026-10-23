@@ -53,6 +53,7 @@ import {
   UNLOCK_URL,
 } from "../../../demo/scenarios/fixtures.js";
 import { base64urlEncode, utf8Decode } from "../../../core-shared/codec.js";
+import { periodKeyMap } from "../../../test-reference/support/namedRecords.js";
 import {
   candidatesOffered,
   chainBrowser,
@@ -406,7 +407,9 @@ test("an unnamed unlock across the move asks the first issuer holding carriers f
     // A publisher still sealing the old supply for a period-key-only route, or an
     // issuer handing back a key it cached by coordinate, would return the old
     // period key here, and B would stay locked after the grant.
-    assert.deepEqual(exchanges[0].body.keys.periodKeys, { [ACCESS_GROUP]: newPeriodKeys });
+    assert.deepEqual(periodKeyMap(exchanges[0].body.keys.periodKeys), {
+      [ACCESS_GROUP]: newPeriodKeys,
+    });
     assert.equal(exchanges[0].body.keys.chainKeys, undefined);
 
     assert.equal(opened.error, null);
@@ -434,7 +437,7 @@ test("an unnamed unlock across the move asks the first issuer holding carriers f
     assert.equal(unlocked.issuerName, CHAIN_ISSUER_NAME);
     assert.equal(exchanges[0].body.keys.periodKeys, undefined);
     assert.deepEqual(
-      Object.keys(exchanges[0].body.keys.chainKeys[ACCESS_GROUP]),
+      Object.keys(periodKeyMap(exchanges[0].body.keys.chainKeys, "cutoff")[ACCESS_GROUP]),
       [coordinates.at(-1)],
       "one chain key, at the last coordinate the grant runs to",
     );

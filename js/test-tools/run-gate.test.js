@@ -159,3 +159,39 @@ test("partial and failing lanes print browser skip reasons without relaxing the 
     rmSync(directory, { recursive: true, force: true });
   }
 });
+
+for (const failing of ["check:consumer-types", "check:consumer-declarations"]) {
+  test(`the public gate fails when ${failing} fails`, () => {
+    const directory = mkdtempSync(join(tmpdir(), "dca-consumer-gate-"));
+    try {
+      const launcher = join(directory, "npm.cjs");
+      writeFileSync(
+        launcher,
+        `
+        const script = process.argv[3];
+        if (script === ${JSON.stringify(failing)}) {
+          console.error("deliberate consumer failure");
+          process.exitCode = 1;
+        } else {
+          const todos = script === "test:experiments" ? 8 : 0;
+          console.log("# tests " + (1 + todos) + "\\n# pass 1\\n# fail 0\\n# cancelled 0\\n# skipped 0\\n# todo " + todos);
+        }
+      `,
+      );
+      const child = spawnSync(
+        process.execPath,
+        [fileURLToPath(new URL("./run-gate.js", import.meta.url))],
+        {
+          env: { ...process.env, npm_execpath: launcher },
+          encoding: "utf8",
+        },
+      );
+      assert.ifError(child.error);
+      assert.equal(child.status, 1, child.stdout + child.stderr);
+      assert.match(child.stdout, /deliberate consumer failure/);
+      assert.match(child.stdout, /1 required public-gate stage\(s\) failed/);
+    } finally {
+      rmSync(directory, { recursive: true, force: true });
+    }
+  });
+}

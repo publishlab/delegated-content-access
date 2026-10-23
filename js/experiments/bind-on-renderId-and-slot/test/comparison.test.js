@@ -59,7 +59,7 @@ const PERIOD_KEYS = { [ACCESS_GROUP]: { [T]: new Uint8Array(16).fill(0x33) } };
 
 /** The two carriers of one binding value, and the blob width each produces. */
 const CARRIERS = [
-  { label: "ECDH P-256", algorithm: "ecdh-p256", blobBytes: 109 },
+  { label: "ECDH P-256", algorithm: "ecdh-p256", blobBytes: 97 },
   { label: "rsa-oaep", algorithm: "rsa-oaep", blobBytes: 256 },
 ];
 
@@ -147,7 +147,7 @@ describe("The grammar", () => {
           issuerName: "paywall",
           keyId: "2025-10",
           resourceJWT: "opaque-admission-only",
-          sealed: { contentKeys: {}, periodKeys: { [accessGroup]: { [t]: "opaque" } } },
+          sealed: { contentKeys: [], periodKeys: [{ accessGroup, period: t, key: "opaque" }] },
         }),
       );
     assert.equal(admit("premium1", T).kind, "admitted", "valid coordinate control");

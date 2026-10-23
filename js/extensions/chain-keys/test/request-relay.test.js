@@ -25,6 +25,24 @@ import { assertIssuerRequestBudget } from "../../../core-publisher/issuerRequest
 import { requestEntryCounts, requestLimits } from "../../../core-shared/requestLimits.js";
 import { world, BODYTEXT } from "../../../test-lib/fixtures/wire-policy-world.js";
 import { ISSUER_NAME } from "../../../demo/scenarios/fixtures.js";
+import { contentRecordOf, issuerBlockOf } from "../../../test-lib/helpers/inspect.js";
+import { keyAt, setKeyAt } from "../../../test-reference/support/namedRecords.js";
+
+/**
+ * The labels one group's requestedPeriodKeys records carry, in wire order.
+ *
+ * @param {any} requested
+ * @param {string} accessGroup
+ * @returns {string[]|undefined}
+ */
+function hintsFor(requested, accessGroup) {
+  const records = requested.filter(
+    (/** @type {any} */ record) => record.accessGroup === accessGroup,
+  );
+  return records.length === 0
+    ? undefined
+    : records.flatMap((/** @type {any} */ record) => record.periods);
+}
 
 const ISSUER_A = "issuer-a";
 const ISSUER_B = "issuer-b";
@@ -34,54 +52,64 @@ function pageData() {
     version: "1",
     resourceJWT: `e30.${base64urlEncode(utf8Encode(JSON.stringify({ renderId: "relay-render" })))}.c2lnbmF0dXJl`,
     periodGeometry: { chainsPerDay: 2, periodMinutes: 15 },
-    contentData: {
-      bodytext: {
+    contentData: [
+      {
+        contentName: "bodytext",
         contentType: "text/html",
         nonce: "n",
-        keys: {
-          premium: [{ t: "251023T1400", nonce: "pn", key: "pk" }],
-          vault: [{ t: "251023T1400", nonce: "vn", key: "vk", bind: "dca-bind-seal-omission" }],
-        },
+        keys: [
+          { accessGroup: "premium", period: "251023T1400", nonce: "pn", key: "pk" },
+          {
+            accessGroup: "vault",
+            period: "251023T1400",
+            nonce: "vn",
+            key: "vk",
+            bind: "dca-bind-seal-omission",
+          },
+        ],
       },
-      other: {
+      {
+        contentName: "other",
         contentType: "text/html",
         nonce: "n2",
-        keys: { unused: [{ t: "251023T1400", nonce: "un", key: "uk" }] },
+        keys: [{ accessGroup: "unused", period: "251023T1400", nonce: "un", key: "uk" }],
       },
-      second: {
+      {
+        contentName: "second",
         contentType: "text/html",
         nonce: "n3",
-        keys: {
-          premium: [
-            { t: "251023T1415", nonce: "p2n", key: "p2k" },
-            { t: "251023T1400", nonce: "p3n", key: "p3k" },
-          ],
-        },
+        keys: [
+          { accessGroup: "premium", period: "251023T1415", nonce: "p2n", key: "p2k" },
+          { accessGroup: "premium", period: "251023T1400", nonce: "p3n", key: "p3k" },
+        ],
       },
-    },
-    issuerData: {
-      [ISSUER_A]: {
+    ],
+    issuerData: [
+      {
+        issuerName: ISSUER_A,
         keyId: "a-key",
         unlockUrl: "https://a.example/unlock",
         sealed: {
-          contentKeys: { bodytext: "AQ" },
-          periodKeys: { premium: { "251023T1400": "Ag" } },
-          chainKeys: {
-            premium: { "251023T2345": "Aw" },
-            vault: { "251023T1755": "BA", "251023T2355": "BQ" },
-            unused: { "251023T2345": "Bg" },
-          },
+          contentKeys: [{ contentName: "bodytext", key: "AQ" }],
+          periodKeys: [{ accessGroup: "premium", period: "251023T1400", key: "Ag" }],
+          chainKeys: [
+            { accessGroup: "premium", cutoff: "251023T2345", key: "Aw" },
+            { accessGroup: "vault", cutoff: "251023T1755", key: "BA" },
+            { accessGroup: "vault", cutoff: "251023T2355", key: "BQ" },
+            { accessGroup: "unused", cutoff: "251023T2345", key: "Bg" },
+          ],
         },
       },
-      [ISSUER_B]: {
+      {
+        issuerName: ISSUER_B,
         keyId: "b-key",
         unlockUrl: "https://b.example/unlock",
         sealed: {
-          contentKeys: { bodytext: "CA" },
-          chainKeys: { premium: { "251023T2345": "CQ" } },
+          contentKeys: [{ contentName: "bodytext", key: "CA" }],
+          chainKeys: [{ accessGroup: "premium", cutoff: "251023T2345", key: "CQ" }],
         },
       },
-    },
+    ],
   };
 }
 
@@ -101,19 +129,19 @@ test("publisher budget covers the real chain relay plus bounded client hints", a
     chainsPerDay: 2,
     periodMinutes: 15,
   };
-  dcaData.issuerData[ISSUER_NAME].sealed.chainKeys = {
-    premium: { "251023T2345": "Aw" },
-  };
+  issuerBlockOf(dcaData, ISSUER_NAME).sealed.chainKeys = [
+    { accessGroup: "premium", cutoff: "251023T2345", key: "Aw" },
+  ];
   const chain = new ChainKeyRequestBuilder({ relayPeriodKeys: true })
     .build(new DcaData(dcaData), ISSUER_NAME, [BODYTEXT.name])
     .toObject();
   assert.equal(requestEntryCounts(chain.sealed).entries, 4);
   assert.equal(requestEntryCounts(chain.sealed).groups.get("premium"), 3);
-  assert.deepEqual(chain.sealed.chainKeys, dcaData.issuerData[ISSUER_NAME].sealed.chainKeys);
+  assert.deepEqual(chain.sealed.chainKeys, issuerBlockOf(dcaData, ISSUER_NAME).sealed.chainKeys);
 
   // requestedPeriodKeys is client-added metadata outside the publication.
   const { requestedPeriodKeys, ...withoutHints } = chain;
-  assert.ok(requestedPeriodKeys.premium.length > 0);
+  assert.ok(hintsFor(requestedPeriodKeys, "premium")?.length);
   const lowerBoundBytes = utf8Encode(JSON.stringify(withoutHints)).length;
   const fullBytes = utf8Encode(JSON.stringify(chain)).length;
   const hintBytes = fullBytes - lowerBoundBytes;
@@ -148,30 +176,33 @@ test("base emits neither chain-key member while relay copies only selected issue
   assert.equal(Object.hasOwn(base.sealed, "chainKeys"), false);
 
   const request = build(data).toObject();
-  assert.deepEqual(request.sealed.chainKeys, {
-    premium: { "251023T2345": "Aw" },
-    vault: { "251023T1755": "BA", "251023T2355": "BQ" },
-  });
+  assert.deepEqual(request.sealed.chainKeys, [
+    { accessGroup: "premium", cutoff: "251023T2345", key: "Aw" },
+    { accessGroup: "vault", cutoff: "251023T1755", key: "BA" },
+    { accessGroup: "vault", cutoff: "251023T2355", key: "BQ" },
+  ]);
   assert.equal(JSON.stringify(request).includes("CQ"), false);
   assert.equal(JSON.stringify(request).includes("Bg"), false);
   assert.deepEqual(request.periodGeometry, {
     chainsPerDay: 2,
     periodMinutes: 15,
   });
-  assert.deepEqual(request.sealed.periodKeys, { premium: { "251023T1400": "Ag" } });
-  assert.deepEqual(request.requestedPeriodKeys, {
-    premium: ["251023T1400"],
-    vault: ["251023T1400"],
-  });
+  assert.deepEqual(request.sealed.periodKeys, [
+    { accessGroup: "premium", period: "251023T1400", key: "Ag" },
+  ]);
+  assert.deepEqual(request.requestedPeriodKeys, [
+    { accessGroup: "premium", periods: ["251023T1400"] },
+    { accessGroup: "vault", periods: ["251023T1400"] },
+  ]);
 });
 
 test("article-coordinate hints union actual wraps across only unresolved items", () => {
   const request = build(pageData(), ISSUER_A, ["second", "bodytext"]).toObject();
-  assert.deepEqual(request.requestedPeriodKeys, {
-    premium: ["251023T1400", "251023T1415"],
-    vault: ["251023T1400"],
-  });
-  assert.equal(Object.hasOwn(request.requestedPeriodKeys, "unused"), false);
+  assert.deepEqual(request.requestedPeriodKeys, [
+    { accessGroup: "premium", periods: ["251023T1400", "251023T1415"] },
+    { accessGroup: "vault", periods: ["251023T1400"] },
+  ]);
+  assert.equal(hintsFor(request.requestedPeriodKeys, "unused"), undefined);
 });
 
 test("the wrapper relays period keys only when its base selector is explicitly true", () => {
@@ -194,10 +225,11 @@ test("the wrapper relays period keys only when its base selector is explicitly t
 
 test("one supplied member relays and empty selection remains an ordinary request", () => {
   const one = pageData();
-  delete one.contentData.bodytext.keys.vault;
-  assert.deepEqual(build(one).toObject().sealed.chainKeys, {
-    premium: { "251023T2345": "Aw" },
-  });
+  const item = contentRecordOf(one, "bodytext");
+  item.keys = item.keys.filter((/** @type {any} */ wrap) => wrap.accessGroup !== "vault");
+  assert.deepEqual(build(one).toObject().sealed.chainKeys, [
+    { accessGroup: "premium", cutoff: "251023T2345", key: "Aw" },
+  ]);
 
   const empty = build(pageData(), ISSUER_A, []).toObject();
   assert.equal(Object.hasOwn(empty, "periodGeometry"), false);
@@ -235,81 +267,98 @@ test("relay neither repairs nor forwards an invalid full geometry map", () => {
   assert.equal(Object.hasOwn(request.sealed, "chainKeys"), false);
   assert.equal(Object.hasOwn(request, "requestedPeriodKeys"), false);
   assert.deepEqual(request, base);
-  assert.deepEqual(request.sealed.periodKeys, { premium: { "251023T1400": "Ag" } });
+  assert.deepEqual(request.sealed.periodKeys, [
+    { accessGroup: "premium", period: "251023T1400", key: "Ag" },
+  ]);
 });
 
 test("relay preserves noncanonical chain values and filters invalid wrap labels before hints", () => {
   const data = pageData();
-  data.issuerData[ISSUER_A].sealed.chainKeys.premium = {
-    "251023T2345": "Aw",
-    "251023T2330": "not-base64!",
-  };
-  data.contentData.bodytext.keys.premium.push(
-    { t: "251023T14", nonce: "n", key: "k" },
-    { t: "251302T1415", nonce: "n", key: "k" },
+  const sealed = issuerBlockOf(data, ISSUER_A).sealed;
+  sealed.chainKeys = [
+    { accessGroup: "premium", cutoff: "251023T2345", key: "Aw" },
+    { accessGroup: "premium", cutoff: "251023T2330", key: "not-base64!" },
+    ...sealed.chainKeys.filter((/** @type {any} */ record) => record.accessGroup !== "premium"),
+  ];
+  contentRecordOf(data, "bodytext").keys.push(
+    { accessGroup: "premium", period: "251023T14", nonce: "n", key: "k" },
+    { accessGroup: "premium", period: "251302T1415", nonce: "n", key: "k" },
   );
 
   const request = build(data).toObject();
 
-  assert.deepEqual(request.sealed.chainKeys.premium, {
-    "251023T2345": "Aw",
-    "251023T2330": "not-base64!",
-  });
-  assert.deepEqual(request.requestedPeriodKeys.premium, ["251023T1400"]);
+  assert.deepEqual(
+    request.sealed.chainKeys.filter(
+      (/** @type {any} */ record) => record.accessGroup === "premium",
+    ),
+    [
+      { accessGroup: "premium", cutoff: "251023T2345", key: "Aw" },
+      { accessGroup: "premium", cutoff: "251023T2330", key: "not-base64!" },
+    ],
+  );
+  assert.deepEqual(hintsFor(request.requestedPeriodKeys, "premium"), ["251023T1400"]);
 });
 
 test("off-grid wrap hints cannot poison base siblings or an on-grid family hint", () => {
   const data = pageData();
-  data.contentData.bodytext.keys.premium.push({ t: "251023T1401", nonce: "n", key: "k" });
-  data.contentData.bodytext.keys.vault.push({ t: "251023T1401", nonce: "n", key: "k" });
+  contentRecordOf(data, "bodytext").keys.push(
+    { accessGroup: "premium", period: "251023T1401", nonce: "n", key: "k" },
+    { accessGroup: "vault", period: "251023T1401", nonce: "n", key: "k" },
+  );
   const request = build(data, ISSUER_A, ["bodytext", "second"]).toObject();
 
-  assert.deepEqual(request.sealed.contentKeys, { bodytext: "AQ" });
-  assert.deepEqual(request.sealed.periodKeys, { premium: { "251023T1400": "Ag" } });
-  assert.deepEqual(request.requestedPeriodKeys, {
+  assert.deepEqual(request.sealed.contentKeys, [{ contentName: "bodytext", key: "AQ" }]);
+  assert.deepEqual(request.sealed.periodKeys, [
+    { accessGroup: "premium", period: "251023T1400", key: "Ag" },
+  ]);
+  assert.deepEqual(request.requestedPeriodKeys, [
+    { accessGroup: "premium", periods: ["251023T1400", "251023T1415"] },
+    { accessGroup: "vault", periods: ["251023T1400"] },
+  ]);
+  assert.deepEqual(chainKeyRequestInput(new DcaRequest(request)).requestedPeriodKeys, {
     premium: ["251023T1400", "251023T1415"],
     vault: ["251023T1400"],
   });
-  assert.deepEqual(
-    chainKeyRequestInput(new DcaRequest(request)).requestedPeriodKeys,
-    request.requestedPeriodKeys,
-  );
 
   // A directly authored invalid hint still refuses issuer extension admission.
   // Filtering a relay hint is not permission to relax issuer admission.
-  request.requestedPeriodKeys.premium.push("251023T1401");
+  request.requestedPeriodKeys
+    .find((/** @type {any} */ record) => record.accessGroup === "premium")
+    .periods.push("251023T1401");
   assert.throws(
     () => chainKeyRequestInput(new DcaRequest(request)),
     (/** @type {any} */ error) => error.code === "binding_failed",
   );
 });
 
-test("the request snapshots selected chain maps and geometry without mutating the page", () => {
+test("the request snapshots selected chain records and geometry without mutating the page", () => {
   const data = pageData();
   const request = build(data).toObject();
-  request.sealed.chainKeys.premium["251023T2345"] = "changed";
+  const premiumCutoff = { accessGroup: "premium", cutoff: "251023T2345" };
+  setKeyAt(request.sealed.chainKeys, premiumCutoff, "changed");
   request.periodGeometry.periodMinutes = 99;
-  assert.equal(data.issuerData[ISSUER_A].sealed.chainKeys.premium["251023T2345"], "Aw");
+  assert.equal(keyAt(issuerBlockOf(data, ISSUER_A).sealed.chainKeys, premiumCutoff), "Aw");
   assert.equal(data.periodGeometry.periodMinutes, 15);
 });
 
-test("an own inherited-word family survives the selected extension map", () => {
+test("an inherited-word access group survives chain record selection", () => {
   // `constructor` is a name the grammar admits and every object also answers
-  // to, so a plain `map[name]` read cannot tell an own member of that name
-  // apart from the prototype's. The identifier rule rejects a map keyed by a
-  // name outside the grammar, so an accessGroup map can still carry this
-  // hazard and no other.
+  // to. A record carries it as a value, but a relay that indexes records by
+  // accessGroup in a plain object would read the prototype's member instead
+  // of an own family of that name.
   const data = pageData();
-  data.contentData.bodytext.keys = JSON.parse(
-    '{"constructor":[{"t":"251023T1400","nonce":"n","key":"k"}]}',
-  );
-  data.issuerData[ISSUER_A].sealed.chainKeys = JSON.parse(
-    '{"constructor":{"251023T2345":"Y2hhaW4"}}',
-  );
+  contentRecordOf(data, "bodytext").keys = [
+    { accessGroup: "constructor", period: "251023T1400", nonce: "n", key: "k" },
+  ];
+  issuerBlockOf(data, ISSUER_A).sealed.chainKeys = [
+    { accessGroup: "constructor", cutoff: "251023T2345", key: "Y2hhaW4" },
+  ];
 
   const request = build(data).toObject();
-  assert.equal(Object.hasOwn(request.sealed.chainKeys, "constructor"), true);
-  assert.deepEqual(request.sealed.chainKeys.constructor, { "251023T2345": "Y2hhaW4" });
+  assert.deepEqual(request.sealed.chainKeys, [
+    { accessGroup: "constructor", cutoff: "251023T2345", key: "Y2hhaW4" },
+  ]);
+  assert.deepEqual(hintsFor(request.requestedPeriodKeys, "constructor"), ["251023T1400"]);
   assert.deepEqual(request.periodGeometry, { chainsPerDay: 2, periodMinutes: 15 });
 });
 
@@ -330,14 +379,16 @@ test("PageLoad can select relay without a chain profile, derivation cache, or re
   const load = browser.load(
     rootFromPage({
       publisherOrigin: "https://news.example",
-      asJson: () => ({ ...data, sealedContent: {} }),
+      asJson: () => ({ ...data, sealedContent: [] }),
     }),
   );
 
   assert.equal((await load.unlock({ issuerName: ISSUER_A })).ok, false);
   assert.equal(sent.length, 1);
   assert.ok(sent[0].periodGeometry);
-  assert.ok(sent[0].sealed.chainKeys.premium);
+  assert.ok(
+    sent[0].sealed.chainKeys.some((/** @type {any} */ record) => record.accessGroup === "premium"),
+  );
 });
 
 test("relay refuses invalid or conflicting composition and its issuer view keeps the parsed object", () => {
@@ -398,7 +449,10 @@ test("a relay issuer admits chain-only supply although it encodes no chain respo
     version: "1",
     issuerName: "paywall",
     keyId: "2025-10",
-    sealed: { contentKeys: {}, chainKeys: { premium: { "251023T1400": "AAAA" } } },
+    sealed: {
+      contentKeys: [],
+      chainKeys: [{ accessGroup: "premium", cutoff: "251023T1400", key: "AAAA" }],
+    },
     periodGeometry: { chainsPerDay: 2, periodMinutes: 15 },
   });
   assert.equal(processor.admit(chainOnly).kind, "admitted");
@@ -417,24 +471,25 @@ test("relay emits a deterministic selector subset within family and request boun
     const date = new Date(Date.UTC(2025, 9, 1) + index * 60_000);
     return `${date.toISOString().slice(2, 10).replaceAll("-", "")}T${date.toISOString().slice(11, 16).replace(":", "")}`;
   });
-  for (const group of ["vault", "premium", "unused"]) {
-    data.contentData.bodytext.keys[group] = [...labels]
-      .reverse()
-      .map((t) => ({ t, nonce: "n", key: "k" }));
-  }
+  contentRecordOf(data, "bodytext").keys = ["vault", "premium", "unused"].flatMap((accessGroup) =>
+    [...labels].reverse().map((period) => ({ accessGroup, period, nonce: "n", key: "k" })),
+  );
   const requested = build(data).toObject().requestedPeriodKeys;
-  assert.deepEqual(requested.premium, labels.slice(0, 288));
-  assert.deepEqual(requested.unused, labels.slice(0, 224));
-  assert.equal(requested.vault, undefined);
+  assert.deepEqual(hintsFor(requested, "premium"), labels.slice(0, 288));
+  assert.deepEqual(hintsFor(requested, "unused"), labels.slice(0, 224));
+  assert.equal(hintsFor(requested, "vault"), undefined);
   assert.deepEqual(
     normalizeRequestedPeriodKeys(requested, () => ({
       kind: "valid",
       geometry: settleChainGeometry(data.periodGeometry),
     })),
-    requested,
+    { premium: labels.slice(0, 288), unused: labels.slice(0, 224) },
   );
   assert.equal(
-    Object.values(requested).reduce((n, entries) => n + entries.length, 0),
+    requested.reduce(
+      (/** @type {number} */ n, /** @type {any} */ record) => n + record.periods.length,
+      0,
+    ),
     512,
   );
 });
@@ -465,7 +520,7 @@ test("unknown-only sealed supply cannot admit a request to a selecting chain iss
         version: "1",
         issuerName: "paywall",
         keyId: "2025-10",
-        sealed: { contentKeys: {}, futureKeys: { premium: { "251023T1400": "AAAA" } } },
+        sealed: { contentKeys: [], futureKeys: { premium: { "251023T1400": "AAAA" } } },
       }),
     ),
     { kind: "failure", code: "binding_failed" },
@@ -474,7 +529,7 @@ test("unknown-only sealed supply cannot admit a request to a selecting chain iss
 
 test("chain relay preserves the selected builder's request-family and projection ports", () => {
   const data = pageData();
-  delete data.issuerData[ISSUER_A].sealed.chainKeys;
+  delete issuerBlockOf(data, ISSUER_A).sealed.chainKeys;
   const projection = {
     members: ["innerCoordinates"],
     sealedMembers: [],
@@ -501,4 +556,16 @@ test("chain relay preserves the selected builder's request-family and projection
   assert.ok(builder.keyFamilies);
   assert.deepEqual(builder.keyFamilies(request), { contentKeys: true, familyKeys: false });
   assert.equal(builder.routeProjection, projection);
+});
+
+test("chain relay preserves rivals while omitting unknown delivery members", () => {
+  const data = pageData();
+  const block = data.issuerData[0];
+  const original = block.sealed.chainKeys[0];
+  block.sealed.chainKeys = [
+    { ...original, publisherOnly: "do-not-relay" },
+    { ...original, key: "CQ", publisherOnly: "also-private" },
+  ];
+  const request = build(data);
+  assert.deepEqual(request.sealed.chainKeys, [original, { ...original, key: "CQ" }]);
 });

@@ -21,6 +21,7 @@ import {
   VIDEO,
   world,
 } from "../../test-lib/fixtures/endpoint-hardening-world.js";
+import { contentKeyMap, errorMap, periodKeyMap } from "../support/namedRecords.js";
 
 describe("Uniform error bodies", () => {
   test("a uniform issuer answers every refusal with one body, and only the status differs", async () => {
@@ -155,7 +156,7 @@ describe("Uniform error bodies", () => {
     );
 
     assert.equal(one.status, 200);
-    assert.deepEqual(Object.keys(one.body.keys.contentKeys), [BODYTEXT]);
+    assert.deepEqual(Object.keys(contentKeyMap(one.body.keys.contentKeys)), [BODYTEXT]);
     assert.deepEqual(
       JSON.stringify(one.body),
       JSON.stringify(other.body),
@@ -327,7 +328,7 @@ describe("The body cap, ahead of the parse", () => {
     // was its size and not the path it took.
     const served = await network.post(UNLOCK_URL, request, { from: {}, origin: PUBLISHER_ORIGIN });
     assert.equal(served.status, 200);
-    assert.deepEqual(Object.keys(served.body.keys.contentKeys), [BODYTEXT]);
+    assert.deepEqual(Object.keys(contentKeyMap(served.body.keys.contentKeys)), [BODYTEXT]);
     assert.equal(server.stats().grants, 1);
     assert.equal(log.entries.length, 1, "and nothing else was turned away");
   });
@@ -343,6 +344,31 @@ const LIFTED = Object.freeze({
   maxEntriesPerGroup: 4096,
 });
 
+/**
+ * The first period-key record of the article group: the blob the padding
+ * copies under invented periods and groups.
+ *
+ * @param {any} request
+ * @returns {{ accessGroup: string, period: string, key: string }}
+ */
+function firstArticleRecord(request) {
+  return request.sealed.periodKeys.find(
+    (/** @type {any} */ record) => record.accessGroup === ARTICLE_GROUP,
+  );
+}
+
+/**
+ * The period-key records a request carries under one group.
+ *
+ * @param {any} request
+ * @param {string} accessGroup
+ */
+function periodRecordsOf(request, accessGroup) {
+  return request.sealed.periodKeys.filter(
+    (/** @type {any} */ record) => record.accessGroup === accessGroup,
+  );
+}
+
 describe("The entry caps, ahead of the unseal", () => {
   test("an issuer with its caps lifted pays a private key operation for every padded entry", async () => {
     const { render, endpointWith } = await world();
@@ -350,11 +376,14 @@ describe("The entry caps, ahead of the unseal", () => {
 
     const request = requestFor(page, ISSUER_NAME, [BODYTEXT, PREMIUM]);
     const padded = structuredClone(request);
-    const [firstPeriod] = Object.keys(padded.sealed.periodKeys[ARTICLE_GROUP]);
-    const blob = padded.sealed.periodKeys[ARTICLE_GROUP][firstPeriod];
-    const honest = Object.keys(padded.sealed.periodKeys[ARTICLE_GROUP]).length;
+    const { key: blob } = firstArticleRecord(padded);
+    const honest = periodRecordsOf(padded, ARTICLE_GROUP).length;
     for (let index = 0; index < 500; index++) {
-      padded.sealed.periodKeys[ARTICLE_GROUP][`${String(index).padStart(6, "0")}T0000`] = blob;
+      padded.sealed.periodKeys.push({
+        accessGroup: ARTICLE_GROUP,
+        period: `${String(index).padStart(6, "0")}T0000`,
+        key: blob,
+      });
     }
 
     const { processor, endpoint, registration } = endpointWith({ limits: { ...LIFTED } });
@@ -385,9 +414,13 @@ describe("The entry caps, ahead of the unseal", () => {
     // under 500 other periods are 500 per-item failures beside the two real
     // ones. A caller learns from this exactly what it already knew.
     assert.equal(answer.status, 200);
-    assert.equal(Object.keys(answer.body.keys.periodKeys[ARTICLE_GROUP]).length, honest);
-    assert.equal(Object.keys(answer.body.errors).length, 500);
-    for (const failure of Object.values(answer.body.errors)) {
+    assert.equal(
+      Object.keys(periodKeyMap(answer.body.keys.periodKeys)[ARTICLE_GROUP]).length,
+      honest,
+    );
+    const errors = errorMap(answer.body.errors);
+    assert.equal(Object.keys(errors).length, 500);
+    for (const failure of Object.values(errors)) {
       assert.equal(/** @type {any} */ (failure).error, "unseal_failed");
     }
   });
@@ -398,12 +431,13 @@ describe("The entry caps, ahead of the unseal", () => {
 
     const request = requestFor(page, ISSUER_NAME, [BODYTEXT, PREMIUM]);
     const padded = structuredClone(request);
-    const [firstPeriod] = Object.keys(padded.sealed.periodKeys[ARTICLE_GROUP]);
-    const blob = padded.sealed.periodKeys[ARTICLE_GROUP][firstPeriod];
+    const { key: blob } = firstArticleRecord(padded);
     for (let index = 0; index < 500; index++) {
-      padded.sealed.periodKeys[ARTICLE_GROUP][
-        `991023T${String(Math.floor(index / 60)).padStart(2, "0")}${String(index % 60).padStart(2, "0")}`
-      ] = blob;
+      padded.sealed.periodKeys.push({
+        accessGroup: ARTICLE_GROUP,
+        period: `991023T${String(Math.floor(index / 60)).padStart(2, "0")}${String(index % 60).padStart(2, "0")}`,
+        key: blob,
+      });
     }
 
     // The padding is also past the body default, and this test is about the
@@ -442,29 +476,37 @@ describe("The entry caps, ahead of the unseal", () => {
     const page = await render();
 
     const request = requestFor(page, ISSUER_NAME, [BODYTEXT, PREMIUM]);
-    const [firstPeriod] = Object.keys(request.sealed.periodKeys[ARTICLE_GROUP]);
-    const blob = request.sealed.periodKeys[ARTICLE_GROUP][firstPeriod];
+    const { period: firstPeriod, key: blob } = firstArticleRecord(request);
 
     // Wide: many groups, none of them fat. The per-group cap never fires; the
     // request cap is what bounds it.
     const wide = structuredClone(request);
     for (let index = 0; index < 40; index++) {
-      wide.sealed.periodKeys[`group-${index}`] = { [firstPeriod]: blob };
+      wide.sealed.periodKeys.push({
+        accessGroup: `group-${index}`,
+        period: firstPeriod,
+        key: blob,
+      });
     }
 
     // Deep: one group, far past the per-group cap, and inside a request cap
     // generous enough to admit it.
     const deep = structuredClone(request);
     for (let index = 0; index < 20; index++) {
-      deep.sealed.periodKeys[ARTICLE_GROUP][
-        `991023T${String(Math.floor(index / 60)).padStart(2, "0")}${String(index % 60).padStart(2, "0")}`
-      ] = blob;
+      deep.sealed.periodKeys.push({
+        accessGroup: ARTICLE_GROUP,
+        period: `991023T${String(Math.floor(index / 60)).padStart(2, "0")}${String(index % 60).padStart(2, "0")}`,
+        key: blob,
+      });
     }
 
     // Six coordinates to start with: two contentKeys and two groups over two
     // periods. Wide is 46 of them in 42 groups, deep is 26 in two.
-    assert.equal(Object.keys(wide.sealed.periodKeys).length, 42);
-    assert.equal(Object.keys(deep.sealed.periodKeys[ARTICLE_GROUP]).length, 22);
+    assert.equal(
+      new Set(wide.sealed.periodKeys.map((/** @type {any} */ r) => r.accessGroup)).size,
+      42,
+    );
+    assert.equal(periodRecordsOf(deep, ARTICLE_GROUP).length, 22);
 
     // Both padded shapes stay well inside the lifted body cap, so the entry
     // caps this test names are the only thing that can refuse them.
@@ -501,7 +543,7 @@ describe("The entry caps, ahead of the unseal", () => {
       registration,
     );
     assert.equal(widePassed.status, 200, "thin groups pass a per-group cap");
-    assert.deepEqual(Object.keys(widePassed.body.keys.periodKeys), [ARTICLE_GROUP]);
+    assert.deepEqual(Object.keys(periodKeyMap(widePassed.body.keys.periodKeys)), [ARTICLE_GROUP]);
     assert.equal(widePassed.body.errors, undefined, "a group nobody granted is never opened");
     assert.equal(
       (await unlockThroughAdmission(perGroupProcessor, perGroupOnly, deep, registration)).body
@@ -527,7 +569,7 @@ describe("The entry caps, ahead of the unseal", () => {
       registration,
     );
     assert.equal(deepPassed.status, 200, "one fat group fits a wide request cap");
-    assert.equal(Object.keys(deepPassed.body.errors).length, 20);
+    assert.equal(Object.keys(errorMap(deepPassed.body.errors)).length, 20);
     assert.equal(
       (await unlockThroughAdmission(perRequestProcessor, perRequestOnly, wide, registration)).body
         .error,
@@ -553,7 +595,7 @@ test("refusal takes an admission failure, and refuses a success rather than 200-
       processMiss: async () => ({ kind: "success", document: {}, policyData: null }),
     }),
   );
-  const success = { kind: "success", document: { keys: { contentKeys: {} } }, policyData: null };
+  const success = { kind: "success", document: { keys: { contentKeys: [] } }, policyData: null };
 
   assert.throws(
     () => endpoint.refusal(/** @type {any} */ (success)),
@@ -653,13 +695,16 @@ for (const [name, driver] of /** @type {const} */ ([
     const dcaData = vector.expected.dcaData;
     const [issuerFixture] = vector.input.issuers;
     const [publisherFixture] = vector.input.signingKeys;
-    const valid = {
+    // Built per test, so a fixture that does not read cannot unregister the cases.
+    const validRequest = () => ({
       version: dcaData.version,
       issuerName: issuerFixture.issuerName,
       resourceJWT: dcaData.resourceJWT,
       keyId: issuerFixture.keyId,
-      sealed: dcaData.issuerData[issuerFixture.issuerName].sealed,
-    };
+      sealed: dcaData.issuerData.find(
+        (/** @type {any} */ record) => record.issuerName === issuerFixture.issuerName,
+      ).sealed,
+    });
 
     async function binding() {
       const privateKey = await driver.importIssuerPrivateKey(issuerFixture.privateKeyJwk);
@@ -705,7 +750,7 @@ for (const [name, driver] of /** @type {const} */ ([
     test("an unsupported version is refused before the binding parses or selects a registration", async () => {
       const { endpoint, reached } = await binding();
       for (const version of ["2", "", 1]) {
-        const raw = JSON.stringify({ ...valid, version });
+        const raw = JSON.stringify({ ...validRequest(), version });
         const { answer, parses } = await parsesOf(raw, () => endpoint.unlock(raw));
         assert.deepEqual(answer, { status: 400, body: { error: "bad_version" } }, String(version));
         assert.equal(parses, 1, `one parse, admission's own: ${version}`);
@@ -715,7 +760,7 @@ for (const [name, driver] of /** @type {const} */ ([
 
     test("an over-cap body answers 413 before any parse", async () => {
       const { endpoint, reached } = await binding();
-      const raw = JSON.stringify({ ...valid, padding: "x".repeat(5000) });
+      const raw = JSON.stringify({ ...validRequest(), padding: "x".repeat(5000) });
       const { answer, parses } = await parsesOf(raw, () => endpoint.unlock(raw));
       assert.deepEqual(answer, { status: 413, body: { error: "body_too_large" } });
       assert.equal(parses, 0);
@@ -724,10 +769,10 @@ for (const [name, driver] of /** @type {const} */ ([
 
     test("a valid request is parsed once and that admitted value is processed", async () => {
       const { endpoint, reached } = await binding();
-      const raw = JSON.stringify(valid);
+      const raw = JSON.stringify(validRequest());
       const { answer, parses } = await parsesOf(raw, () => endpoint.unlock(raw));
       assert.equal(/** @type {any} */ (answer).status, 200);
-      assert.ok(/** @type {any} */ (answer).body.keys.contentKeys.bodytext);
+      assert.ok(contentKeyMap(/** @type {any} */ (answer).body.keys.contentKeys).bodytext);
       assert.equal(parses, 1);
       assert.deepEqual(reached, { store: 1, policy: 1 });
     });

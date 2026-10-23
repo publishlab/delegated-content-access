@@ -28,22 +28,20 @@ import {
 
 export { MAX_CHAIN_MEMBERS_PER_FAMILY, MAX_CHAIN_MEMBERS_PER_MESSAGE };
 
-/**
- * The carrier reader's own container test, repeated here so this admission
- * tests the collection the way the reader tests it.
- *
- * @param {unknown} value
- */
+/** @param {unknown} value @returns {value is Record<string, unknown>} */
 function record(value) {
   return value !== null && typeof value === "object" && !Array.isArray(value);
 }
 
 /**
- * Admit the request's chain collection as a map before anything reads inside
- * it. A selecting issuer refuses the whole request here, the way base refuses a
- * request whose base coordinate cannot be spelled. The refusal comes before
- * policy, opening-key lookup and envelope opening, and it names no coordinate.
- * The narrower scopes, geometry, labels and bounds, stay inside the reader and
+ * Admit the request's chain collection as a record array before anything
+ * reads inside it. A selecting issuer refuses the whole request here, the way
+ * base refuses a request whose base coordinate cannot be spelled: a collection
+ * that is not an array, or a record whose `accessGroup` is missing or outside
+ * the name grammar. An element that is not a record names no family and is
+ * skipped; its siblings keep their scope. The refusal comes before policy,
+ * opening-key lookup and envelope opening, and it names no coordinate. The
+ * narrower scopes, geometry, labels and bounds, stay inside the reader and
  * answer for one family; a malformed sealed entry answers for its own member
  * coordinate, once that coordinate is authorized. An issuer that never
  * installed this source never reaches this function and ignores both members.
@@ -56,18 +54,19 @@ function record(value) {
  * @param {unknown} sealed - the request's `sealed` container as it arrived
  */
 function admitRequestChainCollection(sealed) {
-  if (!record(sealed) || !Object.hasOwn(/** @type {object} */ (sealed), CHAIN_KEYS_MEMBER)) return;
+  if (!record(sealed) || !Object.hasOwn(sealed, CHAIN_KEYS_MEMBER)) return;
   const collection = own(sealed, CHAIN_KEYS_MEMBER);
-  if (!record(collection)) {
-    throw dcaError("binding_failed", "a request sealed.chainKeys is a non-array object");
+  if (!Array.isArray(collection)) {
+    throw dcaError("binding_failed", "a request sealed.chainKeys is an array of records");
   }
-  for (const accessGroup of Object.keys(/** @type {object} */ (collection))) {
+  for (const element of collection) {
+    if (!record(element)) continue;
     try {
-      validateChainKeyAccessGroup(accessGroup);
+      validateChainKeyAccessGroup(/** @type {any} */ (own(element, "accessGroup")));
     } catch {
       throw dcaError(
         "binding_failed",
-        "a request sealed.chainKeys name follows the base name grammar",
+        "a request sealed.chainKeys record names an access group in the base name grammar",
       );
     }
   }

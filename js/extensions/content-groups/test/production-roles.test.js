@@ -8,9 +8,10 @@
 // Each test that replaces an assertion of the retired form says which: that
 // form carried a root `contentGroups` array, connector arrays with `null`
 // placeholders, a publisher-wide window seed and the response member
-// `contentGroupChains`. This form carries one named connector map per item, a
-// seed per content name and window under `contentWindowSeeds`, and the
-// response member `contentGroups`.
+// `contentGroupChains`. This form carries one `{group, connector}` record per
+// item route, a `{contentName, windowStart, key}` seed record under
+// `contentWindowSeeds`, and the response member `contentGroupKeys` as named
+// records. Record order on the wire means nothing, so lists compare sorted.
 import test from "node:test";
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
@@ -53,6 +54,17 @@ import {
   names,
   world,
 } from "./_lib/world.js";
+import {
+  connectorOf,
+  connectorsOf,
+  cutoffRecords,
+  find,
+  findAll,
+  groupRecords,
+  issuerBlock,
+  item as pageItem,
+  seedOf,
+} from "./_lib/records.js";
 
 const T13 = "261014T1300";
 const T14 = "261014T1400";
@@ -74,7 +86,8 @@ async function exchanged(w, published, options = {}) {
   const issuer = options.issuer ?? w.issuer();
   const reader = options.reader ?? w.reader();
   const client = reader.client(published, issuer, options);
-  const contentNames = options.names ?? Object.keys(published.page.contentData);
+  const contentNames =
+    options.names ?? published.page.contentData.map(({ contentName }) => contentName);
   const walk = await (options.attempt ? client.attempt : client.unlock)(contentNames);
   return { client, walk, reader, issuer, request: client.sent[0] };
 }
@@ -90,13 +103,43 @@ async function openWith({ page, sealedContent }, name, key) {
 /** The content key a period key recovers through one named connector. */
 async function recovered(published, name, group, periodKey) {
   const pad = await itemPad(periodKey, { renderId: renderIdOf(published), contentName: name });
-  return xor16(binaryStringBytes(published.page.contentData[name].connectors[group]), pad);
+  return xor16(binaryStringBytes(connectorOf(published.page, name, group)), pad);
 }
+/** Point one item's connector record for `group` at another value. */
+function setConnector(page, name, group, connector) {
+  find(connectorsOf(page, name), { group }).connector = connector;
+}
+/** The group names an item's connector records carry, sorted: record order means nothing. */
+const groupsOn = (page, name) =>
+  connectorsOf(page, name)
+    .map(({ group }) => group)
+    .sort();
 async function handleOf(name, window, { secret = SECRET, origin = PUBLISHER } = {}) {
   const seed = await contentNameSeed(secret, origin, GEOMETRY, name, window, CHAIN);
   return seedHandle(seed, GEOMETRY, window, CHAIN);
 }
-const chainKeysOf = (answer) => answer.body.contentGroups.chainKeys;
+const chainKeysOf = (answer) => answer.body.contentGroupKeys.chainKeys;
+/** The groups of one content name's chain-key records, sorted, one per record. */
+const chainGroups = (records, contentName) =>
+  findAll(records, { contentName })
+    .map(({ group }) => group)
+    .sort();
+/** The cutoffs of one content name and group's chain-key records, sorted, one per record. */
+const chainCutoffs = (records, contentName, group) =>
+  findAll(records, { contentName, group })
+    .map(({ cutoff }) => cutoff)
+    .sort();
+/** One chain-key record's key, or undefined. */
+const chainKeyAt = (records, contentName, group, cutoff) =>
+  find(records, { contentName, group, cutoff })?.key;
+/** One recovered item key of an answer body, or undefined. */
+const contentKeyOf = (body, contentName) =>
+  find(body.contentGroupKeys.contentKeys, { contentName })?.key;
+/** The windows of one content name's seed records in a request, sorted. */
+const requestWindows = (request, contentName) =>
+  findAll(request.sealed.contentWindowSeeds, { contentName })
+    .map(({ windowStart }) => windowStart)
+    .sort();
 
 // Replaces the frozen broad-seed vector and the `SEED_ID`, `CONNECTOR_ID` and
 // `CONSTRUCTION` literals: root's content-name seed anchor, the contract's
@@ -142,14 +185,14 @@ async function groupsCrossAllRoles(counts) {
     const published = await w.publish({ items: [item("bodytext", groups)] });
     const { page } = published;
     assert.equal(Object.hasOwn(page, "contentGroups"), false, "no root dictionary");
-    assert.deepEqual(Object.keys(page.contentData.bodytext.connectors), groups);
-    assert.equal(Object.hasOwn(page.contentData.bodytext, "aad"), false, "the record omits aad");
-    const envelope = page.issuerData.issuer.sealed.contentWindowSeeds.bodytext[T12];
-    assert.equal(binaryStringBytes(envelope).length, 125);
+    assert.deepEqual(groupsOn(page, "bodytext"), groups);
+    assert.equal(Object.hasOwn(pageItem(page, "bodytext"), "aad"), false, "the record omits aad");
+    const envelope = seedOf(page, "issuer", "bodytext", T12);
+    assert.equal(binaryStringBytes(envelope).length, 113);
     const { client, request, issuer } = await exchanged(w, published);
-    assert.deepEqual(request.requestedContentGroups, { bodytext: groups });
+    assert.deepEqual(request.requestedContentGroups, groupRecords({ bodytext: groups }));
     const [answer] = issuer.calls.answers;
-    assert.deepEqual(Object.keys(chainKeysOf(answer).bodytext), groups);
+    assert.deepEqual(chainGroups(chainKeysOf(answer), "bodytext"), groups);
     assert.equal(JSON.stringify(answer.body).includes(CONTRACT.wire.sealedSeeds), false);
     const seed = await contentNameSeed(SECRET, PUBLISHER, GEOMETRY, "bodytext", T12, CHAIN);
     assert.equal(JSON.stringify(answer.body).includes(base64urlEncode(seed)), false);
@@ -166,7 +209,7 @@ test("the client rebuilds the content AAD: a carried aad is ignored and a change
   const { reader, issuer } = await exchanged(w, published);
   const variant = (change) => {
     const changed = copy(published);
-    change(changed.page.contentData.bodytext);
+    change(pageItem(changed.page, "bodytext"));
     return reader.client(changed, issuer);
   };
   assert.equal(
@@ -184,17 +227,17 @@ test("the client rebuilds the content AAD: a carried aad is ignored and a change
 });
 
 // Replaces the `null` connector positions under the root dictionary: each
-// item's map names only the groups it has a route for.
+// item's records name only the groups it has a route for.
 test("named connector maps: sparse routes, exact denial, pooled grants and a later cached render", async () => {
   const w = await world();
   const items = [item("bodytext", ["sports", "politics"]), item("headline", ["politics"])];
   const published = await w.publish({ items });
-  assert.deepEqual(Object.keys(published.page.contentData.headline.connectors), ["politics"]);
+  assert.deepEqual(groupsOn(published.page, "headline"), ["politics"]);
   assert.equal(JSON.stringify(published.page.contentData).includes("null"), false);
   const sports = await exchanged(w, published, {
     narrowing: { requestedContentGroups: { bodytext: ["sports"] } },
   });
-  assert.deepEqual(sports.request.requestedContentGroups, { bodytext: ["sports"] });
+  assert.deepEqual(sports.request.requestedContentGroups, groupRecords({ bodytext: ["sports"] }));
   const politics = await exchanged(w, published, {
     narrowing: { requestedContentGroups: { bodytext: ["politics"], headline: ["politics"] } },
   });
@@ -242,26 +285,29 @@ test("the issuer verifies the JWT and independently authorizes requested names, 
   const { request } = await exchanged(w, published);
   assert.equal(request.version, "1");
   assert.equal(request.keyId, "issuer-k1");
-  assert.deepEqual(request.requestedContentGroups, { bodytext: ["sports"] });
-  assert.deepEqual(Object.keys(request.sealed.contentWindowSeeds.bodytext), [T12, NEXT]);
+  assert.deepEqual(request.requestedContentGroups, groupRecords({ bodytext: ["sports"] }));
+  assert.deepEqual(requestWindows(request, "bodytext"), [T12, NEXT]);
   for (const field of ["contentData", "requestedContentItems", "contentGroups"])
     assert.equal(Object.hasOwn(request, field), false, field);
-  assert.equal(request.requestedContentKeys.bodytext.group, "sports");
+  assert.deepEqual(
+    findAll(request.requestedContentKeys, { contentName: "bodytext" }).map(({ group }) => group),
+    ["sports"],
+  );
   assert.equal(request.renderPeriod, T12);
   assert.deepEqual(request.periodGeometry, GEOMETRY);
   const answer = (changed, options) => w.issuer(options).answer(changed);
   // Keep these authorization checks about group routes. The default request
-  // also offers one item connector, which remains an independent alternative.
+  // also offers the item's connectors, which remain independent alternatives.
   const groupOnly = copy(request);
-  groupOnly.requestedContentKeys = {};
+  groupOnly.requestedContentKeys = [];
 
   const badSig = copy(request);
   badSig.resourceJWT = `${badSig.resourceJWT.slice(0, -2)}aa`;
   assert.notEqual((await answer(badSig)).status, 200);
   // A group name on the page is presentation, not entitlement: policy decides.
   const unknown = copy(groupOnly);
-  unknown.requestedContentGroups = { bodytext: ["premium"] };
-  assert.deepEqual(Object.keys(chainKeysOf(await answer(unknown)).bodytext), ["premium"]);
+  unknown.requestedContentGroups = groupRecords({ bodytext: ["premium"] });
+  assert.deepEqual(chainGroups(chainKeysOf(await answer(unknown)), "bodytext"), ["premium"]);
   const refuseAll = chainPolicy({ authorize: () => false });
   assert.equal((await answer(unknown, { policy: refuseAll })).code, "bad_policy");
   for (const deniedLabel of [T12, T15, T18]) {
@@ -269,32 +315,32 @@ test("the issuer verifies the JWT and independently authorizes requested names, 
     assert.equal((await answer(groupOnly, { policy: denied })).code, "bad_policy", deniedLabel);
   }
   const narrow = copy(request);
-  narrow.requestedChainCutoffs = { [T12]: T14 };
-  assert.deepEqual(Object.keys(chainKeysOf(await answer(narrow)).bodytext.sports), [T14]);
+  narrow.requestedChainCutoffs = cutoffRecords({ [T12]: T14 });
+  assert.deepEqual(chainCutoffs(chainKeysOf(await answer(narrow)), "bodytext", "sports"), [T14]);
   const broaden = copy(request);
-  broaden.requestedChainCutoffs = { [T12]: T19 };
-  assert.deepEqual(Object.keys(chainKeysOf(await answer(broaden)).bodytext.sports), [T18]);
+  broaden.requestedChainCutoffs = cutoffRecords({ [T12]: T19 });
+  assert.deepEqual(chainCutoffs(chainKeysOf(await answer(broaden)), "bodytext", "sports"), [T18]);
   // An explicit empty group list refuses; so does a request that asks nothing.
   const emptyList = copy(groupOnly);
-  emptyList.requestedContentGroups = { bodytext: [] };
+  emptyList.requestedContentGroups = groupRecords({ bodytext: [] });
   assert.equal((await answer(emptyList)).code, "binding_failed");
   const asksNothing = copy(groupOnly);
   delete asksNothing.requestedContentGroups;
   assert.notEqual((await answer(asksNothing)).status, 200);
   // No selected window leaves the policy nothing to grant.
   const noWindows = copy(groupOnly);
-  noWindows.requestedChainCutoffs = {};
+  noWindows.requestedChainCutoffs = [];
   assert.equal((await answer(noWindows)).code, "denied");
   const local = await exchanged(w, published, {
     narrowing: { requestedContentItems: ["bodytext"] },
   });
   assert.equal(Object.hasOwn(local.request, "requestedContentItems"), false);
-  assert.deepEqual(local.request.requestedContentGroups, { bodytext: ["sports"] });
+  assert.deepEqual(local.request.requestedContentGroups, groupRecords({ bodytext: ["sports"] }));
 });
 
 // Replaces the pending-association checks on `contentGroupChains`, the
 // foreign-window check and the above-cutoff check: the client admits the
-// `contentGroups` answer against its request, all or nothing, before any cache.
+// `contentGroupKeys` answer against its request, all or nothing, before any cache.
 test("the pending request bounds the answer's names, groups, windows, positions and ceilings before any cache", async () => {
   const w = await world();
   const published = await w.publish({ items: [item("bodytext", ["sports", "politics"])] });
@@ -303,37 +349,48 @@ test("the pending request bounds the answer's names, groups, windows, positions 
     requestedChainCutoffs: { [T12]: T14 },
   };
   const wide = (await exchanged(w, published)).issuer.calls.answers[0].body;
-  const sportsKey = wide.contentGroups.chainKeys.bodytext.sports[T18];
+  const sportsKey = chainKeyAt(wide.contentGroupKeys.chainKeys, "bodytext", "sports", T18);
+  const sportsRecords = (body) =>
+    findAll(body.contentGroupKeys.chainKeys, { contentName: "bodytext", group: "sports" });
+  /** Replace the bodytext sports records with one record at `cutoff`. */
+  const sportsOnlyAt = (body, cutoff) => {
+    body.contentGroupKeys.chainKeys = body.contentGroupKeys.chainKeys
+      .filter((record) => !sportsRecords(body).includes(record))
+      .concat([{ contentName: "bodytext", group: "sports", cutoff, key: sportsKey }]);
+  };
   for (const [label, rewrite] of [
     [
       "foreign group",
       (body) =>
-        (body.contentGroups.chainKeys.bodytext.politics =
-          body.contentGroups.chainKeys.bodytext.sports),
+        body.contentGroupKeys.chainKeys.push(
+          ...sportsRecords(body).map((record) => ({ ...record, group: "politics" })),
+        ),
     ],
     [
       "foreign name",
-      (body) => (body.contentGroups.chainKeys.headline = body.contentGroups.chainKeys.bodytext),
+      (body) =>
+        body.contentGroupKeys.chainKeys.push(
+          ...findAll(body.contentGroupKeys.chainKeys, { contentName: "bodytext" }).map(
+            (record) => ({
+              ...record,
+              contentName: "headline",
+            }),
+          ),
+        ),
     ],
     [
       "redundant wrapper",
-      (body) =>
-        (body.contentGroups.chainKeys.bodytext.sports[T14] = {
-          position: 1,
-          key: body.contentGroups.chainKeys.bodytext.sports[T14],
-        }),
+      (body) => {
+        const record = find(body.contentGroupKeys.chainKeys, {
+          contentName: "bodytext",
+          group: "sports",
+          cutoff: T14,
+        });
+        record.key = { position: 1, key: record.key };
+      },
     ],
-    [
-      "above the ceiling",
-      (body) => (body.contentGroups.chainKeys.bodytext.sports = { [T18]: sportsKey }),
-    ],
-    [
-      "foreign window",
-      (body) =>
-        (body.contentGroups.chainKeys.bodytext.sports = {
-          [NEXT]: sportsKey,
-        }),
-    ],
+    ["above the ceiling", (body) => sportsOnlyAt(body, T18)],
+    ["foreign window", (body) => sportsOnlyAt(body, NEXT)],
   ]) {
     const reader = w.reader();
     const { client } = await exchanged(w, published, {
@@ -356,10 +413,14 @@ test("a corrupted first chain route is skipped and a valid later group opens", a
   const published = await w.publish({ items: [item("bodytext", ["sports", "politics"])] });
   const { client } = await exchanged(w, published, {
     answered: (body) => {
-      const entry = body.contentGroups.chainKeys.bodytext.sports[T18];
-      const bytes = binaryStringBytes(entry);
+      const record = find(body.contentGroupKeys.chainKeys, {
+        contentName: "bodytext",
+        group: "sports",
+        cutoff: T18,
+      });
+      const bytes = binaryStringBytes(record.key);
       bytes[0] ^= 1;
-      body.contentGroups.chainKeys.bodytext.sports[T18] = base64urlEncode(bytes);
+      record.key = base64urlEncode(bytes);
       return body;
     },
   });
@@ -390,9 +451,12 @@ test("a trusted maxGroups admits 1025 groups while the default refuses; retired 
     issuer: w.issuer({ limits, policy: first }),
     reader: w.reader({ limits }),
   });
-  assert.equal(request.requestedContentGroups.bodytext.length, 1025);
+  assert.equal(
+    find(request.requestedContentGroups, { contentName: "bodytext" }).groups.length,
+    1025,
+  );
   assert.equal(issuer.calls.decide[0].contentGroups.bodytext.groups.length, 1025);
-  assert.deepEqual(Object.keys(chainKeysOf(issuer.calls.answers[0]).bodytext), [groups[0]]);
+  assert.deepEqual(chainGroups(chainKeysOf(issuer.calls.answers[0]), "bodytext"), [groups[0]]);
   assert.equal(await client.open("bodytext"), "content:bodytext");
 });
 
@@ -403,11 +467,15 @@ test("raw request and answer bounds refuse surplus entries before verification, 
   const { request } = await exchanged(w, published);
   const reads = w.verifierReads();
   const surplusSeeds = copy(request);
-  surplusSeeds.sealed.contentWindowSeeds.bodytext[NOON2] = "not an envelope";
+  surplusSeeds.sealed.contentWindowSeeds.push({
+    contentName: "bodytext",
+    windowStart: NOON2,
+    key: "not an envelope",
+  });
   assert.equal((await w.issuer().answer(surplusSeeds)).code, "too_many_entries");
   const surplusNames = copy(request);
-  surplusNames.requestedContentGroups = Object.fromEntries(
-    names(65).map((name) => [name, ["sports"]]),
+  surplusNames.requestedContentGroups = groupRecords(
+    Object.fromEntries(names(65).map((name) => [name, ["sports"]])),
   );
   assert.equal((await w.issuer().answer(surplusNames)).code, "too_many_entries");
   assert.equal(w.verifierReads(), reads, "no bound reached the signature verifier");
@@ -416,8 +484,10 @@ test("raw request and answer bounds refuse surplus entries before verification, 
   const { client } = await exchanged(w, published, {
     reader,
     answered: (body) => {
-      const groups = body.contentGroups.chainKeys.bodytext;
-      for (const name of names(2048)) groups[name] = { [T18]: groups.sports[T18] };
+      const records = body.contentGroupKeys.chainKeys;
+      const key = chainKeyAt(records, "bodytext", "sports", T18);
+      for (const group of names(2048))
+        records.push({ contentName: "bodytext", group, cutoff: T18, key });
       return body;
     },
   });
@@ -435,7 +505,7 @@ test("publication snapshots item groups, plaintext and the retained secret befor
   items[0].contentGroups[0] = "politics";
   items[0].value = "changed";
   const published = await pending;
-  assert.deepEqual(Object.keys(published.page.contentData.bodytext.connectors), ["sports"]);
+  assert.deepEqual(groupsOn(published.page, "bodytext"), ["sports"]);
   const handle = await handleOf("bodytext", T12);
   const key = await recovered(
     published,
@@ -474,7 +544,9 @@ test("raw future and wrong-window Step and Leaf probes fail body GCM, while plan
   const w = await world();
   const source = await w.publish({ items: [item("bodytext", ["sports"])] });
   const { issuer } = await exchanged(w, source);
-  const held = binaryStringBytes(chainKeysOf(issuer.calls.answers[0]).bodytext.sports[T18]);
+  const held = binaryStringBytes(
+    chainKeyAt(chainKeysOf(issuer.calls.answers[0]), "bodytext", "sports", T18),
+  );
   const future = await w.publish({ at: T19, items: [item("bodytext", ["sports"], "future")] });
   await assert.rejects(
     chainKeyFromChainKey({
@@ -507,7 +579,7 @@ test("raw future and wrong-window Step and Leaf probes fail body GCM, while plan
     renderId: renderIdOf(future),
     contentName: "bodytext",
   });
-  planted.page.contentData.bodytext.connectors.sports = base64urlEncode(xor16(ckey, wrongPad));
+  setConnector(planted.page, "bodytext", "sports", base64urlEncode(xor16(ckey, wrongPad)));
   assert.equal(
     await openWith(planted, "bodytext", await recovered(planted, "bodytext", "sports", rawFuture)),
     "future",
@@ -544,10 +616,15 @@ test("raw future and wrong-window Step and Leaf probes fail body GCM, while plan
     await (await handleOf("bodytext", NEXT)).periodKey("sports", NEXT),
   );
   const plantedMidnight = copy(midnight);
-  plantedMidnight.page.contentData.bodytext.connectors.sports = base64urlEncode(
-    xor16(
-      midnightKey,
-      await itemPad(wrongWindow, { renderId: renderIdOf(midnight), contentName: "bodytext" }),
+  setConnector(
+    plantedMidnight.page,
+    "bodytext",
+    "sports",
+    base64urlEncode(
+      xor16(
+        midnightKey,
+        await itemPad(wrongWindow, { renderId: renderIdOf(midnight), contentName: "bodytext" }),
+      ),
     ),
   );
   assert.equal(
@@ -566,8 +643,8 @@ test("raw future and wrong-window Step and Leaf probes fail body GCM, while plan
 test("a connector-only item carries no ordinary key; an item with no route refuses before sealing", async () => {
   const w = await world();
   const published = await w.publish({ items: [item("bodytext", ["sports"])] });
-  assert.equal(Object.hasOwn(published.page.contentData.bodytext, "keys"), false);
-  assert.equal(Object.hasOwn(published.page.issuerData.issuer.sealed, "contentKeys"), false);
+  assert.equal(Object.hasOwn(pageItem(published.page, "bodytext"), "keys"), false);
+  assert.equal(Object.hasOwn(issuerBlock(published.page, "issuer").sealed, "contentKeys"), false);
   // An empty group list is ordinary only, and no ordinary route is supplied.
   await assert.rejects(w.publish({ items: [item("bodytext", [])] }), /route/);
   // The only seed is for the next window, so the render window has no route.
@@ -601,12 +678,13 @@ test("a seed envelope binds publisher, render, issuer, content name, window and 
     new TextDecoder().decode(await contentNameSeedAad(binding, CHAIN)),
     `["dca-bind-content-name-seed","${namespace}","${binding.renderId}","issuer","bodytext","261014T1200",2,60]`,
   );
-  const seeds = published.page.issuerData.issuer.sealed.contentWindowSeeds;
+  const seedAt = (contentName, windowStart) =>
+    seedOf(published.page, "issuer", contentName, windowStart);
   const privateKey = w.opening.issuer.privateKey;
   const open = async (envelope, change) =>
     openSeed(envelope, privateKey, await contentNameSeedAad({ ...binding, ...change }, CHAIN));
   assert.deepEqual(
-    await open(seeds.bodytext[T12], {}),
+    await open(seedAt("bodytext", T12), {}),
     await contentNameSeed(SECRET, PUBLISHER, GEOMETRY, "bodytext", T12, CHAIN),
   );
   for (const change of [
@@ -618,17 +696,18 @@ test("a seed envelope binds publisher, render, issuer, content name, window and 
     { periodGeometry: { chainsPerDay: 4, periodMinutes: 60 } },
   ])
     await assert.rejects(
-      open(seeds.bodytext[T12], change),
+      open(seedAt("bodytext", T12), change),
       { name: "OperationError" },
       JSON.stringify(change),
     );
-  await assert.rejects(open(seeds.bodytext[NEXT], {}), { name: "OperationError" });
-  await assert.rejects(open(seeds.headline[T12], {}), { name: "OperationError" });
+  await assert.rejects(open(seedAt("bodytext", NEXT), {}), { name: "OperationError" });
+  await assert.rejects(open(seedAt("headline", T12), {}), { name: "OperationError" });
   // An envelope replayed into a later render's request does not open there.
   const later = await w.publish({ items: [item("bodytext", ["sports"])] });
   const { request } = await exchanged(w, later);
   const replayed = copy(request);
-  replayed.sealed.contentWindowSeeds.bodytext[T12] = seeds.bodytext[T12];
+  find(replayed.sealed.contentWindowSeeds, { contentName: "bodytext", windowStart: T12 }).key =
+    seedAt("bodytext", T12);
   assert.equal((await w.issuer().answer(replayed)).code, "binding_failed");
   // The signed resource carries no commitment or content-group route.
   const claims = claimsOf(published.page.resourceJWT);
@@ -654,23 +733,23 @@ test("a connector map is read by group name: member order is free, a relabeled o
     change(changed.page);
     return reader.client(changed, issuer);
   };
-  const reorder = (page) => {
-    const { sports, politics } = page.contentData.bodytext.connectors;
-    page.contentData.bodytext.connectors = { politics, sports };
-  };
+  const reorder = (page) => pageItem(page, "bodytext").connectors.reverse();
   assert.equal(await variant(reorder).open("bodytext"), "content:bodytext");
   const relabel = (page) => {
-    const { sports, politics } = page.contentData.bodytext.connectors;
-    page.contentData.bodytext.connectors = { sports: politics, politics: sports };
+    const sports = connectorOf(page, "bodytext", "sports");
+    const politics = connectorOf(page, "bodytext", "politics");
+    setConnector(page, "bodytext", "sports", politics);
+    setConnector(page, "bodytext", "politics", sports);
   };
   assert.equal(await variant(relabel).open("bodytext"), null);
   for (const [label, change] of [
-    ["empty map", (page) => (page.contentData.bodytext.connectors = {})],
+    ["empty map", (page) => (pageItem(page, "bodytext").connectors = [])],
+    // Bare connector values without their group names.
     [
       "array",
       (page) =>
-        (page.contentData.bodytext.connectors = Object.values(
-          page.contentData.bodytext.connectors,
+        (pageItem(page, "bodytext").connectors = connectorsOf(page, "bodytext").map(
+          ({ connector }) => connector,
         )),
     ],
     ["root dictionary", (page) => (page.contentGroups = ["sports", "politics"])],
@@ -726,12 +805,12 @@ test("standard access reveals the item's premium pad but cannot open premium-onl
   });
   const { reader, client } = await exchanged(w, shared, { issuer });
   assert.equal(await client.open("bodytext"), "shared article");
-  const delivered = chainKeysOf(issuer.calls.answers[0]).bodytext;
-  assert.deepEqual(Object.keys(delivered), ["standard"]);
+  const delivered = chainKeysOf(issuer.calls.answers[0]);
+  assert.deepEqual(chainGroups(delivered, "bodytext"), ["standard"]);
 
   // The reader computes the item key from its delivered standard chain.
   const chainKey = await chainKeyFromChainKey({
-    chainKey: binaryStringBytes(delivered.standard[T18]),
+    chainKey: binaryStringBytes(chainKeyAt(delivered, "bodytext", "standard", T18)),
     accessGroup: "standard",
     suppliedT: T18,
     targetT: T12,
@@ -749,7 +828,7 @@ test("standard access reveals the item's premium pad but cannot open premium-onl
   assert.equal(await openWith(shared, "bodytext", sharedCkey), "shared article");
   const exposedPremiumPad = xor16(
     sharedCkey,
-    binaryStringBytes(shared.page.contentData.bodytext.connectors.premium),
+    binaryStringBytes(connectorOf(shared.page, "bodytext", "premium")),
   );
   // Publisher-side oracle confirms what leaked; it is not reader material.
   const publisherHandle = await handleOf("bodytext", T12);
@@ -765,11 +844,11 @@ test("standard access reveals the item's premium pad but cannot open premium-onl
       items: [item("bodytext", ["premium"], `premium-only ${period}`)],
     });
     assert.notEqual(renderIdOf(target), renderIdOf(shared));
-    assert.deepEqual(Object.keys(target.page.contentData.bodytext.connectors), ["premium"]);
+    assert.deepEqual(groupsOn(target.page, "bodytext"), ["premium"]);
     assert.equal(await reader.client(target, issuer).open("bodytext"), null);
     // Raw attempts bypass client lookup and coordinate validation. The body
     // must reject them, including when both articles use the same period key.
-    const connector = binaryStringBytes(target.page.contentData.bodytext.connectors.premium);
+    const connector = binaryStringBytes(connectorOf(target.page, "bodytext", "premium"));
     for (const candidate of [
       sharedCkey,
       xor16(connector, exposedPremiumPad),
@@ -812,17 +891,21 @@ test("a zero-connector item grant exposes only that item's pad, not another name
     await openWith(
       published,
       "bodytext",
-      binaryStringBytes(genuine.body.contentGroups.contentKeys.bodytext),
+      binaryStringBytes(contentKeyOf(genuine.body, "bodytext")),
     ),
     "content:bodytext",
   );
   const changed = copy(request);
-  changed.requestedContentKeys.bodytext.connector = base64urlEncode(new Uint8Array(16));
+  for (const route of findAll(changed.requestedContentKeys, { contentName: "bodytext" }))
+    route.connector = base64urlEncode(new Uint8Array(16));
   const answer = await issuer.answer(changed);
   assert.equal(answer.status, 200);
-  assert.deepEqual(Object.keys(answer.body.contentGroups), ["contentKeys"]);
-  assert.deepEqual(Object.keys(answer.body.contentGroups.contentKeys), ["bodytext"]);
-  const exposedPad = binaryStringBytes(answer.body.contentGroups.contentKeys.bodytext);
+  assert.deepEqual(Object.keys(answer.body.contentGroupKeys), ["contentKeys"]);
+  assert.deepEqual(
+    answer.body.contentGroupKeys.contentKeys.map(({ contentName }) => contentName),
+    ["bodytext"],
+  );
+  const exposedPad = binaryStringBytes(contentKeyOf(answer.body, "bodytext"));
   const pkey = await (await handleOf("bodytext", T12)).periodKey("sports", T12);
   assert.deepEqual(
     exposedPad,
@@ -845,7 +928,7 @@ test("a zero-connector item grant exposes only that item's pad, not another name
     [published, "headline"],
     [later, "bodytext"],
   ]) {
-    const connector = binaryStringBytes(target.page.contentData[name].connectors.sports);
+    const connector = binaryStringBytes(connectorOf(target.page, name, "sports"));
     for (const candidate of [
       exposedPad,
       xor16(connector, exposedPad),
@@ -962,7 +1045,7 @@ test("a policy reading the request geometry serves a rollover; a relayed other g
     assert.equal(issuer.calls.answers.at(-1).status, 200);
     assert.equal(await client.open("bodytext"), "content:bodytext");
   }
-  assert.deepEqual(Object.keys(chainKeysOf(issuer.calls.answers.at(-1)).bodytext.sports), [
+  assert.deepEqual(chainCutoffs(chainKeysOf(issuer.calls.answers.at(-1)), "bodytext", "sports"), [
     "261014T1700",
   ]);
 
@@ -994,12 +1077,16 @@ test("an altered renderPeriod returns a wrong item candidate and leaves a chain 
   const answer = (changed) => w.issuer().answer(changed);
   const asItem = copy(request);
   delete asItem.requestedContentGroups;
-  asItem.requestedContentKeys = {
-    bodytext: { group: "sports", connector: published.page.contentData.bodytext.connectors.sports },
-  };
+  asItem.requestedContentKeys = [
+    {
+      contentName: "bodytext",
+      group: "sports",
+      connector: connectorOf(published.page, "bodytext", "sports"),
+    },
+  ];
   const genuine = await answer(asItem);
   assert.equal(genuine.status, 200);
-  assert.ok(genuine.body.contentGroups.contentKeys.bodytext);
+  assert.ok(contentKeyOf(genuine.body, "bodytext"));
   // Same window and the next window: both seeds open, the pad differs, and
   // the recovered candidate cannot authenticate the genuine body.
   for (const period of [T13, "261015T0100"]) {
@@ -1011,7 +1098,7 @@ test("an altered renderPeriod returns a wrong item candidate and leaves a chain 
       await openWith(
         published,
         "bodytext",
-        binaryStringBytes(result.body.contentGroups.contentKeys.bodytext),
+        binaryStringBytes(contentKeyOf(result.body, "bodytext")),
       ),
       null,
       period,
@@ -1090,7 +1177,7 @@ test("fresh item keys across item names and renders; another group's key fails r
 });
 
 // Replaces the `contentGroupChains` carrier shape: the answer is the
-// `contentGroups` section beside base `keys`.
+// `contentGroupKeys` section beside base `keys`.
 test("the answer is a chain-key carrier without seed bytes; policy output cannot broaden the request", async () => {
   const w = await world();
   const published = await w.publish({ items: [item("bodytext", ["sports", "politics"])] });
@@ -1102,10 +1189,10 @@ test("the answer is a chain-key carrier without seed bytes; policy output cannot
     },
   });
   const { body } = issuer.calls.answers[0];
-  assert.deepEqual(Object.keys(body), ["keys", "contentGroups"]);
+  assert.deepEqual(Object.keys(body), ["keys", "contentGroupKeys"]);
   assert.equal(Object.hasOwn(body, "periodGeometry"), false);
-  assert.deepEqual(Object.keys(body.contentGroups), ["chainKeys"]);
-  const entry = body.contentGroups.chainKeys.bodytext.sports[T18];
+  assert.deepEqual(Object.keys(body.contentGroupKeys), ["chainKeys"]);
+  const entry = chainKeyAt(body.contentGroupKeys.chainKeys, "bodytext", "sports", T18);
   assert.equal(typeof entry, "string");
   assert.equal(binaryStringBytes(entry).length, 16);
   // Defense in depth: a grant outside the request is the policy's fault.
@@ -1150,13 +1237,13 @@ test("request identity and verified claims precede policy; a narrowed or reorder
   assert.equal((await issuer.answer({ ...request, keyId: "other-key" })).code, "unknown_key");
   assert.equal(issuer.calls.decide.length, 1);
   const subset = await exchanged(w, published, { narrowing: { seedWindows: [T12] } });
-  assert.deepEqual(Object.keys(subset.request.sealed.contentWindowSeeds.bodytext), [T12]);
+  assert.deepEqual(requestWindows(subset.request, "bodytext"), [T12]);
   assert.equal(await subset.client.open("bodytext"), "content:bodytext");
   const reversed = copy(request);
-  reversed.sealed.contentWindowSeeds.bodytext = Object.fromEntries(
-    Object.entries(reversed.sealed.contentWindowSeeds.bodytext).reverse(),
-  );
-  assert.deepEqual(Object.keys(chainKeysOf(await issuer.answer(reversed)).bodytext.sports), [T18]);
+  reversed.sealed.contentWindowSeeds.reverse();
+  assert.deepEqual(chainCutoffs(chainKeysOf(await issuer.answer(reversed)), "bodytext", "sports"), [
+    T18,
+  ]);
 });
 
 test("the finite transcript uses exact literal ASCII and integer octets, without serializer-dependent escapes", () => {
@@ -1222,8 +1309,9 @@ test("protocol entries are own JSON members: a __proto__ member is a name like a
   const published = await w.publish({ items: [item("bodytext", ["sports"])] });
   const issuer = w.issuer();
   const page = copy(published);
-  page.page.contentData.bodytext = JSON.parse(
-    JSON.stringify(page.page.contentData.bodytext).replace('"sports"', '"__proto__"'),
+  const index = page.page.contentData.indexOf(pageItem(page.page, "bodytext"));
+  page.page.contentData[index] = JSON.parse(
+    JSON.stringify(page.page.contentData[index]).replace('"sports"', '"__proto__"'),
   );
   const fresh = w.reader();
   const client = fresh.client(page, issuer);
@@ -1236,12 +1324,56 @@ test("protocol entries are own JSON members: a __proto__ member is a name like a
   const reader = w.reader();
   const answered = await exchanged(w, published, {
     reader,
-    answered: (body) => JSON.parse(JSON.stringify(body).replace('"sports":', '"__proto__":')),
+    answered: (body) =>
+      JSON.parse(JSON.stringify(body).replace('"group":"sports"', '"group":"__proto__"')),
   });
   assert.equal(await answered.client.open("bodytext"), null);
   assert.deepEqual(await reader.chainKeyCache().entries(), []);
   const control = await exchanged(w, published);
   assert.equal(await control.client.open("bodytext"), "content:bodytext");
+});
+
+// Extensible request records ignore unknown own fields. Response key records
+// remain closed. JSON.parse creates an own __proto__ field in either case,
+// never a prototype; neither reading changes any prototype.
+test("own __proto__ is ignored in extensible requests and refused in closed responses", async () => {
+  const w = await world();
+  const published = await w.publish({ items: [item("bodytext", ["sports"])] });
+  const prototypeMembers = Object.getOwnPropertyNames(Object.prototype);
+  /** The JSON value with an own `__proto__` member opened right after `anchor`. */
+  const smuggled = (/** @type {any} */ value, /** @type {string} */ anchor) => {
+    const json = JSON.stringify(value);
+    assert.ok(json.includes(anchor), `the document holds ${anchor}`);
+    return JSON.parse(json.replace(anchor, `${anchor}"__proto__":{"polluted":"yes"},`));
+  };
+
+  // The same exchange opens the item without the extra member.
+  const control = await exchanged(w, published);
+  assert.equal(await control.client.open("bodytext"), "content:bodytext");
+
+  // Request side: this unknown field does not change the successful grant.
+  const request = smuggled(control.request, '"requestedContentGroups":[{');
+  assert.ok(Object.hasOwn(request.requestedContentGroups[0], "__proto__"));
+  const issuer = w.issuer();
+  const accepted = await issuer.answer(request);
+  assert.equal(accepted.status, 200);
+  assert.equal(issuer.calls.decide.length, 1);
+
+  // Answer side: the client refuses the section and files no chain key.
+  const reader = w.reader();
+  const answered = await exchanged(w, published, {
+    reader,
+    answered: (body) => {
+      const tampered = smuggled(body, '"chainKeys":[{');
+      assert.ok(Object.hasOwn(tampered.contentGroupKeys.chainKeys[0], "__proto__"));
+      return tampered;
+    },
+  });
+  assert.equal(await answered.client.open("bodytext"), null);
+  assert.deepEqual(await reader.chainKeyCache().entries(), []);
+
+  assert.deepEqual(Object.getOwnPropertyNames(Object.prototype), prototypeMembers);
+  assert.equal(/** @type {any} */ ({}).polluted, undefined);
 });
 
 test("rotated retained secrets keep rival chain keys usable in one window, in either order and at any cutoff", async () => {
@@ -1292,9 +1424,13 @@ test("policy refusal and empty grants precede opening even a valid-width corrupt
   const published = await w.publish({ items: [item("bodytext", ["sports"])] });
   const { request } = await exchanged(w, published);
   const corrupted = copy(request);
-  const seed = binaryStringBytes(corrupted.sealed.contentWindowSeeds.bodytext[T12]);
+  const record = find(corrupted.sealed.contentWindowSeeds, {
+    contentName: "bodytext",
+    windowStart: T12,
+  });
+  const seed = binaryStringBytes(record.key);
   seed[seed.length - 1] ^= 1;
-  corrupted.sealed.contentWindowSeeds.bodytext[T12] = base64urlEncode(seed);
+  record.key = base64urlEncode(seed);
   const refusing = w.issuer({ policy: chainPolicy({ authorize: () => false }) });
   assert.equal((await refusing.answer(corrupted)).code, "bad_policy");
   const empty = w.issuer({ policy: () => ({ grants: [], authorizePeriod: () => true }) });
@@ -1388,8 +1524,11 @@ test("an equivalent narrower receipt and a wider cached rival count as one trial
       issuer: cut,
       attempt: true,
       answered: (body) => {
-        body.contentGroups.chainKeys.bodytext.sports =
-          wrong.contentGroups.chainKeys.bodytext.sports;
+        const sports = { contentName: "bodytext", group: "sports" };
+        const held = findAll(body.contentGroupKeys.chainKeys, sports);
+        body.contentGroupKeys.chainKeys = body.contentGroupKeys.chainKeys
+          .filter((record) => !held.includes(record))
+          .concat(findAll(wrong.contentGroupKeys.chainKeys, sports));
         return body;
       },
     });
@@ -1438,10 +1577,10 @@ test("page group names are derivation inputs while verified claims and issuer po
   assert.equal(await client.open("bodytext"), "content:bodytext");
 
   const relabeled = copy(published);
-  relabeled.page.contentData.bodytext.connectors = {
-    politics: relabeled.page.contentData.bodytext.connectors.sports,
-  };
+  pageItem(relabeled.page, "bodytext").connectors = [
+    { group: "politics", connector: connectorOf(relabeled.page, "bodytext", "sports") },
+  ];
   const { client: other, issuer } = await exchanged(w, relabeled);
-  assert.deepEqual(Object.keys(chainKeysOf(issuer.calls.answers[0]).bodytext), ["politics"]);
+  assert.deepEqual(chainGroups(chainKeysOf(issuer.calls.answers[0]), "bodytext"), ["politics"]);
   assert.equal(await other.open("bodytext"), null);
 });

@@ -15,23 +15,48 @@ const request = {
   resourceJWT: "token",
   keyId: "key",
   sealed: {
-    contentKeys: { article: "item-envelope" },
-    periodKeys: { premium: { t1: "premium-envelope" }, sport: { t1: "sport-envelope" } },
-    chainKeys: { premium: { t1: "premium-chain" }, sport: { t1: "sport-chain" } },
+    contentKeys: [{ contentName: "article", key: "item-envelope" }],
+    periodKeys: [
+      { accessGroup: "premium", period: "t1", key: "premium-envelope" },
+      { accessGroup: "sport", period: "t1", key: "sport-envelope" },
+      { accessGroup: "premium", period: "t1", key: "premium-rival" },
+    ],
+    chainKeys: [
+      { accessGroup: "premium", cutoff: "t1", key: "premium-chain" },
+      { accessGroup: "sport", cutoff: "t1", key: "sport-chain" },
+    ],
   },
   periodGeometry: { chainsPerDay: 2, periodMinutes: 15 },
-  requestedPeriodKeys: { premium: ["t1"], sport: ["t1"] },
+  requestedPeriodKeys: [
+    { accessGroup: "premium", periods: ["t1"] },
+    { accessGroup: "sport", periods: ["t1"] },
+  ],
 };
+
+/** @param {any} records @returns {string[]} */
+function groups(records) {
+  return (records ?? []).map((/** @type {any} */ record) => record.accessGroup);
+}
 
 test("a family retry excludes item and sibling-family coordinates before association", () => {
   const selected = projectUnavailableFamilies(request, ["premium"]);
-  assert.deepEqual(selected.sealed.contentKeys, {});
-  assert.deepEqual(Object.keys(selected.sealed.periodKeys), ["premium"]);
-  assert.deepEqual(Object.keys(selected.sealed.chainKeys), ["premium"]);
+  assert.deepEqual(selected.sealed.contentKeys, []);
+  // Both rival records of the premium family stay: a projection narrows
+  // identities and never picks among candidates.
+  assert.deepEqual(selected.sealed.periodKeys, [
+    { accessGroup: "premium", period: "t1", key: "premium-envelope" },
+    { accessGroup: "premium", period: "t1", key: "premium-rival" },
+  ]);
+  assert.deepEqual(groups(selected.sealed.chainKeys), ["premium"]);
   assert.deepEqual(selected.periodGeometry, request.periodGeometry);
-  assert.deepEqual(Object.keys(selected.requestedPeriodKeys), ["premium"]);
+  assert.deepEqual(groups(selected.requestedPeriodKeys), ["premium"]);
   assert.equal(hasEligibleCoordinates(selected), true);
-  assert.deepEqual(Object.keys(request.sealed.contentKeys), ["article"], "original request intact");
+  assert.equal(hasEligibleCoordinates({ sealed: { contentKeys: [], periodKeys: [] } }), false);
+  assert.deepEqual(
+    groups(request.sealed.periodKeys),
+    ["premium", "sport", "premium"],
+    "original intact",
+  );
 });
 
 test("a retry with no authored family is skipped and unknown extension material is not relayed", () => {
@@ -114,12 +139,15 @@ test("family-only retries retain exactly the selected geometry and chain hints",
         sealed: { [kind]: request.sealed[kind] },
       };
       if (hintSource === "absent") delete input.requestedPeriodKeys;
-      if (hintSource === "unrelated") input.requestedPeriodKeys = { sport: ["t1"] };
+      if (hintSource === "unrelated")
+        input.requestedPeriodKeys = [{ accessGroup: "sport", periods: ["t1"] }];
       const selected = projectUnavailableFamilies(input, ["premium"]);
       assert.deepEqual(selected.periodGeometry, request.periodGeometry);
       assert.deepEqual(
         selected.requestedPeriodKeys,
-        kind === "chainKeys" && hintSource === "selected" ? { premium: ["t1"] } : undefined,
+        kind === "chainKeys" && hintSource === "selected"
+          ? [{ accessGroup: "premium", periods: ["t1"] }]
+          : undefined,
       );
     }
   }

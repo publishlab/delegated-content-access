@@ -2,6 +2,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { world, item, chainPolicy } from "./_lib/world.js";
+import { find, findAll } from "./_lib/records.js";
 
 const denied = () => ({ grants: [], authorizePeriod: () => false });
 const itemOnly = (input) => ({
@@ -25,16 +26,23 @@ test("the same default request lets issuer policy choose reusable, item-only, or
     const client = w.reader().client(publication, issuer);
     await client.attempt(["bodytext"]);
     assert.equal(client.sent.length, 1, mode);
-    assert.deepEqual(client.sent[0].requestedContentGroups, { bodytext: ["sports"] });
-    assert.equal(client.sent[0].requestedContentKeys.bodytext.group, "sports");
+    assert.deepEqual(client.sent[0].requestedContentGroups, [
+      { contentName: "bodytext", groups: ["sports"] },
+    ]);
+    assert.deepEqual(
+      findAll(client.sent[0].requestedContentKeys, { contentName: "bodytext" }).map(
+        (route) => route.group,
+      ),
+      ["sports"],
+    );
     assert.equal(await client.open("bodytext"), mode === "denied" ? null : "entitled story");
-    const result = issuer.calls.answers[0].body.contentGroups;
+    const result = issuer.calls.answers[0].body.contentGroupKeys;
     if (mode === "item") {
-      assert.ok(result.contentKeys.bodytext);
+      assert.ok(find(result.contentKeys, { contentName: "bodytext" }));
       assert.equal(result.chainKeys, undefined);
       assert.equal(result.periodKeys, undefined);
     } else if (mode === "reusable") {
-      assert.ok(result.chainKeys.bodytext);
+      assert.ok(find(result.chainKeys, { contentName: "bodytext" }));
       assert.equal(result.contentKeys, undefined);
     } else {
       assert.equal(result, undefined);
@@ -52,12 +60,16 @@ test("a malformed connector sibling leaves valid grouped and ordinary items open
     ],
     ordinary: ["purchase"],
   });
-  publication.page.contentData.headline.connectors = {};
+  // An empty connector collection does not admit: an item carries one to maxGroups records.
+  find(publication.page.contentData, { contentName: "headline" }).connectors = [];
   const issuer = w.issuer({ policy: reusableOnly });
   const client = w.reader().client(publication, issuer);
   await client.attempt(["bodytext", "headline", "purchase"]);
   assert.equal(client.sent.length, 1);
-  assert.deepEqual(Object.keys(client.sent[0].requestedContentGroups), ["bodytext"]);
+  assert.deepEqual(
+    client.sent[0].requestedContentGroups.map((entry) => entry.contentName),
+    ["bodytext"],
+  );
   assert.equal(await client.open("bodytext"), "valid body");
   assert.equal(await client.open("purchase"), "ordinary");
   assert.equal(await client.open("headline"), null);
@@ -72,7 +84,7 @@ test("a refused group response member preserves authenticated ordinary progress 
   const issuer = w.issuer({ policy: reusableOnly });
   const client = w.reader().client(publication, issuer, {
     answered(body) {
-      body.contentGroups.unknown = {};
+      body.contentGroupKeys.unknown = {};
       return body;
     },
   });

@@ -79,8 +79,17 @@ test("serialized JSON exchange hands HTML and known-schema JSON to independent c
   assert.equal(target.text, new TextDecoder().decode(html.bytes));
   assert.equal(mean, 6);
   assert.equal(badCalls, 0);
-  assert.equal(client.delivery.contentData.bodytext.contentType, "text/html");
-  assert.equal(Object.hasOwn(client.delivery.contentData.bodytext, "contentEncodings"), false);
+  assert.equal(
+    client.delivery.contentData.find((record) => record.contentName === "bodytext").contentType,
+    "text/html",
+  );
+  assert.equal(
+    Object.hasOwn(
+      client.delivery.contentData.find((record) => record.contentName === "bodytext"),
+      "contentEncodings",
+    ),
+    false,
+  );
   connection.dispose();
 });
 
@@ -189,7 +198,11 @@ test("existing gzip decodes before JSON handling; unsupported gzip releases no h
   ]);
   const plain = await publisher.client();
   const gzip = await publisher.client({ gzip: decode });
-  assert.deepEqual(gzip.delivery.contentData.measurements.contentEncodings, ["gzip"]);
+  assert.deepEqual(
+    gzip.delivery.contentData.find((record) => record.contentName === "measurements")
+      .contentEncodings,
+    ["gzip"],
+  );
   let observed = null,
     calls = 0;
   const target = { text: null, effects: 0 };
@@ -262,7 +275,10 @@ test("NDJSON framing and record meaning stay with the agreed application callbac
   assert.equal(result.observations.status, "handled");
   assert.deepEqual(observations, [4, 8]);
   assert.equal(
-    Object.hasOwn(client.delivery.contentData.observations, "contentDescription"),
+    Object.hasOwn(
+      client.delivery.contentData.find((record) => record.contentName === "observations"),
+      "contentDescription",
+    ),
     false,
   );
   connection.dispose();

@@ -21,6 +21,11 @@ import { parseLockedDocument } from "../adapter-client/parse5Tree.js";
 import { openMapItems } from "../core-client/mapItems.js";
 import { treeDeliveryRoot } from "../core-client/treeDeliveryRoot.js";
 import { createBrowserClient } from "../../../integration-client/createBrowserClient.js";
+import {
+  contentKeyMap,
+  errorMap,
+  notDeliveredMap,
+} from "../../../test-reference/support/namedRecords.js";
 import { ISSUER_NAME, ORIGIN, articlePage, mapWorld } from "./world.js";
 
 /**
@@ -70,7 +75,7 @@ describe("Section 6.2: item states from issuer decisions", () => {
       reader: { extract: () => "ciphertext" },
       resolver: {
         resolveDetailed: async () => ({ missing: ["factbox"] }),
-        contentKeyWithOriginFor: async () => ({ key: new Uint8Array(16) }),
+        resolveAuthenticated: async () => ({ covered: [], missing: [], origins: [] }),
       },
       opener: { open: async () => new TextEncoder().encode("<p>cached</p>") },
       unlock: async () => ({ status: 503, body: { error: "outage" }, application: null }),
@@ -94,7 +99,7 @@ describe("Section 6.2: item states from issuer decisions", () => {
     });
     assert.equal(world.unlocks.length, 1, "one base unlock for both map items");
     assert.deepEqual(
-      Object.keys(world.unlocks[0].request.sealed.contentKeys).sort(),
+      Object.keys(contentKeyMap(world.unlocks[0].request.sealed.contentKeys)).sort(),
       ["bodytext", "factbox"],
       "the request presents exactly the map items through the base builder",
     );
@@ -118,7 +123,7 @@ describe("Section 6.2: item states from issuer decisions", () => {
     const states = await openMapItems(clientFor(html, transport, { relayPeriodKeys: true }), [
       "bodytext",
     ]);
-    assert.deepEqual(bodies[0].notDelivered, { premium: { reason: "denied" } });
+    assert.deepEqual(notDeliveredMap(bodies[0].notDelivered), { premium: { reason: "denied" } });
     assert.deepEqual(states, { bodytext: { state: "locked", text: null } });
   });
 
@@ -136,7 +141,7 @@ describe("Section 6.2: item states from issuer decisions", () => {
     const html = await render(world, TWO);
     // Change the first character of the issuer's sealed envelope for bodytext.
     const tampered = html.replace(
-      /("contentKeys":\{"bodytext":")([A-Za-z0-9_-])/,
+      /("contentKeys":\[\{"contentName":"bodytext","key":")([A-Za-z0-9_-])/,
       (_m, head, first) => `${head}${first === "A" ? "B" : "A"}`,
     );
     assert.notEqual(tampered, html);
@@ -151,7 +156,7 @@ describe("Section 6.2: item states from issuer decisions", () => {
       },
     };
     const states = await openMapItems(clientFor(tampered, transport), ["bodytext", "factbox"]);
-    assert.equal(bodies[0].errors.bodytext.error, "unseal_failed");
+    assert.equal(errorMap(bodies[0].errors).bodytext.error, "unseal_failed");
     assert.deepEqual(states.bodytext, { state: "locked", text: null });
     assert.equal(states.factbox.state, "opened");
   });
@@ -253,7 +258,7 @@ describe("Section 6.2: failed items", () => {
     const world = await mapWorld();
     const html = await render(world, TWO);
     const tampered = html.replace(
-      /(class="dca-sealed-content">\n\{"bodytext":")([A-Za-z0-9_-])/,
+      /(class="dca-sealed-content">\n\[\{"contentName":"bodytext","content":")([A-Za-z0-9_-])/,
       (_m, head, first) => `${head}${first === "A" ? "B" : "A"}`,
     );
     assert.notEqual(tampered, html);

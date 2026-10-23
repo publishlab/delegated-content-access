@@ -139,12 +139,27 @@ export class ResponseAssociation {
     return own(publicKey, "kty") === "RSA" ? "RSA-OAEP" : null;
   }
 
+  /**
+   * Whether some record of one captured sealed collection names exactly these
+   * field values. Several records may name one coordinate; it is presented
+   * once.
+   *
+   * @param {'contentKeys'|'periodKeys'|'chainKeys'} section
+   * @param {Record<string, string>} coordinate
+   * @returns {boolean}
+   */
+  #presents(section, coordinate) {
+    const records = own(own(this.#request, "sealed"), section);
+    if (!Array.isArray(records)) return false;
+    const fields = Object.entries(coordinate);
+    return records.some(
+      (sealed) => record(sealed) && fields.every(([field, value]) => own(sealed, field) === value),
+    );
+  }
+
   /** @param {string} contentName */
   presentsContent(contentName) {
-    return (
-      isContentName(contentName) &&
-      Object.hasOwn(own(own(this.#request, "sealed"), "contentKeys") ?? {}, contentName)
-    );
+    return isContentName(contentName) && this.#presents("contentKeys", { contentName });
   }
 
   /** @param {string} accessGroup @param {string} t */
@@ -152,12 +167,12 @@ export class ResponseAssociation {
     return (
       isAccessGroup(accessGroup) &&
       isPeriodKeyLabel(t) &&
-      Object.hasOwn(own(own(own(this.#request, "sealed"), "periodKeys"), accessGroup) ?? {}, t)
+      this.#presents("periodKeys", { accessGroup, period: t })
     );
   }
 
   /** @param {string} accessGroup @param {string} t */
   presentsChainKey(accessGroup, t) {
-    return Object.hasOwn(own(own(own(this.#request, "sealed"), "chainKeys"), accessGroup) ?? {}, t);
+    return this.#presents("chainKeys", { accessGroup, cutoff: t });
   }
 }

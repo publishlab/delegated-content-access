@@ -319,17 +319,22 @@ capability by adding `notDelivered` to the core result of any request that
 presented at least one access-group family:
 
 ```text
-notDelivered = { accessGroup: { reason: "denied" / "unavailable",
-                                message: <optional string> } }
+notDelivered = [ { accessGroup: <identifier>,
+                   reason: "denied" / "unavailable",
+                   message: <optional string> } ]
 ```
 
-`notDelivered`, when present, MUST be a non-empty non-array object. Each
-member name is an `accessGroup` the associated request presented
-([core Section 6.1](spec--core-protocol.md#61-presented-coordinates)), and
-each value MUST be a non-array object with a string `reason` member whose
-value is `denied` or `unavailable`, and an optional string `message` member.
-The value contains no key material and names no `t`. Unknown members inside a
-`notDelivered` entry are ignored, as inside a core error object.
+`notDelivered`, when present, MUST be a non-empty array of report entries.
+Each entry MUST be a non-array object whose `accessGroup` is an access group the
+associated request presented
+([core Section 6.1](spec--core-protocol.md#61-presented-coordinates)), with a
+string `reason` member whose value is `denied` or `unavailable`, and an
+optional string `message` member. The entry contains no key material and names
+no `t`. Unknown members inside a `notDelivered` entry are ignored, as inside a
+core error record. The issuer emits one entry per access group. A client that
+finds several entries for one `accessGroup` uses the last whole entry
+([data format Section 2.3](spec--data-format.md#23-collections-of-named-records))
+and then applies the conflict checks below to it.
 
 `reason` takes one of two values:
 
@@ -367,20 +372,20 @@ that family and which reason applied. A `message`, if present, MUST NOT
 disclose more than the `reason` does.
 
 A result that names an access group in `notDelivered` delivers no reusable
-period capability for that family: with `notDelivered.premium` present, the
-result carries no `keys.periodKeys` entry and no `keys.chainKeys` entry under
-`premium`.
+period capability for that family: with a `notDelivered` entry for `premium`
+present, the result carries no `keys.periodKeys` record and no `keys.chainKeys`
+record for `premium`.
 
 A `keys.contentKeys` entry, an item content key returned by the issuer, is
 instead the result of an independently authorized `contentName` coordinate.
-It MAY coexist with `notDelivered.premium` even when the publisher's delivery
+It MAY coexist with the `premium` report entry even when the publisher's delivery
 also offers a `premium` period wrap for that content item. That content key
 does not become a capability for the family merely because the client could
 also unwrap the same item's content key with a `premium` period key.
 
-The same result carries no period-coordinate `errors` entry for that family:
-no `accessGroup "|" t` coordinate under its name. An error keyed by
-`contentName` reports failure of the independent item content-key coordinate
+The same result carries no period-coordinate `errors` record for that family:
+no `accessGroup "|" t` coordinate under its name. An error record whose
+`coordinate` is a `contentName` reports failure of the independent item content-key coordinate
 and MAY coexist with the family report. A per-period-coordinate opening
 failure belongs only to a family the result did not name in `notDelivered`.
 
@@ -410,24 +415,25 @@ response. It MUST NOT discard independently admissible item content keys,
 item errors or unrelated extension sections solely because the report is
 malformed. Existing retained capability is unaffected. Whole-response
 representation and transport admission still apply before retaining any key,
-including classification of the original supported key maps before suppressing
+including classification of the original supported key collections before suppressing
 family grants. The client MUST NOT record the rejected report as an empty
 success, infer a denial or availability reason, activate conditional fallback,
 or cache a denial from it. An independent later attempt remains a host decision.
 
-For this conflict check, an empty key-section or family container carries no
-key entry and MUST be treated as delivering no capability. Its presence alone
-MUST NOT conflict with a `notDelivered` entry. Producers still omit optional
-key sections when they deliver no keys, as core Section 7 requires; the
-required `keys.contentKeys` map may be empty. For this check, a family has a
-key entry only when the applicable key section and its access-group family
-are non-array objects and the family contains at least one own member. A
-present non-object or array family is malformed key material; it contributes
-no key entry to this conflict check and does not by itself invalidate an
-otherwise admissible `notDelivered` report. Its ordinary malformed-container
-treatment still applies. A non-empty family object conflicts before
-individual coordinate or key-entry admission, so an invalid member name or
-leaf value cannot excuse a contradictory report.
+For this conflict check, an empty key section carries no key entry and MUST
+be treated as delivering no capability. Its presence alone MUST NOT conflict
+with a `notDelivered` entry. Producers still omit optional key sections when
+they deliver no keys, as core Section 7 requires; the required
+`keys.contentKeys` array may be empty. For this check, a family has a key entry
+only when the applicable key section is an array holding at least one
+non-array object record whose `accessGroup` equals the family name. A present
+non-array key section, or an element that is not a non-array object, is
+malformed key material; it contributes no key entry to this conflict check and
+does not by itself invalidate an otherwise admissible `notDelivered` report.
+Its ordinary malformed-container treatment still applies. A record naming the
+family conflicts before individual coordinate or key-entry admission, so an
+invalid `period`, `cutoff` or `key` value cannot excuse a contradictory
+report.
 
 A rejected key entry does not discard an otherwise admitted `notDelivered`
 member; its entries keep the meaning this subsection gives them. A
@@ -451,8 +457,8 @@ client grant horizon from one another.
 
 Before sealing an item selected for period-key access, the publisher MUST
 assign that item at least one access group and MUST author at least one usable
-period-key wrap for each assigned group in
-`contentData[contentName].keys[accessGroup][]`. When the intended access policy
+period-key wrap for each assigned group in the item's `keys` collection, as an
+entry naming that `accessGroup`. When the intended access policy
 offers several groups as alternatives, the publisher MUST include every
 intended group and wrap the item's one `contentKey` under each, as
 [content protection Section 4](spec--content-protection.md#4-base-period-key-content-key-wrapping)
@@ -488,13 +494,42 @@ For an item selected for period-key access, the publisher wraps the item's
 `contentKey` under period keys for its assigned groups and period candidates;
 how those period keys were made does not change the wrap. Only reusable period
 material is regenerated deterministically. Content keys remain fresh and
-independent; content encryption uses its implicit fixed nonce, while wrap
-nonces remain fresh random values under
-[content protection Sections 3 and 4](spec--content-protection.md#3-base-protected-item-transcript).
+independent; content encryption uses its implicit fixed nonce, while each
+wrap derives its nonce from its wrap context under
+[content protection Section 4.1](spec--content-protection.md#41-wrap-nonce).
 Nonce uniqueness applies across the aggregate use of one
 `periodKey[t]`, independently generated or reproduced by a canonical
 construction, including concurrent publisher nodes that regenerate the same
 period key.
+
+Distinct wrap contexts are necessary, but not sufficient, for distinct derived
+nonces. A compliant producer keeps the contexts of different wraps apart:
+
+- it draws a fresh random render ID for every render
+  ([core Section 4.1](spec--core-protocol.md#41-producer-form));
+- it draws an independent content key for every item in a render
+  ([content protection Section 3.1](spec--content-protection.md#31-content-key-generation)); and
+- it never encrypts different key material under one period key in the same
+  render, item, access group, period and selected wrap AAD.
+
+Resending a saved wrap, or repeating the identical encryption, is not a new
+context. This profile defines no operation that reseals different key
+material in an existing render's context.
+
+The wrap nonce is the first 96 bits of a SHA-256 digest. It is not the
+RBG-based IV construction of NIST SP 800-38D, and distinct contexts do not
+guarantee distinct nonces. Treat the truncated digest of each distinct context
+as an independent uniform 96-bit value, and each render ID as an independent
+uniform 128-bit value. Two independently authored wraps under one key can
+reuse a nonce in two ways: two distinct contexts give equal truncated digests,
+or two renders draw the same render ID and so repeat an identical context. For
+`q` wraps under one key, and at most `q` renders among them, a union bound puts
+the probability of either event at no more than `q*(q-1)/2^97` for the digest
+collision plus `q*(q-1)/2^129` for the repeated context. At `q = 2^32` the sum is about
+`1.2 * 10^-10`, below `2^-32`; at one million wraps it is about
+`6.3 * 10^-18`. The estimate holds under that model and assumes no producer
+chooses names or labels by searching for digest collisions; it is not a
+proof of collision freedom.
 
 The counting domain is one set of `periodKey` bytes, whichever generation,
 producer or regeneration produced it and wherever it ran. Invocations by every
@@ -502,10 +537,9 @@ producer, process lifetime, replacement node and backfill job that use those
 bytes combine into one count. Rival bytes at one coordinate from different
 generations are different keys with separate counts, and counts never combine
 across independently generated period keys, access groups or coordinates
-merely because their labels or publisher are related. The `2^32` invocation
-limit that
-[content protection Section 3.3](spec--content-protection.md#33-content-encryption)
-sets for the RBG-based IV construction applies to that aggregate. A
+merely because their labels or publisher are related. The aggregate count of
+wrap encryptions under one set of `periodKey` bytes MUST NOT exceed `2^32`
+across all producers; the estimate above stays below `2^-32` at that count. A
 deployment SHOULD choose a materially lower local ceiling from its risk
 budget and expected volume; `2^32` is a construction limit, not a render
 target.
@@ -551,9 +585,9 @@ by the group.
 
 One `(accessGroup, t)` can have several candidate key bytes across separately
 rendered documents during key-material rollover or migration; within one
-render the family uses one generation (Section 5.5). A response carries one
-value at `periodKeys[accessGroup][t]`, while the client cache can retain rival
-values learned from several responses. AES-GCM authentication selects the
+render the family uses one generation (Section 5.5). A response can carry
+several candidate records at one `(accessGroup, t)` in `keys.periodKeys`, and
+the client cache can retain rival values learned from several responses. AES-GCM authentication selects the
 candidate that matches an article wrap. The article's `dca-data` selects the
 publisher, access group and coordinate; the client looks up candidates under
 the cache partition of Section 5.5 and uses any admitted candidate as

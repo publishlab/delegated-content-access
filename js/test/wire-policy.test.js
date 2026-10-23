@@ -35,6 +35,17 @@ import {
   world,
 } from "../test-lib/fixtures/wire-policy-world.js";
 import { contentAadOctets } from "../test-reference/support/contentAadOctets.js";
+import { wrapNonceOf } from "../test-reference/support/contentKeyWrapNonceOctets.js";
+import {
+  contentNamesOn,
+  contentRecordOf,
+  issuerBlockOf,
+  sealedContentByName,
+  sealedContentOf,
+  wrapGroupsOn,
+  wrapsOf,
+} from "../test-lib/helpers/inspect.js";
+import { keyAt } from "../test-reference/support/namedRecords.js";
 
 /**
  * What a JSON hop does to one object. `wire()` is the whole render; this is the
@@ -73,7 +84,7 @@ async function contentKeyFor(w, page, contentName) {
     200,
     "the reference unlock has to succeed, or the comparison below means nothing",
   );
-  return base64urlDecode(body.keys.contentKeys[contentName]);
+  return base64urlDecode(keyAt(body.keys.contentKeys, { contentName }));
 }
 
 describe("the content AAD is derived, never carried", () => {
@@ -92,18 +103,25 @@ describe("the content AAD is derived, never carried", () => {
     const dcaData = unsealer.parse(page);
     unsealer.buildRequest(dcaData, ISSUER_NAME, ["bodytext"]);
     await unsealer.applyResponse(dcaData, ISSUER_NAME, {
-      keys: { contentKeys: { bodytext: base64urlEncode(contentKey) } },
+      keys: { contentKeys: [{ contentName: "bodytext", key: base64urlEncode(contentKey) }] },
     });
 
     /** @param {Uint8Array} aad */
     const resealed = async (aad) => {
       const copy = structuredClone(page);
-      copy.contentData.bodytext = {
+      const at = copy.contentData.findIndex(
+        (/** @type {any} */ record) => record.contentName === "bodytext",
+      );
+      copy.contentData[at] = {
+        contentName: "bodytext",
         contentType: "text/html",
         nonce: base64urlEncode(nonce),
         aad: former,
       };
-      copy.sealedContent.bodytext = base64urlEncode(
+      const sealed = copy.sealedContent.find(
+        (/** @type {any} */ record) => record.contentName === "bodytext",
+      );
+      sealed.content = base64urlEncode(
         await encrypt(contentKey, nonce, utf8Encode(ARTICLES.A), aad),
       );
       return copy;
@@ -148,30 +166,35 @@ describe("one contentKey, two accessGroups", () => {
       items: [{ ...BODYTEXT, accessGroups: ["subscriber", "premium"] }],
     });
 
-    const groups = page.contentData.bodytext.keys;
     assert.deepEqual(
-      Object.keys(groups),
+      wrapGroupsOn(page, "bodytext"),
       ["subscriber", "premium"],
-      "one sealed-entry list per group the item names",
+      "sealed entries under each group the item names",
     );
 
     // The two envelopes are different objects on the wire - a different
-    // periodKey and a different nonce - which is what makes the byte-equality
-    // below a claim about the key material rather than about the bytes on the
-    // page.
-    const subscriberEntry = groups.subscriber.find((/** @type {any} */ e) => e.t === T_NOW);
-    const premiumEntry = groups.premium.find((/** @type {any} */ e) => e.t === T_NOW);
+    // periodKey, and a nonce derived from a different accessGroup - which is
+    // what makes the byte-equality below a claim about the key material rather
+    // than about the bytes on the page.
+    const subscriberEntry = wrapsOf(page, "bodytext", "subscriber").find(
+      (/** @type {any} */ e) => e.period === T_NOW,
+    );
+    const premiumEntry = wrapsOf(page, "bodytext", "premium").find(
+      (/** @type {any} */ e) => e.period === T_NOW,
+    );
     assert.notEqual(subscriberEntry.key, premiumEntry.key);
-    assert.notEqual(subscriberEntry.nonce, premiumEntry.nonce);
+    const subscriberNonce = wrapNonceOf(page, "bodytext", "subscriber", T_NOW);
+    const premiumNonce = wrapNonceOf(page, "bodytext", "premium", T_NOW);
+    assert.notDeepEqual(subscriberNonce, premiumNonce);
 
     const fromSubscriber = await decrypt(
       await w.periodKeySupply.derive("subscriber", T_NOW),
-      base64urlDecode(subscriberEntry.nonce),
+      subscriberNonce,
       base64urlDecode(subscriberEntry.key),
     );
     const fromPremium = await decrypt(
       await w.periodKeySupply.derive("premium", T_NOW),
-      base64urlDecode(premiumEntry.nonce),
+      premiumNonce,
       base64urlDecode(premiumEntry.key),
     );
 
@@ -188,7 +211,7 @@ describe("one contentKey, two accessGroups", () => {
       const opened = await decrypt(
         key,
         new Uint8Array(12),
-        base64urlDecode(page.sealedContent.bodytext),
+        base64urlDecode(sealedContentOf(page, "bodytext")),
         contentAadOctets(page, "bodytext"),
       );
       assert.equal(utf8Decode(opened), ARTICLES.A);
@@ -208,9 +231,11 @@ describe("deferred content", () => {
     // The publisher ships both items' keys and only one item's ciphertext. The
     // other arrives later from a URL, and the page as delivered is the page
     // below.
-    const recordAsShipped = hop(page.contentData.premiumtext);
-    const fetchedLater = page.sealedContent.premiumtext;
-    delete page.sealedContent.premiumtext;
+    const recordAsShipped = hop(contentRecordOf(page, "premiumtext"));
+    const fetchedLater = sealedContentOf(page, "premiumtext");
+    page.sealedContent = page.sealedContent.filter(
+      (/** @type {any} */ record) => record.contentName !== "premiumtext",
+    );
 
     const cache = new PeriodKeyCache();
     const unsealer = new Client({ cache, publisherOrigin: PUB });
@@ -227,7 +252,7 @@ describe("deferred content", () => {
 
     // A client walking the page finds a record for a name with no element.
     // That is not an error, and nothing here throws.
-    const names = Object.keys(dcaData.contentData);
+    const names = contentNamesOn(dcaData);
     assert.deepEqual(names, ["bodytext", "premiumtext"]);
     assert.equal(unsealer.extract(page, "premiumtext"), null, "no element for it yet");
     assert.equal(typeof unsealer.extract(page, "bodytext"), "string");
@@ -251,7 +276,7 @@ describe("deferred content", () => {
     // The fetch lands. Nothing about the record was re-negotiated - it is
     // the object the page shipped - and the contentKey is the one the page's
     // own keys already resolved to.
-    assert.deepEqual(dcaData.contentData.premiumtext, recordAsShipped);
+    assert.deepEqual(contentRecordOf(dcaData, "premiumtext"), recordAsShipped);
     assert.deepEqual(
       await unsealer.contentKeyFor(dcaData, "premiumtext"),
       await contentKeyFor(w, page, "premiumtext"),
@@ -261,30 +286,41 @@ describe("deferred content", () => {
     const opened = await unsealer.decrypt(dcaData, "premiumtext", fetchedLater);
     assert.equal(utf8Decode(opened), ARTICLES.D);
 
-    // A moved deferred item retains its wraps and key, but its changed name
-    // must fail authentication under the render/name transcript.
+    // A moved deferred item carries its wraps, but their nonces derive from the
+    // item name, so under the changed name they open no key.
     const misfiled = {
       ...dcaData,
-      contentData: {
+      contentData: [
         ...dcaData.contentData,
-        "premiumtext-other": { ...recordAsShipped },
-      },
+        { ...recordAsShipped, contentName: "premiumtext-other" },
+      ],
     };
-    // The tag again, and not merely a rejection: the key and the nonce are the
-    // ones that just worked, so only the AAD moved, and GCM is what says no.
     await assert.rejects(
       () => unsealer.decrypt(misfiled, "premiumtext-other", fetchedLater),
-      (/** @type {any} */ err) => err.code === "decrypt_failed",
+      (/** @type {any} */ err) => err.code === "no_key",
+      "the moved wraps open nothing under another name",
+    );
+    // The tag again, and not merely a rejection: the key is the one that just
+    // worked, so only the AAD moved, and GCM is what says no.
+    await assert.rejects(
+      decrypt(
+        await contentKeyFor(w, page, "premiumtext"),
+        new Uint8Array(NONCE_BYTES),
+        base64urlDecode(fetchedLater),
+        contentAadOctets(page, "premiumtext-other"),
+      ),
       "the fetched ciphertext is pinned to its own AAD, not just to some AAD",
     );
 
     // A carried nonce is unknown metadata and cannot retune this procedure.
     const retuned = {
       ...dcaData,
-      contentData: {
-        ...dcaData.contentData,
-        premiumtext: { ...recordAsShipped, nonce: { malformed: true } },
-      },
+      contentData: [
+        ...dcaData.contentData.filter(
+          (/** @type {any} */ record) => record.contentName !== "premiumtext",
+        ),
+        { ...recordAsShipped, nonce: { malformed: true } },
+      ],
     };
     assert.equal(
       utf8Decode(await unsealer.decrypt(retuned, "premiumtext", fetchedLater)),
@@ -320,11 +356,15 @@ describe("one record per content item", () => {
     const w = await world();
     const { page } = await w.render();
 
-    const record = page.contentData.bodytext;
-    assert.deepEqual(Object.keys(record), ["contentType", "keys"], "one record, in wire order");
-    assert.deepEqual(Object.keys(record.keys), ["premium"]);
+    const record = contentRecordOf(page, "bodytext");
     assert.deepEqual(
-      record.keys.premium.map((/** @type {any} */ e) => e.t),
+      Object.keys(record),
+      ["contentName", "contentType", "keys"],
+      "one record, in wire order",
+    );
+    assert.deepEqual(wrapGroupsOn(page, "bodytext"), ["premium"]);
+    assert.deepEqual(
+      wrapsOf(page, "bodytext", "premium").map((/** @type {any} */ e) => e.period),
       [T_NOW, T_NEXT],
     );
 
@@ -348,14 +388,19 @@ describe("one record per content item", () => {
     // opens the same record.
     const w = await world();
     const { page } = await w.render();
-    assert.ok(page.contentData.bodytext.keys, "the page does carry the cached path");
+    assert.ok(contentRecordOf(page, "bodytext").keys, "the page does carry the cached path");
 
     const unsealer = new Client({ publisherOrigin: PUB });
     const dcaData = unsealer.parse(page);
     unsealer.buildRequest(dcaData, ISSUER_NAME, ["bodytext"]);
     await unsealer.applyResponse(dcaData, ISSUER_NAME, {
       keys: {
-        contentKeys: { bodytext: base64urlEncode(await contentKeyFor(w, page, "bodytext")) },
+        contentKeys: [
+          {
+            contentName: "bodytext",
+            key: base64urlEncode(await contentKeyFor(w, page, "bodytext")),
+          },
+        ],
       },
     });
 
@@ -369,10 +414,14 @@ describe("one record per content item", () => {
     const w = await world();
     const { page } = await w.render({ periodKeySupply: null });
 
-    const record = page.contentData.bodytext;
-    assert.deepEqual(Object.keys(record), ["contentType"], "no cached path, no keys member");
+    const record = contentRecordOf(page, "bodytext");
+    assert.deepEqual(
+      Object.keys(record),
+      ["contentName", "contentType"],
+      "no cached path, no keys member",
+    );
     assert.equal(
-      Object.hasOwn(page.issuerData[ISSUER_NAME].sealed, "periodKeys"),
+      Object.hasOwn(issuerBlockOf(page, ISSUER_NAME).sealed, "periodKeys"),
       false,
       "and nothing for the issuer to grant a family with",
     );
@@ -382,7 +431,12 @@ describe("one record per content item", () => {
     unsealer.buildRequest(dcaData, ISSUER_NAME, ["bodytext"]);
     await unsealer.applyResponse(dcaData, ISSUER_NAME, {
       keys: {
-        contentKeys: { bodytext: base64urlEncode(await contentKeyFor(w, page, "bodytext")) },
+        contentKeys: [
+          {
+            contentName: "bodytext",
+            key: base64urlEncode(await contentKeyFor(w, page, "bodytext")),
+          },
+        ],
       },
     });
 
@@ -398,7 +452,7 @@ describe("one record per content item", () => {
       items: [{ ...BODYTEXT, accessGroups: ["subscriber", "premium"] }],
     });
 
-    assert.deepEqual(Object.keys(page.contentData.bodytext.keys), ["subscriber", "premium"]);
+    assert.deepEqual(wrapGroupsOn(page, "bodytext"), ["subscriber", "premium"]);
 
     for (const accessGroup of ["subscriber", "premium"]) {
       const unsealer = new Client({
@@ -422,11 +476,17 @@ describe("one record per content item", () => {
 
     // Neither malformed record below is the page declaring no such item, so
     // reporting `unknown_content` would say a name the page carries is one it
-    // does not: one record is not an object, the other lost a member the
-    // decrypt is built from.
-    for (const malformed of ["not a record", { nonce: "AA" }]) {
+    // does not: each still names bodytext, and each lost or broke a member
+    // the decrypt is built from.
+    for (const malformed of [
+      { contentName: "bodytext", nonce: "AA" },
+      { contentName: "bodytext", contentType: 7 },
+    ]) {
       const dcaData = unsealer.parse(hop(page));
-      dcaData.contentData.bodytext = malformed;
+      const at = dcaData.contentData.findIndex(
+        (/** @type {any} */ record) => record.contentName === "bodytext",
+      );
+      dcaData.contentData[at] = malformed;
 
       await assert.rejects(
         () => unsealer.decrypt(dcaData, "bodytext", unsealer.extract(page, "bodytext")),
@@ -442,14 +502,39 @@ describe("one record per content item", () => {
       );
     }
   });
+
+  test("an element that is no record names no item, and every named item still opens", async () => {
+    // A non-record element carries no contentName, so it declares nothing:
+    // the collection keeps its named records, and the element costs neither
+    // item its route.
+    const w = await world();
+    const { page } = await w.render({ items: [BODYTEXT, PREMIUMTEXT] });
+    for (const element of ["not a record", 7, null, ["bodytext"]]) {
+      const unsealer = new Client({
+        cache: await cacheHolding(w, "premium"),
+        publisherOrigin: PUB,
+      });
+      const delivered = hop(page);
+      delivered.contentData.splice(1, 0, element);
+      const dcaData = unsealer.parse(delivered);
+      assert.equal(
+        utf8Decode(
+          await unsealer.decrypt(dcaData, "premiumtext", unsealer.extract(page, "premiumtext")),
+        ),
+        ARTICLES.D,
+        JSON.stringify(element),
+      );
+    }
+  });
 });
 
 /**
  * The markup side of the split, as this suite can honestly model it: the sealed
- * ciphertext lives in its own artefact, looked up by contentName. In a browser
- * that lookup is an own-property read of the JSON object parsed out of the
- * `dca-sealed-content` script block; the DOM is the browser adapter's and the
- * bytes it hands over are these.
+ * ciphertext lives in its own artefact, looked up by contentName. Here that is
+ * the Sealer's own contentName-to-ciphertext map; in a browser it is the
+ * `{contentName, content}` records parsed out of the `dca-sealed-content`
+ * script block. The DOM is the browser adapter's and the bytes it hands over
+ * are these.
  *
  * @param {object} sealedContent
  * @param {string} contentName
@@ -485,7 +570,7 @@ describe("the JSON API variant", () => {
     assert.equal(JSON.stringify(unsealer.parse(dcaData)), JSON.stringify(dcaData));
 
     // Same names on both sides, and the ciphertext for each is one string.
-    assert.deepEqual(Object.keys(sealedContent), Object.keys(page.sealedContent));
+    assert.deepEqual(Object.keys(sealedContent), Object.keys(sealedContentByName(page)));
     for (const contentName of Object.keys(sealedContent)) {
       assert.equal(
         fromSealedContentElement(sealedContent, contentName),
@@ -509,7 +594,7 @@ describe("the JSON API variant", () => {
     async function readAll(data, extract) {
       const unsealer = new Client({ cache: new PeriodKeyCache(), publisherOrigin: PUB });
       const parsed = unsealer.parse(data);
-      const names = Object.keys(parsed.contentData);
+      const names = contentNamesOn(parsed);
 
       const { processor, endpoint, publisherRegistration } = w.endpointWith();
       const { body } = await unlockThroughAdmission(

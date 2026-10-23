@@ -17,9 +17,10 @@ import { ENCODING, encode, decode } from "../core-shared--client-publisher/gzipC
  * @param {import('../../../core-client/DcaData.js').ContentItemView} call.item - the
  *   captured view, as `DcaData#contentItemFor` returns it
  * @param {string} call.ciphertext - base64url, as the delivery carries it
- * @param {() => Promise<Uint8Array|CryptoKey|null|undefined>} call.resolveKey - the
+ * @param {(authenticate: (candidate: Uint8Array|CryptoKey, origin?: { kind?: string }) => Promise<boolean>) => Promise<Uint8Array|CryptoKey|null|undefined>} call.resolveKey - the
  *   content key for this item, asked for only once the item is one this client
- *   can read
+ *   can read. The predicate answers whether a candidate opens the item, so a
+ *   resolver holding rival candidates can pick the one that opens.
  * @param {import('../core-shared--client-publisher/gzipCodec.js').Gzip|null} [call.gzip] - the
  *   gzip implementation. The strict single-member decoder is the default;
  *   a client that reads no gzipped item at all passes `null`.

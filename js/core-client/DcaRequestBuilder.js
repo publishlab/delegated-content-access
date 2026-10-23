@@ -11,13 +11,15 @@
 // receives.
 //
 // `DcaData` admits the page this reads. It holds the outer object, the
-// selected issuer block and each route map to the shape the format states, so
-// this refuses an unusable issuer block with `unknown_issuer`. `DcaData` also
-// admits identifier-keyed maps, so this relays only what the format admits: a
-// rejected route map carries no member into the request, a rejected
-// cached-wrap map selects no accessGroup, and a name the caller asks about
-// that no admitted map carries stays absent and is not looked up some other
-// way.
+// selected issuer block and each route collection to the shape the format
+// states, so this refuses an unusable issuer block with `unknown_issuer`.
+// `DcaData` also admits the identity fields of each collection, so this relays
+// only what the format admits: a rejected route collection carries no record
+// into the request, a rejected cached-wrap collection selects no accessGroup,
+// and a name the caller asks about that no admitted record carries stays
+// absent and is not looked up some other way. Several records at one
+// coordinate are candidate alternatives, and the builder relays every one
+// whose key is canonical.
 //
 // `build` always sends the baseline contentKeys for the needed items. When
 // trusted client configuration selects period-key relay, it also sends the
@@ -34,7 +36,7 @@
 import { dcaError } from "../core-shared/errors.js";
 import { binaryStringBytes } from "../core-shared/binaryStrings.js";
 import { isPeriodKeyLabel } from "../core-shared/periodLabels.js";
-import { setOwn } from "../core-shared/wire.js";
+import { own } from "../core-shared/wire.js";
 import { DcaData } from "./DcaData.js";
 import { DcaRequest } from "../core-shared--client-issuer/DcaRequest.js";
 
@@ -86,23 +88,35 @@ export class DcaRequestBuilder {
       throw dcaError("unknown_issuer", `the page carries no issuer "${issuerName}"`);
     }
 
-    /** @type {Record<string, string>} */
-    const contentKeys = {};
-    /** @type {Record<string, Record<string, string>>} */
-    const periodKeys = {};
+    /** @type {{ contentName: string, key: string }[]} */
+    const contentKeys = [];
+    /** @type {{ accessGroup: string, period: string, key: string }[]} */
+    const periodKeys = [];
+    // An item or group named twice by the caller or by the page is relayed
+    // once; its several candidate records are all relayed, each once.
+    const relayedItems = new Set();
+    const relayedGroups = new Set();
     for (const contentName of needed) {
-      const blob = page.sealedContentKeyFor(issuerName, contentName);
-      if (binaryStringBytes(blob) !== null) setOwn(contentKeys, contentName, blob);
+      if (relayedItems.has(contentName)) continue;
+      relayedItems.add(contentName);
+      for (const key of page.sealedContentKeysFor(issuerName, contentName)) {
+        if (typeof key === "string" && binaryStringBytes(key) !== null)
+          contentKeys.push({ contentName, key });
+      }
 
       for (const accessGroup of this.#relayPeriodKeys ? page.accessGroupsFor(contentName) : []) {
-        const periods = page.sealedPeriodKeysFor(issuerName, accessGroup);
-        if (periods !== null && typeof periods === "object") {
-          const admitted = Object.fromEntries(
-            Object.entries(/** @type {any} */ (periods)).filter(
-              ([t, blob]) => isPeriodKeyLabel(t) && binaryStringBytes(blob) !== null,
-            ),
-          );
-          if (Object.keys(admitted).length > 0) setOwn(periodKeys, accessGroup, admitted);
+        if (relayedGroups.has(accessGroup)) continue;
+        relayedGroups.add(accessGroup);
+        for (const record of page.sealedPeriodKeysFor(issuerName, accessGroup) ?? []) {
+          const period = own(record, "period");
+          const key = own(record, "key");
+          if (
+            typeof period === "string" &&
+            isPeriodKeyLabel(period) &&
+            typeof key === "string" &&
+            binaryStringBytes(key) !== null
+          )
+            periodKeys.push({ accessGroup, period, key });
         }
       }
     }

@@ -52,6 +52,8 @@ import { portableTest, test } from "../support/portable-test.js";
 import { assertSignedOrigin } from "../support/signedOrigin.js";
 import { wholeRenderIssuerSupplyPlan } from "../../core-publisher/issuerSupplyPlan.js";
 import { contentAadOctets } from "../support/contentAadOctets.js";
+import { contentKeyMap } from "../support/namedRecords.js";
+import { contentNamesOn, contentRecordOf, issuerBlockOf } from "../../test-lib/helpers/inspect.js";
 
 const portableSealerTest = portableTest("portable-sealer-origin");
 const portableRefusalTest = portableTest("portable-sealer-refusals");
@@ -123,7 +125,7 @@ describe("The publisher signs one delivery origin", () => {
 
     await assertSignedOrigin(dcaData.resourceJWT, ORIGIN, TEST_SIGNING_PUBLIC_KEY_SPKI);
     // The issuer block names the key the setup configured for its issuer.
-    assert.equal(dcaData.issuerData[ISSUER_NAME].keyId, KEY_ID);
+    assert.equal(issuerBlockOf(dcaData, ISSUER_NAME).keyId, KEY_ID);
   });
 
   portableSealerTest(
@@ -165,20 +167,19 @@ describe("The publisher signs one delivery origin", () => {
           "second",
         ],
       ])) {
-        const { resource, contentData, issuerData, resourceJWT } = sealed.dcaData;
-        // The reference draws the render id, content key and issuer-envelope
-        // nonce in that order. Content itself uses the fixed zero nonce.
-        const stream = labelStream(label, 44);
+        const { resource, resourceJWT } = sealed.dcaData;
+        // The reference draws the render id and content key in that order.
+        // Content and ordinary ECDH envelopes use implicit zero nonces.
+        const stream = labelStream(label, 32);
         const renderId = stream.subarray(0, 16);
         const contentKeyBytes = stream.subarray(16, 32);
         const contentNonce = new Uint8Array(12);
-        const sealingNonce = stream.subarray(32, 44);
         await assertSignedOrigin(resourceJWT, ORIGIN, TEST_SIGNING_PUBLIC_KEY_SPKI);
         assert.equal(resource.issuedAt, instant);
         assert.equal(resource.renderId, base64url(renderId));
         assert.equal(resource.resourceId, resourceId);
-        assert.deepEqual(Object.keys(contentData), [contentName]);
-        assert.equal(Object.hasOwn(contentData[contentName], "nonce"), false);
+        assert.deepEqual(contentNamesOn(sealed.dcaData), [contentName]);
+        assert.equal(Object.hasOwn(contentRecordOf(sealed.dcaData, contentName), "nonce"), false);
         const contentKey = await crypto.subtle.importKey(
           "raw",
           contentKeyBytes,
@@ -196,12 +197,10 @@ describe("The publisher signs one delivery origin", () => {
           Buffer.from(sealed.sealedContent[contentName], "base64url"),
         );
         assert.equal(new TextDecoder().decode(plaintext), ARTICLES.A);
-        const envelope = issuerData[ISSUER_NAME].sealed.contentKeys[contentName];
-        // The ECDH envelope carries its nonce after the 65-byte ephemeral point.
-        assert.equal(
-          Buffer.from(envelope, "base64url").subarray(65, 77).toString("base64url"),
-          base64url(sealingNonce),
-        );
+        const envelope = contentKeyMap(
+          issuerBlockOf(sealed.dcaData, ISSUER_NAME).sealed.contentKeys,
+        )[contentName];
+        assert.equal(Buffer.from(envelope, "base64url").length, 97);
         // The issuer opens the envelope at its coordinate to the drawn content key.
         const opened = await openEcdhEnvelope(
           envelope,

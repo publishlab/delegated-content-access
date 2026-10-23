@@ -3,6 +3,7 @@
 import { utf8Encode } from "../core-shared/codec.js";
 import { dcaError } from "../core-shared/errors.js";
 import { requestEntryCounts } from "../core-shared/requestLimits.js";
+import { recordsByName } from "../core-shared--client-publisher/deliveryRecords.js";
 
 /**
  * What a selected request composition adds to the base request it wraps:
@@ -24,18 +25,22 @@ import { requestEntryCounts } from "../core-shared/requestLimits.js";
  * @param {readonly ((delivery: any, issuerName: string) => RequestRelay | undefined)[]} [relays]
  */
 export function issuerRequestDocument(delivery, issuer, relays = []) {
-  const block = delivery.issuerData[issuer.issuerName];
+  const block = recordsByName(delivery.issuerData, "issuerName", () => true)?.get(
+    issuer.issuerName,
+  );
   if (block === undefined) return undefined;
   const groupsNeeded = new Set(
-    Object.values(delivery.contentData).flatMap((item) => Object.keys(item.keys ?? {})),
+    delivery.contentData.flatMap((/** @type {any} */ item) =>
+      (item.keys ?? []).map((/** @type {any} */ entry) => entry.accessGroup),
+    ),
   );
   /** @type {Record<string, any>} */
-  const sealed = { contentKeys: block.sealed.contentKeys ?? {} };
+  const sealed = { contentKeys: block.sealed.contentKeys ?? [] };
   for (const field of ["periodKeys", "chainKeys"]) {
-    const groups = Object.fromEntries(
-      Object.entries(block.sealed[field] ?? {}).filter(([group]) => groupsNeeded.has(group)),
+    const records = (block.sealed[field] ?? []).filter((/** @type {any} */ record) =>
+      groupsNeeded.has(record.accessGroup),
     );
-    if (Object.keys(groups).length > 0) sealed[field] = groups;
+    if (records.length > 0) sealed[field] = records;
   }
   /** @type {Record<string, unknown>} */
   const members = {};

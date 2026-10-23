@@ -52,10 +52,19 @@ Each publication records a snapshot of reviewed work. Protocol changes follow
 the [specification adoption process](docs/spec---overview.md#document-status). The [profile specification](docs/spec--profiles.md) remains the
 source of current mandatory and optional duties.
 
-## Implemented since the previous public draft
+## Current reference capabilities
 
-Compatibility notes against the 21 September 2026 public draft are recorded in
-[CHANGELOG.md](CHANGELOG.md).
+Publication-by-publication compatibility notes are recorded in
+[CHANGELOG.md](CHANGELOG.md). Its Unreleased section covers changes since
+v1.0.0-alpha.2, published on 20 October 2026.
+
+**Current draft compatibility:** unreleased deliveries and exchanges use arrays
+of named records, 97-octet ordinary ECDH key envelopes and 113-octet content-group
+seed envelopes. They are incompatible with the former maps and carried-nonce
+envelopes. The changelog identifies the roles that must update together and the
+selected-profile boundaries. These changes and the reference corrections remain
+Unreleased until a publication records them; they are not evidence of native-port
+or deployed-browser compatibility.
 
 **Chain activation and period-key overlap:** a simple publisher can keep random
 pkeys without chain construction. Enabling chains selects a new generation of derived pkeys. Compatible clients
@@ -78,7 +87,7 @@ activation, retained-key, rollover and cutoff evidence in
 `chainsPerDay`. All ordinary and content-group chain routes in one delivery
 share that pair. Ordinary pkey labels stay explicit, including overlap or
 next-period wraps. The content-groups Proposal uses root `renderPeriod` and per-item named
-`connectors`; `contentGroups` names its response section, not a delivery-root
+`connectors`; `contentGroupKeys` names its response section, not a delivery-root
 group dictionary. Its secret-rotation candidates require bounded rival trials,
 while retention duration remains an integration choice.
 
@@ -156,6 +165,15 @@ or prove every combination of extensions.
     content name and window, across articles. It cannot derive withheld content
     names. Omitting it from a later article does not revoke the seed's existing
     reach. Narrower issuer entrustment needs a narrower supplied scope or source.
+
+- **Issuer-response size reduction** [research, wire]
+  - **Current state:** Ordinary ECDH key and content-group seed envelopes omit
+    their transmitted nonce; issuer responses retain theirs.
+  - **Remaining work:** Any response nonce omission needs a separately selected
+    construction and interoperability evidence. It remains deferred; current
+    coordinates alone do not distinguish rival keys at one coordinate.
+  - **Boundary:** No response field or fixed-nonce procedure is introduced by
+    the completed ordinary-envelope changes.
 
 - **Access-group generalization** [design, profile]
   - **Current state:** Generalization remains paused;

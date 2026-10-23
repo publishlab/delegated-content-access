@@ -457,7 +457,8 @@ export async function exchange(rendered, route, phases = () => {}) {
     const bytes = await client.opener.open({
       item,
       ciphertext: client.reader.extract(NAME),
-      resolveKey: () => client.resolver.contentKeyFor(client.dcaData, NAME),
+      resolveKey: (authenticate) =>
+        client.resolver.contentKeyForAuthenticatedItem(client.dcaData, NAME, authenticate),
     });
     opened = utf8Decode(bytes);
   }

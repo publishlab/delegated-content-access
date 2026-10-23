@@ -27,9 +27,12 @@ const ISSUER_NOW = "2025-10-23T14:20:00Z";
 
 test("unit: a denied window start withholds the chain grant for a later cutoff", () => {
   const request = new DcaRequest({
-    sealed: { contentKeys: {}, chainKeys: { [ACCESS_GROUP]: { [SUPPLIED]: "AQ" } } },
+    sealed: {
+      contentKeys: [],
+      chainKeys: [{ accessGroup: ACCESS_GROUP, cutoff: SUPPLIED, key: "AQ" }],
+    },
     periodGeometry: GEOMETRY,
-    requestedPeriodKeys: { [ACCESS_GROUP]: [CUTOFF] },
+    requestedPeriodKeys: [{ accessGroup: ACCESS_GROUP, periods: [CUTOFF] }],
   });
   const answer = chainKeyCapabilitySource({ representation: "chain-keys" }).selection(
     request,
@@ -109,10 +112,12 @@ test("end to end: the reader cannot open the denied window-start item from a cut
 
   const first = await readArticle(browser, atCutoff, [CONTENT_NAME]);
   assert.equal(exchanges.length, 1);
-  const chainKeys = exchanges[0].response?.keys?.chainKeys?.[ACCESS_GROUP];
-  assert.equal(
+  const chainKeys = (exchanges[0].response?.keys?.chainKeys ?? []).filter(
+    (/** @type {any} */ record) => record.accessGroup === ACCESS_GROUP,
+  );
+  assert.deepEqual(
     chainKeys,
-    undefined,
+    [],
     `the issuer must return no chain key while position 0 is denied; returned ${JSON.stringify(chainKeys)}`,
   );
   assert.equal(first.texts[CONTENT_NAME], null);

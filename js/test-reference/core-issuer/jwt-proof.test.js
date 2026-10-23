@@ -76,6 +76,15 @@ import {
 import { directWorld } from "../../demo/scenarios/world.js";
 import { AllowAllPolicy } from "../../demo/support/AllowAllPolicy.js";
 import { wholeRenderIssuerSupplyPlan } from "../../core-publisher/issuerSupplyPlan.js";
+import { recordsByName } from "../../core-shared--client-publisher/deliveryRecords.js";
+import {
+  contentKeyMap,
+  errorMap,
+  keyAt,
+  periodKeyMap,
+  recordAt,
+  setKeyAt,
+} from "../support/namedRecords.js";
 
 const { subtle } = globalThis.crypto;
 
@@ -612,14 +621,11 @@ test("the render carries the envelope, and the blobs carry their own coordinate"
   // Beside a blob there is the name it sits under and nothing else - what it
   // is committed to is inside it, so there is no second copy of a coordinate
   // for a client to move independently.
-  const sealed = page.issuerData[ISSUER_NAME].sealed;
+  const sealed = recordAt(page.issuerData, { issuerName: ISSUER_NAME }).sealed;
   assert.deepEqual(Object.keys(sealed), ["contentKeys", "periodKeys"]);
-  assert.deepEqual(Object.keys(sealed.contentKeys), [BODYTEXT, LOCKED]);
+  assert.deepEqual(Object.keys(contentKeyMap(sealed.contentKeys)), [BODYTEXT, LOCKED]);
 
-  const blobs = [
-    ...Object.values(sealed.contentKeys),
-    ...Object.values(sealed.periodKeys).flatMap((periods) => Object.values(periods)),
-  ];
+  const blobs = [...sealed.contentKeys, ...sealed.periodKeys].map((record) => record.key);
   assert.equal(blobs.length, 6, "two contentKeys and two accessGroups over two periods");
   assert.equal(new Set(blobs).size, 6, "one blob per coordinate, and every one its own seal");
 
@@ -638,12 +644,15 @@ test("a publisher with no period-key supply ships no cached path at all", async 
   const page = await render("123456", { periodKeySupply: null });
 
   assert.equal(
-    Object.hasOwn(page.contentData.bodytext, "keys"),
+    Object.hasOwn(
+      recordsByName(page.contentData, "contentName", () => true)?.get("bodytext"),
+      "keys",
+    ),
     false,
     "nothing for a client to unwrap",
   );
   assert.deepEqual(
-    Object.keys(page.issuerData[ISSUER_NAME].sealed),
+    Object.keys(recordAt(page.issuerData, { issuerName: ISSUER_NAME }).sealed),
     ["contentKeys"],
     "and nothing sealed for an issuer to hand out",
   );
@@ -672,9 +681,9 @@ test("the request carries the envelope and the whole page unlocks", async () => 
   );
 
   assert.equal(status, 200);
-  assert.deepEqual(Object.keys(body.keys.contentKeys), [BODYTEXT, LOCKED]);
-  assert.deepEqual(Object.keys(body.keys.periodKeys), [PREMIUM, LOCKED]);
-  assert.equal(body.errors, undefined);
+  assert.deepEqual(Object.keys(contentKeyMap(body.keys.contentKeys)), [BODYTEXT, LOCKED]);
+  assert.deepEqual(Object.keys(periodKeyMap(body.keys.periodKeys)), [PREMIUM, LOCKED]);
+  assert.equal(errorMap(body.errors), undefined);
   assert.equal(asked.publisherRegistrations, 1, "one exact kid selects one publisher registration");
   assert.equal(
     keyStore.reachCount,
@@ -695,17 +704,24 @@ test("a sealed blob moved to another slot does not open, and the honest ones bes
   // was sealed and bound to is `bodytext`, and the coordinate the issuer
   // rebuilds is the name it is answering under.
   const relabelled = structuredClone(clean);
-  relabelled.sealed.contentKeys[LOCKED] = clean.sealed.contentKeys[BODYTEXT];
+  setKeyAt(
+    relabelled.sealed.contentKeys,
+    { contentName: LOCKED },
+    keyAt(clean.sealed.contentKeys, { contentName: BODYTEXT }),
+  );
 
   const { status, body } = await unlockThroughAdmission(endpointProcessor, endpoint, relabelled);
 
   assert.equal(status, 200);
   assert.deepEqual(
-    Object.keys(body.keys.contentKeys),
+    Object.keys(contentKeyMap(body.keys.contentKeys)),
     [BODYTEXT],
     "the coordinate that was honest still answers",
   );
-  assert.deepEqual(body.errors[LOCKED], { error: "unseal_failed", message: UNSEAL_MESSAGE });
+  assert.deepEqual(errorMap(body.errors)[LOCKED], {
+    error: "unseal_failed",
+    message: UNSEAL_MESSAGE,
+  });
   assert.equal(
     keyStore.reachCount,
     before + 1,
@@ -729,58 +745,77 @@ test("a sealed blob moved to another slot does not open, and the honest ones bes
   // A periodKey moved across `t` is the same refusal at the other coordinate,
   // reported under the pair that names it.
   const acrossPeriods = structuredClone(clean);
-  const [first, second] = Object.keys(clean.sealed.periodKeys[PREMIUM]);
-  acrossPeriods.sealed.periodKeys[PREMIUM][second] = clean.sealed.periodKeys[PREMIUM][first];
+  const [first, second] = Object.keys(periodKeyMap(clean.sealed.periodKeys)[PREMIUM]);
+  setKeyAt(
+    acrossPeriods.sealed.periodKeys,
+    { accessGroup: PREMIUM, period: second },
+    keyAt(clean.sealed.periodKeys, { accessGroup: PREMIUM, period: first }),
+  );
 
   const moved = await unlockThroughAdmission(endpointProcessor, endpoint, acrossPeriods);
   assert.equal(moved.status, 200);
-  assert.deepEqual(moved.body.errors[`${PREMIUM}|${second}`], {
+  assert.deepEqual(errorMap(moved.body.errors)[`${PREMIUM}|${second}`], {
     error: "unseal_failed",
     message: UNSEAL_MESSAGE,
   });
-  assert.deepEqual(Object.keys(moved.body.keys.periodKeys[PREMIUM]), [first]);
+  assert.deepEqual(Object.keys(periodKeyMap(moved.body.keys.periodKeys)[PREMIUM]), [first]);
 
   // And a blob from another render of the same publisher, under its own name:
   // the coordinate matches and the render it was sealed under does not.
   const other = await render("123457");
   const crossRender = structuredClone(clean);
-  crossRender.sealed.contentKeys[BODYTEXT] =
-    other.issuerData[ISSUER_NAME].sealed.contentKeys[BODYTEXT];
+  setKeyAt(
+    crossRender.sealed.contentKeys,
+    { contentName: BODYTEXT },
+    keyAt(recordAt(other.issuerData, { issuerName: ISSUER_NAME }).sealed.contentKeys, {
+      contentName: BODYTEXT,
+    }),
+  );
 
   const swapped = await unlockThroughAdmission(endpointProcessor, endpoint, crossRender);
   assert.equal(swapped.status, 200);
-  assert.deepEqual(swapped.body.errors[BODYTEXT], {
+  assert.deepEqual(errorMap(swapped.body.errors)[BODYTEXT], {
     error: "unseal_failed",
     message: UNSEAL_MESSAGE,
   });
-  assert.deepEqual(Object.keys(swapped.body.keys.contentKeys), [LOCKED]);
+  assert.deepEqual(Object.keys(contentKeyMap(swapped.body.keys.contentKeys)), [LOCKED]);
 
   // A period envelope is bound to its render too. Keep the target request's
   // signed resource and content-key siblings, and copy only one period blob.
-  const periodT = Object.keys(clean.sealed.periodKeys[PREMIUM])[0];
-  const periodSiblings = Object.keys(clean.sealed.periodKeys[PREMIUM]).filter((t) => t !== periodT);
+  const periodLabels = Object.keys(periodKeyMap(clean.sealed.periodKeys)[PREMIUM]);
+  const periodT = periodLabels[0];
+  const periodSiblings = periodLabels.filter((t) => t !== periodT);
   const honestPeriods = structuredClone(clean);
-  honestPeriods.sealed.contentKeys = {};
+  honestPeriods.sealed.contentKeys = [];
   const honestPeriodAnswer = await unlockThroughAdmission(
     endpointProcessor,
     endpoint,
     honestPeriods,
   );
   assert.equal(honestPeriodAnswer.status, 200);
-  assert.equal(honestPeriodAnswer.body.errors, undefined);
-  assert.ok(honestPeriodAnswer.body.keys.periodKeys[PREMIUM][periodT]);
+  assert.equal(errorMap(honestPeriodAnswer.body.errors), undefined);
+  assert.ok(periodKeyMap(honestPeriodAnswer.body.keys.periodKeys)[PREMIUM][periodT]);
 
   const crossRenderPeriod = structuredClone(honestPeriods);
-  crossRenderPeriod.sealed.periodKeys[PREMIUM][periodT] =
-    other.issuerData[ISSUER_NAME].sealed.periodKeys[PREMIUM][periodT];
+  setKeyAt(
+    crossRenderPeriod.sealed.periodKeys,
+    { accessGroup: PREMIUM, period: periodT },
+    keyAt(recordAt(other.issuerData, { issuerName: ISSUER_NAME }).sealed.periodKeys, {
+      accessGroup: PREMIUM,
+      period: periodT,
+    }),
+  );
   const periodAnswer = await unlockThroughAdmission(endpointProcessor, endpoint, crossRenderPeriod);
   assert.equal(periodAnswer.status, 200);
-  assert.deepEqual(periodAnswer.body.errors[`${PREMIUM}|${periodT}`], {
+  assert.deepEqual(errorMap(periodAnswer.body.errors)[`${PREMIUM}|${periodT}`], {
     error: "unseal_failed",
     message: UNSEAL_MESSAGE,
   });
-  assert.equal(periodAnswer.body.keys.periodKeys[PREMIUM][periodT], undefined);
-  assert.deepEqual(Object.keys(periodAnswer.body.keys.periodKeys[PREMIUM]), periodSiblings);
+  assert.equal(periodKeyMap(periodAnswer.body.keys.periodKeys)[PREMIUM][periodT], undefined);
+  assert.deepEqual(
+    Object.keys(periodKeyMap(periodAnswer.body.keys.periodKeys)[PREMIUM]),
+    periodSiblings,
+  );
 
   // The other period envelope remains useful: the client uses the issuer's
   // valid sibling key to unwrap this render's real item content.
@@ -797,26 +832,29 @@ test("a sealed blob moved to another slot does not open, and the honest ones bes
   // A name this render never sealed, added by the client. Whatever blob it
   // carries was sealed somewhere else, which is what the client cannot fix.
   const invented = structuredClone(clean);
-  invented.sealed.contentKeys.premiumtext = clean.sealed.contentKeys[BODYTEXT];
+  invented.sealed.contentKeys.push({
+    contentName: "premiumtext",
+    key: keyAt(clean.sealed.contentKeys, { contentName: BODYTEXT }),
+  });
 
   const added = await unlockThroughAdmission(endpointProcessor, endpoint, invented);
   assert.equal(added.status, 200);
-  assert.deepEqual(added.body.errors.premiumtext, {
+  assert.deepEqual(errorMap(added.body.errors).premiumtext, {
     error: "unseal_failed",
     message: UNSEAL_MESSAGE,
   });
-  assert.deepEqual(Object.keys(added.body.keys.contentKeys), [BODYTEXT, LOCKED]);
+  assert.deepEqual(Object.keys(contentKeyMap(added.body.keys.contentKeys)), [BODYTEXT, LOCKED]);
 
   const malformed = structuredClone(clean);
-  malformed.sealed.contentKeys[BODYTEXT] = { not: "a string" };
+  setKeyAt(malformed.sealed.contentKeys, { contentName: BODYTEXT }, { not: "a string" });
   const nonString = await unlockThroughAdmission(endpointProcessor, endpoint, malformed);
   assert.equal(nonString.status, 200);
-  assert.deepEqual(nonString.body.errors[BODYTEXT], {
+  assert.deepEqual(errorMap(nonString.body.errors)[BODYTEXT], {
     error: "unseal_failed",
     message: UNSEAL_MESSAGE,
   });
   assert.deepEqual(
-    Object.keys(nonString.body.keys.contentKeys),
+    Object.keys(contentKeyMap(nonString.body.keys.contentKeys)),
     [LOCKED],
     "a non-string coordinate leaves its sibling open",
   );
@@ -828,17 +866,17 @@ test("a subset of the sealed keys is legal - the cache resolved the rest", async
 
   const request = requestFor(page, ISSUER_NAME, [BODYTEXT]);
   assert.deepEqual(
-    Object.keys(request.sealed.contentKeys),
+    Object.keys(contentKeyMap(request.sealed.contentKeys)),
     [BODYTEXT],
     "locked-data came out of the cache",
   );
-  assert.deepEqual(Object.keys(request.sealed.periodKeys), [PREMIUM]);
+  assert.deepEqual(Object.keys(periodKeyMap(request.sealed.periodKeys)), [PREMIUM]);
 
   const { status, body } = await unlockThroughAdmission(endpointProcessor, endpoint, request);
 
   assert.equal(status, 200);
-  assert.deepEqual(Object.keys(body.keys.contentKeys), [BODYTEXT]);
-  assert.deepEqual(Object.keys(body.keys.periodKeys), [PREMIUM]);
+  assert.deepEqual(Object.keys(contentKeyMap(body.keys.contentKeys)), [BODYTEXT]);
+  assert.deepEqual(Object.keys(periodKeyMap(body.keys.periodKeys)), [PREMIUM]);
 
   // A subset stops being a request when it goes down to nothing at all. A client
   // that resolved the whole page from its cache presents no coordinate, and
@@ -1002,10 +1040,18 @@ test("the envelope has to be the one these blobs were sealed under", async () =>
   });
 
   assert.equal(mixed.status, 200);
-  assert.deepEqual(mixed.body.keys.contentKeys, {});
-  assert.equal(mixed.body.keys.periodKeys, undefined, "an empty section stays off the answer");
-  assert.equal(Object.keys(mixed.body.errors).length, 6, "every coordinate the request carried");
-  for (const entry of Object.values(mixed.body.errors)) {
+  assert.deepEqual(contentKeyMap(mixed.body.keys.contentKeys), {});
+  assert.equal(
+    periodKeyMap(mixed.body.keys.periodKeys),
+    undefined,
+    "an empty section stays off the answer",
+  );
+  assert.equal(
+    Object.keys(errorMap(mixed.body.errors)).length,
+    6,
+    "every coordinate the request carried",
+  );
+  for (const entry of Object.values(errorMap(mixed.body.errors))) {
     assert.equal(/** @type {any} */ (entry).error, "unseal_failed");
   }
   assert.equal(keyStore.reachCount, before + 1);
@@ -1014,8 +1060,8 @@ test("the envelope has to be the one these blobs were sealed under", async () =>
   // render these blobs are from, and it changed nothing above. The same
   // request with its own envelope back is the whole page again.
   const honest = await unlockThroughAdmission(endpointProcessor, endpoint, request);
-  assert.deepEqual(Object.keys(honest.body.keys.contentKeys), [BODYTEXT, LOCKED]);
-  assert.equal(honest.body.errors, undefined);
+  assert.deepEqual(Object.keys(contentKeyMap(honest.body.keys.contentKeys)), [BODYTEXT, LOCKED]);
+  assert.equal(errorMap(honest.body.errors), undefined);
 });
 
 test("markup signed before a signing-key rotation still verifies, selected by kid", async () => {
@@ -1037,7 +1083,7 @@ test("markup signed before a signing-key rotation still verifies, selected by ki
       requestFor(page, ISSUER_NAME, WHOLE_PAGE),
     );
     assert.equal(status, 200);
-    assert.deepEqual(Object.keys(body.keys.contentKeys), [BODYTEXT, LOCKED]);
+    assert.deepEqual(Object.keys(contentKeyMap(body.keys.contentKeys)), [BODYTEXT, LOCKED]);
   }
 
   // The kid selects, and it is not a hint: a token that names the new key and
@@ -1074,12 +1120,15 @@ test("a duplicate JSON member cannot make the gate and the backend disagree", as
   const other = await render("123457");
 
   const request = requestFor(page, ISSUER_NAME, WHOLE_PAGE);
-  const mine = request.sealed.contentKeys[BODYTEXT];
-  const foreign = other.issuerData[ISSUER_NAME].sealed.contentKeys[BODYTEXT];
+  const mine = keyAt(request.sealed.contentKeys, { contentName: BODYTEXT });
+  const foreign = keyAt(
+    recordAt(other.issuerData, { issuerName: ISSUER_NAME }).sealed.contentKeys,
+    { contentName: BODYTEXT },
+  );
 
   const honest = JSON.stringify(request);
-  const member = (/** @type {string} */ blob) =>
-    `${JSON.stringify(BODYTEXT)}:${JSON.stringify(blob)}`;
+  // The record's `key` member, which the attack writes twice inside it.
+  const member = (/** @type {string} */ blob) => `"key":${JSON.stringify(blob)}`;
   assert.equal(honest.split(member(mine)).length - 1, 1, "the honest body names it once");
 
   /** The one member, written twice, in the order asked for. */
@@ -1103,8 +1152,27 @@ test("a duplicate JSON member cannot make the gate and the backend disagree", as
   // another render, so no key comes back for that name.
   const answer = await unlockThroughAdmission(endpointProcessor, endpoint, twice([mine, foreign]));
   assert.equal(answer.status, 200);
-  assert.equal(answer.body.errors[BODYTEXT].error, "unseal_failed");
-  assert.deepEqual(Object.keys(answer.body.keys.contentKeys), [LOCKED]);
+  assert.equal(errorMap(answer.body.errors)[BODYTEXT].error, "unseal_failed");
+  assert.deepEqual(Object.keys(contentKeyMap(answer.body.keys.contentKeys)), [LOCKED]);
+
+  // Two whole records at the name are two candidates, not a shadowing: the
+  // foreign one opens nothing and the page's own one answers, in either
+  // order, with the bytes the honest body gets.
+  for (const blobs of [
+    [foreign, mine],
+    [mine, foreign],
+  ]) {
+    const rivals = structuredClone(request);
+    rivals.sealed.contentKeys = [
+      ...blobs.map((key) => ({ contentName: BODYTEXT, key })),
+      ...rivals.sealed.contentKeys.filter(
+        (/** @type {any} */ record) => record.contentName !== BODYTEXT,
+      ),
+    ];
+    const both = await unlockThroughAdmission(endpointProcessor, endpoint, rivals);
+    assert.equal(both.status, 200);
+    assert.deepEqual(both.body, clean.body, "the foreign record costs the name nothing");
+  }
 });
 
 test("the pure checks decide nothing about access", async () => {
@@ -1147,7 +1215,7 @@ test("the pure checks decide nothing about access", async () => {
   assert.equal(refused.status, 400);
   assert.equal(refused.body.error, "binding_failed");
   assert.equal(refused.body.keys, undefined, "nothing partial comes back");
-  assert.equal(refused.body.errors, undefined);
+  assert.equal(errorMap(refused.body.errors), undefined);
   assert.equal(keyStore.reachCount, before, "no private key was touched");
 });
 
@@ -1206,7 +1274,7 @@ test("a renderId outside the binding width is refused whole too", async () => {
   assert.equal(refused.status, 400);
   assert.equal(refused.body.error, "binding_failed");
   assert.equal(refused.body.keys, undefined, "nothing partial comes back");
-  assert.equal(refused.body.errors, undefined, "and no per-blob verdict either");
+  assert.equal(errorMap(refused.body.errors), undefined, "and no per-blob verdict either");
   assert.equal(keyStore.reachCount, before, "no private key was touched");
 });
 
@@ -1282,7 +1350,7 @@ test("the other signed payload members are admitted, and none of them becomes a 
     200,
     "an old issuedAt and an expired iat/exp pair are not an expiry",
   );
-  assert.equal(typeof answered.body.keys.contentKeys[BODYTEXT], "string");
+  assert.equal(typeof contentKeyMap(answered.body.keys.contentKeys)[BODYTEXT], "string");
 
   const lowercase = await signedAs({
     ...page.resource,

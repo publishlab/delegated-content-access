@@ -1,0 +1,2 @@
+# Delay newly resolved dependency releases by seven days.
+minimumReleaseAge: 10080

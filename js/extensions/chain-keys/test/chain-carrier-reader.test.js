@@ -35,6 +35,8 @@ import { periodFamilyGeneration } from "../core-shared--publisher-issuer/periodF
 import { periodFamilySupply } from "../core-publisher/periodFamilySupply.js";
 import { explicitChainKeyClientProfile } from "../referenceProfile.js";
 import { wholeRenderIssuerSupplyPlan } from "../../../core-publisher/issuerSupplyPlan.js";
+import { periodKeyMap } from "../../../test-reference/support/namedRecords.js";
+import { chainKeyRecords } from "./world.js";
 
 const GROUP = "premium";
 const OTHER = "archive";
@@ -42,6 +44,19 @@ const GEOMETRY = Object.freeze({ chainsPerDay: 2, periodMinutes: 15 });
 const EARLY_T = "251023T1145";
 const LATE_T = "251023T2345";
 const CHAIN_KEY = base64urlEncode(new Uint8Array(16).fill(3));
+const RIVAL_KEY = base64urlEncode(new Uint8Array(16).fill(4));
+
+/**
+ * Families in which no record holds a string cutoff. Their collection remains
+ * admitted while none of the malformed labels names a source coordinate.
+ */
+const NO_CUTOFF_FAMILIES = Object.freeze([
+  [{ accessGroup: GROUP }],
+  [{ accessGroup: GROUP, key: CHAIN_KEY }],
+  [{ accessGroup: GROUP, cutoff: null, key: CHAIN_KEY }],
+  [{ accessGroup: GROUP, cutoff: 7, key: CHAIN_KEY }],
+  [{ accessGroup: GROUP, cutoff: [LATE_T], key: CHAIN_KEY }],
+]);
 
 function associated(page, request) {
   return new ResponseAssociation(page, ISSUER, {
@@ -58,7 +73,7 @@ function requestCarrier(collection, geometry = GEOMETRY, requestedPeriodKeys) {
   return new DcaRequest({
     version: "dca/1",
     issuerName: "issuer.example",
-    sealed: { contentKeys: {}, chainKeys: collection },
+    sealed: { contentKeys: [], chainKeys: collection },
     periodGeometry: geometry,
     ...(requestedPeriodKeys === undefined ? {} : { requestedPeriodKeys }),
   });
@@ -84,7 +99,7 @@ const CARRIERS = [
       chainKeyRequestInput(requestCarrier(collection, geometry)),
     sharedRead: (/** @type {unknown} */ collection, /** @type {unknown} */ geometry = GEOMETRY) =>
       chainKeyCarrierReader({
-        container: { contentKeys: {}, chainKeys: collection },
+        container: { contentKeys: [], chainKeys: collection },
         context: geometry,
         valueName: "sealed",
       }),
@@ -103,12 +118,23 @@ const CARRIERS = [
   },
 ];
 
+/** @param {Record<string, string[]>} table one `{accessGroup, periods}` record per group */
+function hintRecords(table) {
+  return Object.entries(table).map(([accessGroup, periods]) => ({ accessGroup, periods }));
+}
+
+/** One valid premium source member, the family the hints below are checked against. */
+const PREMIUM_SOURCE = chainKeyRecords({ premium: { "251023T1415": CHAIN_KEY } });
+
 test("requestedPeriodKeys normalizes order and duplicates without presenting hint-only groups", () => {
   const input = chainKeyRequestInput(
-    requestCarrier({ premium: { "251023T1415": CHAIN_KEY } }, GEOMETRY, {
-      premium: ["251023T1415", "251023T1200", "251023T1415", "251023T1400"],
-      absent: ["251023T1000"],
-    }),
+    requestCarrier(PREMIUM_SOURCE, GEOMETRY, [
+      {
+        accessGroup: "premium",
+        periods: ["251023T1415", "251023T1200", "251023T1415", "251023T1400"],
+      },
+      { accessGroup: "absent", periods: ["251023T1000"] },
+    ]),
   );
   assert.deepEqual(input.requestedPeriodKeys, {
     premium: ["251023T1200", "251023T1400", "251023T1415"],
@@ -123,9 +149,7 @@ test("requestedPeriodKeys checks raw bounds and grid before source selection", (
   assert.throws(
     () =>
       chainKeyRequestInput(
-        requestCarrier({ premium: { "251023T1415": CHAIN_KEY } }, GEOMETRY, {
-          premium: duplicated,
-        }),
+        requestCarrier(PREMIUM_SOURCE, GEOMETRY, hintRecords({ premium: duplicated })),
       ),
     (/** @type {any} */ error) => error.code === "binding_failed",
   );
@@ -133,19 +157,25 @@ test("requestedPeriodKeys checks raw bounds and grid before source selection", (
   assert.throws(
     () =>
       chainKeyRequestInput(
-        requestCarrier({ premium: { "251023T1415": CHAIN_KEY } }, GEOMETRY, {
-          premium: ["251023T1415", "251023T1410"],
-        }),
+        requestCarrier(
+          PREMIUM_SOURCE,
+          GEOMETRY,
+          hintRecords({ premium: ["251023T1415", "251023T1410"] }),
+        ),
       ),
     (/** @type {any} */ error) => error.code === "binding_failed",
     "a label off the admitted family grid is a request-structure failure",
   );
 
   const exactlyBounded = chainKeyRequestInput(
-    requestCarrier({ premium: { "251023T1415": CHAIN_KEY } }, GEOMETRY, {
-      premium: Array(288).fill("251023T1415"),
-      archive: Array(224).fill("251023T1400"),
-    }),
+    requestCarrier(
+      PREMIUM_SOURCE,
+      GEOMETRY,
+      hintRecords({
+        premium: Array(288).fill("251023T1415"),
+        archive: Array(224).fill("251023T1400"),
+      }),
+    ),
   );
   assert.deepEqual(exactlyBounded.requestedPeriodKeys, {
     premium: ["251023T1415"],
@@ -154,27 +184,115 @@ test("requestedPeriodKeys checks raw bounds and grid before source selection", (
   assert.throws(
     () =>
       chainKeyRequestInput(
-        requestCarrier({ premium: { "251023T1415": CHAIN_KEY } }, GEOMETRY, {
-          premium: Array(288).fill("251023T1415"),
-          archive: Array(225).fill("251023T1400"),
-        }),
+        requestCarrier(
+          PREMIUM_SOURCE,
+          GEOMETRY,
+          hintRecords({
+            premium: Array(288).fill("251023T1415"),
+            archive: Array(225).fill("251023T1400"),
+          }),
+        ),
       ),
     (/** @type {any} */ error) => error.code === "binding_failed",
     "the total raw input is bounded before duplicate normalization",
   );
 });
 
+test("requestedPeriodKeys records for one group request the union of their labels", () => {
+  const input = chainKeyRequestInput(
+    requestCarrier(PREMIUM_SOURCE, GEOMETRY, [
+      { accessGroup: "premium", periods: ["251023T1415", "251023T1200"] },
+      { accessGroup: "archive", periods: ["251023T1000"] },
+      { accessGroup: "premium", periods: ["251023T1400", "251023T1415"] },
+    ]),
+  );
+  assert.deepEqual(input.requestedPeriodKeys, {
+    premium: ["251023T1200", "251023T1400", "251023T1415"],
+    archive: ["251023T1000"],
+  });
+});
+
+test("requestedPeriodKeys counts raw labels across records toward both bounds", () => {
+  /** @param {{ accessGroup: string, periods: string[] }[]} hints */
+  const admit = (hints) => chainKeyRequestInput(requestCarrier(PREMIUM_SOURCE, GEOMETRY, hints));
+  const refused = (/** @type {any} */ error) => error.code === "binding_failed";
+
+  assert.deepEqual(
+    admit([
+      { accessGroup: "premium", periods: Array(144).fill("251023T1415") },
+      { accessGroup: "premium", periods: Array(144).fill("251023T1415") },
+    ]).requestedPeriodKeys,
+    { premium: ["251023T1415"] },
+    "288 raw labels over two records fit the family bound",
+  );
+  assert.throws(
+    () =>
+      admit([
+        { accessGroup: "premium", periods: Array(144).fill("251023T1415") },
+        { accessGroup: "premium", periods: Array(145).fill("251023T1415") },
+      ]),
+    refused,
+    "289 raw labels over two records of one group exceed the family bound of 288",
+  );
+
+  const spread = [
+    { accessGroup: "premium", periods: Array(200).fill("251023T1415") },
+    { accessGroup: "archive", periods: Array(200).fill("251023T1400") },
+    { accessGroup: "premium", periods: Array(88).fill("251023T1415") },
+  ];
+  assert.deepEqual(
+    admit([...spread, { accessGroup: "sport", periods: Array(24).fill("251023T1400") }])
+      .requestedPeriodKeys,
+    { premium: ["251023T1415"], archive: ["251023T1400"], sport: ["251023T1400"] },
+    "512 raw labels over four records fit the request bound",
+  );
+  assert.throws(
+    () => admit([...spread, { accessGroup: "sport", periods: Array(25).fill("251023T1400") }]),
+    refused,
+    "513 raw labels over four records exceed the request bound of 512",
+  );
+});
+
+test("requestedPeriodKeys in any other shape refuses the request", () => {
+  const record = { accessGroup: "premium", periods: ["251023T1415"] };
+  for (const [shape, hints] of /** @type {[string, unknown][]} */ ([
+    ["the former group map", { premium: ["251023T1415"] }],
+    ["an empty collection", []],
+    ["a non-record element beside a record", [record, "251023T1415"]],
+    ["a null element", [null]],
+    ["an array element", [["premium", ["251023T1415"]]]],
+    ["empty periods", [{ accessGroup: "premium", periods: [] }]],
+    ["periods that are not an array", [{ accessGroup: "premium", periods: "251023T1415" }]],
+    ["a missing accessGroup", [{ periods: ["251023T1415"] }]],
+    ["a bad accessGroup", [{ accessGroup: "bad name", periods: ["251023T1415"] }]],
+  ])) {
+    assert.throws(
+      () => chainKeyRequestInput(requestCarrier(PREMIUM_SOURCE, GEOMETRY, hints)),
+      (/** @type {any} */ error) => error.code === "binding_failed",
+      shape,
+    );
+  }
+});
+
 test("requestedPeriodKeys cannot repair an already invalid source family", () => {
   const input = chainKeyRequestInput(
-    requestCarrier({ premium: { "251023T1415": CHAIN_KEY, "251023T1400": CHAIN_KEY } }, GEOMETRY, {
-      premium: ["251023T1415"],
-    }),
+    requestCarrier(
+      chainKeyRecords({ premium: { "251023T1415": CHAIN_KEY, "251023T1400": CHAIN_KEY } }),
+      GEOMETRY,
+      hintRecords({ premium: ["251023T1415"] }),
+    ),
   );
   assert.equal(input.family("premium").kind, "invalid");
   assert.deepEqual(input.requestedPeriodKeys, { premium: ["251023T1415"] });
-  for (const family of [null, "x", 7, [], {}]) {
+  for (const family of [
+    [
+      { accessGroup: GROUP, cutoff: LATE_T, key: CHAIN_KEY },
+      { accessGroup: GROUP, cutoff: "251023T2330", key: CHAIN_KEY },
+    ],
+    Array.from({ length: 3 }, () => ({ accessGroup: GROUP, cutoff: LATE_T, key: CHAIN_KEY })),
+  ]) {
     const failed = chainKeyRequestInput(
-      requestCarrier({ [GROUP]: family }, GEOMETRY, { [GROUP]: ["251023T1410"] }),
+      requestCarrier(family, GEOMETRY, hintRecords({ [GROUP]: ["251023T1410"] })),
     );
     assert.equal(
       failed.family(GROUP).kind,
@@ -187,10 +305,12 @@ test("requestedPeriodKeys cannot repair an already invalid source family", () =>
 describe("one decided reading of both chain carriers", () => {
   for (const { carrier, valueName, read, sharedRead } of CARRIERS) {
     test(`${carrier}: a non-string member is dropped while valid siblings survive`, () => {
-      const input = read({
-        [GROUP]: { [LATE_T]: { key: 7 }, [EARLY_T]: CHAIN_KEY },
-        [OTHER]: { [LATE_T]: CHAIN_KEY },
-      });
+      const input = read(
+        chainKeyRecords({
+          [GROUP]: { [LATE_T]: { key: 7 }, [EARLY_T]: CHAIN_KEY },
+          [OTHER]: { [LATE_T]: CHAIN_KEY },
+        }),
+      );
 
       assert.equal(input.family(GROUP).kind, "valid", "one malformed value costs only that member");
       assert.deepEqual(
@@ -207,20 +327,24 @@ describe("one decided reading of both chain carriers", () => {
 
     test(`${carrier}: positioned duplicates void a family before envelope admission`, () => {
       for (const value of ["AQ==", "AQ"]) {
-        const input = read({
-          [GROUP]: { "251023T2330": value, [LATE_T]: CHAIN_KEY },
-          [OTHER]: { [LATE_T]: CHAIN_KEY },
-        });
+        const input = read(
+          chainKeyRecords({
+            [GROUP]: { "251023T2330": value, [LATE_T]: CHAIN_KEY },
+            [OTHER]: { [LATE_T]: CHAIN_KEY },
+          }),
+        );
         assert.equal(input.family(GROUP).kind, "invalid");
         assert.equal(input.family(OTHER).kind, "valid");
       }
     });
 
     test(`${carrier}: an invalid label costs one member and keeps a valid sibling`, () => {
-      const input = read({
-        [GROUP]: { "251023T1410": CHAIN_KEY, [EARLY_T]: CHAIN_KEY },
-        [OTHER]: { [LATE_T]: CHAIN_KEY },
-      });
+      const input = read(
+        chainKeyRecords({
+          [GROUP]: { "251023T1410": CHAIN_KEY, [EARLY_T]: CHAIN_KEY },
+          [OTHER]: { [LATE_T]: CHAIN_KEY },
+        }),
+      );
 
       assert.equal(input.family(GROUP).kind, "valid");
       assert.deepEqual(
@@ -231,12 +355,10 @@ describe("one decided reading of both chain carriers", () => {
     });
 
     test(`${carrier}: member order follows the label, not the wire`, () => {
-      /** @type {Record<string, string>} */
-      const family = {};
-      family[LATE_T] = CHAIN_KEY;
-      family[EARLY_T] = CHAIN_KEY;
-
-      const view = read({ [GROUP]: family }).family(GROUP);
+      const view = read([
+        { accessGroup: GROUP, cutoff: LATE_T, key: CHAIN_KEY },
+        { accessGroup: GROUP, cutoff: EARLY_T, key: CHAIN_KEY },
+      ]).family(GROUP);
 
       assert.equal(view.kind, "valid");
       assert.deepEqual(
@@ -247,7 +369,7 @@ describe("one decided reading of both chain carriers", () => {
     });
 
     test(`${carrier}: invalid stays distinct from absent`, () => {
-      const input = read({ [GROUP]: { [LATE_T]: CHAIN_KEY } });
+      const input = read(chainKeyRecords({ [GROUP]: { [LATE_T]: CHAIN_KEY } }));
 
       assert.deepEqual([...input.presented], [GROUP]);
       assert.equal(input.family(GROUP).kind, "valid");
@@ -257,35 +379,166 @@ describe("one decided reading of both chain carriers", () => {
         "a family nobody presented is absent, never invalid",
       );
 
-      for (const family of [null, "x", 7, [], {}]) {
-        const failed = read({ [GROUP]: family, [OTHER]: { [LATE_T]: CHAIN_KEY } });
+      for (const family of NO_CUTOFF_FAMILIES) {
+        const failed = read([...family, { accessGroup: OTHER, cutoff: LATE_T, key: CHAIN_KEY }]);
         assert.deepEqual([...failed.presented], [GROUP, OTHER]);
-        assert.equal(failed.family(GROUP).kind, "invalid");
+        assert.equal(failed.family(GROUP).kind, "valid", "label failures retain member scope");
+        assert.deepEqual(failed.family(GROUP).members, []);
+        assert.deepEqual(failed.family(GROUP).malformedMembers, []);
         assert.equal(failed.family(OTHER).kind, "valid");
       }
-      for (const collection of ["not-a-collection", null]) {
+      for (const collection of ["not-a-collection", null, { [GROUP]: { [LATE_T]: CHAIN_KEY } }]) {
         const malformed = sharedRead(collection);
         assert.deepEqual([...malformed.presented], []);
         assert.equal(
           malformed.family(GROUP).kind,
           "invalid",
-          "a malformed collection invalidates every family it could have carried",
+          "a collection that is not a record array invalidates every family it could have carried",
         );
       }
     });
 
+    test(`${carrier}: a non-record element names no family and its siblings keep their scope`, () => {
+      const input = read([
+        null,
+        "x",
+        7,
+        [GROUP, EARLY_T, CHAIN_KEY],
+        { accessGroup: GROUP, cutoff: LATE_T, key: CHAIN_KEY },
+        { accessGroup: OTHER, cutoff: LATE_T, key: CHAIN_KEY },
+      ]);
+      assert.deepEqual([...input.presented], [GROUP, OTHER]);
+      assert.deepEqual(
+        input.family(GROUP).members.map((/** @type {any} */ member) => member.t),
+        [LATE_T],
+      );
+      assert.equal(input.family(OTHER).kind, "valid");
+
+      // The request refuses a record without a string accessGroup at
+      // admission, which carrier-corrections.test.js holds; the shared reader
+      // underneath skips it the way it skips a non-record.
+      const nameless = sharedRead([
+        { accessGroup: GROUP, cutoff: LATE_T, key: CHAIN_KEY },
+        { cutoff: EARLY_T, key: CHAIN_KEY },
+        { accessGroup: 7, cutoff: EARLY_T, key: CHAIN_KEY },
+      ]);
+      assert.deepEqual([...nameless.presented], [GROUP]);
+      assert.deepEqual(
+        nameless.family(GROUP).members.map((/** @type {any} */ member) => member.t),
+        [LATE_T],
+        "a record without a string accessGroup lends no cutoff to a family",
+      );
+
+      const skippedUncounted = sharedRead([
+        ...Array.from({ length: 16 }, (_, index) => ({
+          accessGroup: `g${index}`,
+          cutoff: LATE_T,
+          key: CHAIN_KEY,
+        })),
+        null,
+        "x",
+        [],
+        { cutoff: LATE_T, key: CHAIN_KEY },
+      ]);
+      assert.ok(
+        skippedUncounted.presented.every(
+          (/** @type {string} */ accessGroup) =>
+            skippedUncounted.family(accessGroup).kind === "valid",
+        ),
+        "skipped elements count toward no bound",
+      );
+    });
+
+    for (const [order, records] of [
+      [
+        "first value first",
+        [
+          { accessGroup: GROUP, cutoff: LATE_T, key: CHAIN_KEY },
+          { accessGroup: GROUP, cutoff: LATE_T, key: RIVAL_KEY },
+        ],
+      ],
+      [
+        "rival value first",
+        [
+          { accessGroup: GROUP, cutoff: LATE_T, key: RIVAL_KEY },
+          { accessGroup: GROUP, cutoff: LATE_T, key: CHAIN_KEY },
+        ],
+      ],
+    ]) {
+      test(`${carrier}: rival records at one cutoff are two candidate members, ${order}`, () => {
+        const view = read(records).family(GROUP);
+
+        assert.equal(view.kind, "valid", "rivals at one cutoff hold one position");
+        assert.deepEqual(
+          view.members.map((/** @type {any} */ member) => member.t),
+          [LATE_T, LATE_T],
+        );
+        assert.deepEqual(
+          view.members.map((/** @type {any} */ member) => member[valueName]).sort(),
+          [CHAIN_KEY, RIVAL_KEY].sort(),
+          "neither record overwrites the other",
+        );
+        assert.deepEqual(view.malformedMembers, []);
+      });
+    }
+
+    test(`${carrier}: an identical duplicate record is one member`, () => {
+      const view = read([
+        { accessGroup: GROUP, cutoff: LATE_T, key: CHAIN_KEY },
+        { accessGroup: GROUP, cutoff: LATE_T, key: CHAIN_KEY },
+      ]).family(GROUP);
+
+      assert.equal(view.kind, "valid");
+      assert.deepEqual(
+        view.members.map((/** @type {any} */ member) => [member.t, member[valueName]]),
+        [[LATE_T, CHAIN_KEY]],
+      );
+    });
+
+    test(`${carrier}: a cutoff with no valid value among its records is one malformed member`, () => {
+      const allMalformed = read([
+        { accessGroup: GROUP, cutoff: LATE_T, key: 7 },
+        { accessGroup: GROUP, cutoff: LATE_T, key: "AQ==" },
+      ]).family(GROUP);
+      assert.equal(allMalformed.kind, "valid");
+      assert.deepEqual(allMalformed.members, []);
+      assert.deepEqual(
+        allMalformed.malformedMembers.map((/** @type {any} */ member) => member.t),
+        [LATE_T],
+      );
+
+      const oneValid = read([
+        { accessGroup: GROUP, cutoff: LATE_T, key: 7 },
+        { accessGroup: GROUP, cutoff: LATE_T, key: CHAIN_KEY },
+      ]).family(GROUP);
+      assert.deepEqual(
+        oneValid.members.map((/** @type {any} */ member) => member[valueName]),
+        [CHAIN_KEY],
+      );
+      assert.deepEqual(oneValid.malformedMembers, [], "a valid rival leaves the cutoff no gap");
+    });
+
+    test(`${carrier}: rival records at two cutoffs of one window still void the family`, () => {
+      const input = read([
+        { accessGroup: GROUP, cutoff: LATE_T, key: CHAIN_KEY },
+        { accessGroup: GROUP, cutoff: LATE_T, key: RIVAL_KEY },
+        { accessGroup: GROUP, cutoff: "251023T2330", key: CHAIN_KEY },
+        { accessGroup: OTHER, cutoff: LATE_T, key: CHAIN_KEY },
+      ]);
+      assert.equal(input.family(GROUP).kind, "invalid");
+      assert.equal(input.family(OTHER).kind, "valid");
+    });
+
     test(`${carrier}: geometry resolves as a whole pair or the family fails`, () => {
-      const partial = read({ [GROUP]: { [LATE_T]: CHAIN_KEY } }, { chainsPerDay: 2 });
+      const records = chainKeyRecords({ [GROUP]: { [LATE_T]: CHAIN_KEY } });
+      const partial = read(records, { chainsPerDay: 2 });
       assert.equal(
         partial.family(GROUP).kind,
         "invalid",
         "a partial root pair fails the family instead of inferring",
       );
 
-      const reordered = read(
-        { [GROUP]: { [LATE_T]: CHAIN_KEY } },
-        { periodMinutes: 15, chainsPerDay: 2 },
-      );
+      const reordered = read(records, { periodMinutes: 15, chainsPerDay: 2 });
       assert.deepEqual(reordered.family(GROUP).geometry, {
         chainsPerDay: 2,
         periodMinutes: 15,
@@ -293,7 +546,7 @@ describe("one decided reading of both chain carriers", () => {
         positionsPerWindow: 48,
       });
 
-      const unresolved = read({ [GROUP]: { [LATE_T]: CHAIN_KEY } }, null);
+      const unresolved = read(records, null);
       assert.equal(
         unresolved.family(GROUP).kind,
         "invalid",
@@ -302,7 +555,9 @@ describe("one decided reading of both chain carriers", () => {
     });
 
     test(`${carrier}: one window holds one member, within both bounds`, () => {
-      const collision = read({ [GROUP]: { [LATE_T]: CHAIN_KEY, "251023T2330": CHAIN_KEY } });
+      const collision = read(
+        chainKeyRecords({ [GROUP]: { [LATE_T]: CHAIN_KEY, "251023T2330": CHAIN_KEY } }),
+      );
       assert.equal(
         collision.family(GROUP).kind,
         "invalid",
@@ -310,18 +565,22 @@ describe("one decided reading of both chain carriers", () => {
       );
 
       const two = ["251023T1145", "251023T2345"];
-      const full = read({ [GROUP]: Object.fromEntries(two.map((t) => [t, CHAIN_KEY])) });
+      const full = read(
+        chainKeyRecords({ [GROUP]: Object.fromEntries(two.map((t) => [t, CHAIN_KEY])) }),
+      );
       assert.equal(full.family(GROUP).kind, "valid");
       assert.equal(full.family(GROUP).members.length, 2);
 
-      const overFamily = read({
-        [GROUP]: {
-          [two[0]]: CHAIN_KEY,
-          [two[1]]: CHAIN_KEY,
-          "251024T1145": { malformed: true },
-        },
-        [OTHER]: { [LATE_T]: CHAIN_KEY },
-      });
+      const overFamily = read(
+        chainKeyRecords({
+          [GROUP]: {
+            [two[0]]: CHAIN_KEY,
+            [two[1]]: CHAIN_KEY,
+            "251024T1145": { malformed: true },
+          },
+          [OTHER]: { [LATE_T]: CHAIN_KEY },
+        }),
+      );
       assert.equal(overFamily.family(GROUP).kind, "invalid", "raw maxChainMembersPerFamily is 2");
       assert.equal(
         overFamily.family(OTHER).kind,
@@ -330,9 +589,11 @@ describe("one decided reading of both chain carriers", () => {
       );
 
       const atMessageLimit = read(
-        Object.fromEntries(
-          Array.from({ length: 16 }, (_, index) => [`g${index}`, { [LATE_T]: CHAIN_KEY }]),
-        ),
+        Array.from({ length: 16 }, (_, index) => ({
+          accessGroup: `g${index}`,
+          cutoff: LATE_T,
+          key: CHAIN_KEY,
+        })),
       );
       assert.ok(
         atMessageLimit.presented.every(
@@ -343,9 +604,11 @@ describe("one decided reading of both chain carriers", () => {
       );
 
       const overMessage = read(
-        Object.fromEntries(
-          Array.from({ length: 17 }, (_, index) => [`g${index}`, { [LATE_T]: CHAIN_KEY }]),
-        ),
+        Array.from({ length: 17 }, (_, index) => ({
+          accessGroup: `g${index}`,
+          cutoff: LATE_T,
+          key: CHAIN_KEY,
+        })),
       );
       assert.ok(
         overMessage.presented.every(
@@ -354,12 +617,50 @@ describe("one decided reading of both chain carriers", () => {
         "maxChainMembersPerMessage refuses the whole 17-member collection",
       );
     });
+
+    test(`${carrier}: raw records count toward both bounds before identical copies merge`, () => {
+      const copy = { accessGroup: GROUP, cutoff: LATE_T, key: CHAIN_KEY };
+      const twoCopies = read([copy, { ...copy }]);
+      assert.equal(twoCopies.family(GROUP).kind, "valid", "two raw records fit the family bound");
+
+      const threeCopies = read([copy, { ...copy }, { ...copy }]);
+      assert.equal(
+        threeCopies.family(GROUP).kind,
+        "invalid",
+        "three identical records are three raw records against MAX_CHAIN_MEMBERS_PER_FAMILY",
+      );
+
+      const copiedFamilies = (/** @type {number} */ count) =>
+        Array.from({ length: count }, (_, index) => ({
+          accessGroup: `g${Math.floor(index / 2)}`,
+          cutoff: LATE_T,
+          key: CHAIN_KEY,
+        }));
+      const atMessageLimit = read(copiedFamilies(16));
+      assert.ok(
+        atMessageLimit.presented.every(
+          (/** @type {string} */ accessGroup) =>
+            atMessageLimit.family(accessGroup).kind === "valid",
+        ),
+        "eight families of two identical records are 16 raw records",
+      );
+      const overMessage = read(copiedFamilies(17));
+      assert.equal(overMessage.presented.length, 9, "nine distinct records after merging");
+      assert.ok(
+        overMessage.presented.every(
+          (/** @type {string} */ accessGroup) => overMessage.family(accessGroup).kind === "invalid",
+        ),
+        "17 raw records exceed maxChainMembersPerMessage whatever merges",
+      );
+    });
   }
 });
 
 test("the response reader marks a grammar-failing family name invalid rather than absent", () => {
   const input = chainKeyResponseInput(
-    responseCarrier({ "bad name": { [LATE_T]: CHAIN_KEY }, [OTHER]: { [LATE_T]: CHAIN_KEY } }),
+    responseCarrier(
+      chainKeyRecords({ "bad name": { [LATE_T]: CHAIN_KEY }, [OTHER]: { [LATE_T]: CHAIN_KEY } }),
+    ),
     { periodGeometry: GEOMETRY },
   );
   assert.ok(input.presented.includes("bad name"));
@@ -369,7 +670,7 @@ test("the response reader marks a grammar-failing family name invalid rather tha
 test("the response carrier leaves wrapped ciphertext spelling to transport admission", () => {
   const input = chainKeyResponseInput(
     {
-      keys: { chainKeys: { [GROUP]: { "251023T2330": { key: "AQ==" } } } },
+      keys: { chainKeys: [{ accessGroup: GROUP, cutoff: "251023T2330", key: { key: "AQ==" } }] },
     },
     { periodGeometry: GEOMETRY },
   );
@@ -379,11 +680,13 @@ test("the response carrier leaves wrapped ciphertext spelling to transport admis
 });
 
 test("explicit local ingress capacity admits 16 chain members with ordinary base companions", () => {
-  const chainGroups = Object.fromEntries(
-    Array.from({ length: 8 }, (_, index) => [
-      `g${index}`,
-      { [EARLY_T]: CHAIN_KEY, [LATE_T]: CHAIN_KEY },
-    ]),
+  const chainGroups = chainKeyRecords(
+    Object.fromEntries(
+      Array.from({ length: 8 }, (_, index) => [
+        `g${index}`,
+        { [EARLY_T]: CHAIN_KEY, [LATE_T]: CHAIN_KEY },
+      ]),
+    ),
   );
   const document = JSON.stringify(
     new DcaRequest({
@@ -391,8 +694,8 @@ test("explicit local ingress capacity admits 16 chain members with ordinary base
       issuerName: "paywall",
       keyId: "2025-10",
       sealed: {
-        contentKeys: { bodytext: "sealed-content-key" },
-        periodKeys: { ordinary: { [LATE_T]: "sealed-period-key" } },
+        contentKeys: [{ contentName: "bodytext", key: "sealed-content-key" }],
+        periodKeys: [{ accessGroup: "ordinary", period: LATE_T, key: "sealed-period-key" }],
         chainKeys: chainGroups,
       },
       periodGeometry: GEOMETRY,
@@ -400,7 +703,7 @@ test("explicit local ingress capacity admits 16 chain members with ordinary base
   );
   const engine = {
     checkOperatingIssuerName() {},
-    unlock: async () => ({ contentKeys: {}, periodKeys: {}, errors: {} }),
+    unlock: async () => ({ contentKeys: [], periodKeys: [], errors: [] }),
   };
 
   assert.equal(
@@ -538,8 +841,11 @@ describe("each carrier is read once per message", () => {
 
     const result = await engine.unlock(request, registration, {}, { capturedAtMs: Date.parse(AT) });
 
-    assert.deepEqual(result.errors, {});
-    assert.deepEqual(Object.keys(result.periodKeys[GROUP]), ["251023T1415", "251023T1430"]);
+    assert.deepEqual(result.errors, []);
+    assert.deepEqual(Object.keys(periodKeyMap(result.periodKeys)[GROUP]), [
+      "251023T1415",
+      "251023T1430",
+    ]);
     assert.equal(reads, 1, "one unlock resolves the request carrier once");
   });
 
@@ -548,7 +854,7 @@ describe("each carrier is read once per message", () => {
     let reads = 0;
     const response = {
       keys: {
-        chainKeys: Object.fromEntries(groups.map((group) => [group, { [LATE_T]: CHAIN_KEY }])),
+        chainKeys: groups.map((accessGroup) => ({ accessGroup, cutoff: LATE_T, key: CHAIN_KEY })),
       },
     };
     Object.defineProperty(response, "periodGeometry", {
@@ -573,17 +879,22 @@ describe("each carrier is read once per message", () => {
       {
         version: "1",
         resourceJWT: token({ renderId: "render-chain-carrier-reader" }),
-        issuerData: {
-          [ISSUER]: { keyId: "k1", unlockUrl: "https://issuer.example/unlock", sealed: {} },
-        },
-        contentData: {},
+        issuerData: [
+          {
+            issuerName: ISSUER,
+            keyId: "k1",
+            unlockUrl: "https://issuer.example/unlock",
+            sealed: {},
+          },
+        ],
+        contentData: [],
       },
       { publisherOrigin: PUB },
     );
 
     const request = {
       sealed: {
-        chainKeys: Object.fromEntries(groups.map((group) => [group, { [LATE_T]: CHAIN_KEY }])),
+        chainKeys: groups.map((accessGroup) => ({ accessGroup, cutoff: LATE_T, key: CHAIN_KEY })),
       },
       periodGeometry: GEOMETRY,
     };
@@ -616,17 +927,25 @@ describe("the reading decides what the client files", () => {
       {
         version: "1",
         resourceJWT: token({ renderId: "render-chain-family-drop" }),
-        issuerData: {
-          [ISSUER]: { keyId: "k1", unlockUrl: "https://issuer.example/unlock", sealed: {} },
-        },
-        contentData: {},
+        issuerData: [
+          {
+            issuerName: ISSUER,
+            keyId: "k1",
+            unlockUrl: "https://issuer.example/unlock",
+            sealed: {},
+          },
+        ],
+        contentData: [],
       },
       { publisherOrigin: PUB },
     );
 
     const request = {
       sealed: {
-        chainKeys: { [GROUP]: { [LATE_T]: CHAIN_KEY }, [OTHER]: { [LATE_T]: CHAIN_KEY } },
+        chainKeys: [
+          { accessGroup: GROUP, cutoff: LATE_T, key: CHAIN_KEY },
+          { accessGroup: OTHER, cutoff: LATE_T, key: CHAIN_KEY },
+        ],
       },
       periodGeometry: GEOMETRY,
     };
@@ -635,10 +954,11 @@ describe("the reading decides what the client files", () => {
       ISSUER,
       {
         keys: {
-          chainKeys: {
-            [GROUP]: { [EARLY_T]: CHAIN_KEY, [LATE_T]: lateMember },
-            [OTHER]: { [LATE_T]: CHAIN_KEY },
-          },
+          chainKeys: [
+            { accessGroup: GROUP, cutoff: EARLY_T, key: CHAIN_KEY },
+            { accessGroup: GROUP, cutoff: LATE_T, key: lateMember },
+            { accessGroup: OTHER, cutoff: LATE_T, key: CHAIN_KEY },
+          ],
         },
         periodGeometry: GEOMETRY,
       },
@@ -691,24 +1011,24 @@ test("chain opening errors report only the presented source member while an item
   const page = new DcaData({
     version: "1",
     resourceJWT: token({ renderId: "render-chain-error-association" }),
-    issuerData: { [ISSUER]: { keyId: "k1", sealed: {} } },
-    contentData: {},
+    issuerData: [{ issuerName: ISSUER, keyId: "k1", sealed: {} }],
+    contentData: [],
   });
   const resolver = new ContentKeyResolver({ chainKeyProfile: explicitChainKeyClientProfile });
   const application = await resolver.applyResponse(
     page,
     ISSUER,
     {
-      keys: { contentKeys: { bodytext: CHAIN_KEY } },
-      errors: {
-        [`${GROUP}|${LATE_T}`]: { error: "unseal_failed" },
-        [`${GROUP}|${EARLY_T}`]: { error: "unseal_failed" },
-      },
+      keys: { contentKeys: [{ contentName: "bodytext", key: CHAIN_KEY }] },
+      errors: [
+        { coordinate: `${GROUP}|${LATE_T}`, error: "unseal_failed" },
+        { coordinate: `${GROUP}|${EARLY_T}`, error: "unseal_failed" },
+      ],
     },
     associated(page, {
       sealed: {
-        contentKeys: { bodytext: "sealed-item" },
-        chainKeys: { [GROUP]: { [LATE_T]: CHAIN_KEY } },
+        contentKeys: [{ contentName: "bodytext", key: "sealed-item" }],
+        chainKeys: [{ accessGroup: GROUP, cutoff: LATE_T, key: CHAIN_KEY }],
       },
       periodGeometry: GEOMETRY,
     }),
@@ -719,4 +1039,67 @@ test("chain opening errors report only the presented source member while an item
     issues: [{ section: "errors", code: "unsolicited_coordinate" }],
   });
   assert.deepEqual(await resolver.contentKeyFor(page, "bodytext"), new Uint8Array(16).fill(3));
+});
+
+// Data-format Section 2.1 rejects a whole collection when one record's
+// identifier is bad. The client has never done that for `keys.chainKeys`: a
+// bad family name in the old response map cost only that entry, and the
+// record form keeps that per-entry scope. This test pins it, so a change to
+// either reading of Section 2.1 is a deliberate one.
+describe("a response chain record with a bad accessGroup costs only that record", () => {
+  for (const [label, record] of /** @type {[string, object][]} */ ([
+    ["a number", { accessGroup: 7, cutoff: LATE_T, key: CHAIN_KEY }],
+    ["missing", { cutoff: LATE_T, key: CHAIN_KEY }],
+    ["outside the grammar", { accessGroup: "2bad", cutoff: LATE_T, key: CHAIN_KEY }],
+  ])) {
+    test(`an accessGroup that is ${label} leaves its valid sibling filed`, async () => {
+      /** @type {any[][]} */
+      const filed = [];
+      const resolver = new ContentKeyResolver({
+        chainCache: {
+          put(/** @type {any[]} */ ...args) {
+            filed.push(args);
+          },
+          candidates: () => [],
+        },
+        chainKeyProfile: explicitChainKeyClientProfile,
+      });
+      const page = new DcaData(
+        {
+          version: "1",
+          resourceJWT: token({ renderId: "render-chain-identity-scope" }),
+          issuerData: [
+            {
+              issuerName: ISSUER,
+              keyId: "k1",
+              unlockUrl: "https://issuer.example/unlock",
+              sealed: {},
+            },
+          ],
+          contentData: [],
+        },
+        { publisherOrigin: PUB },
+      );
+      const request = {
+        sealed: { chainKeys: [{ accessGroup: GROUP, cutoff: LATE_T, key: CHAIN_KEY }] },
+        periodGeometry: GEOMETRY,
+      };
+      const applied = await resolver.applyResponse(
+        page,
+        ISSUER,
+        {
+          keys: { chainKeys: [{ accessGroup: GROUP, cutoff: LATE_T, key: CHAIN_KEY }, record] },
+          periodGeometry: GEOMETRY,
+        },
+        associated(page, request),
+      );
+
+      assert.equal(applied.accepted, 1);
+      assert.deepEqual(applied.issues, [{ section: "chainKeys", code: "malformed_key" }]);
+      assert.deepEqual(
+        filed.map(([accessGroup]) => accessGroup),
+        [GROUP],
+      );
+    });
+  }
 });

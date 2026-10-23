@@ -17,17 +17,19 @@ import { writeMarkupDelivery } from "../adapter-publisher/writeMarkupDelivery.js
 import { MarkupDeliveryReader } from "../adapter-client/MarkupDeliveryReader.js";
 import { actorWorld } from "../demo/scenarios/world.js";
 import { domOver } from "../test-lib/helpers/domOver.js";
+import { sealedContentByName } from "../test-lib/helpers/inspect.js";
 
 /**
  * One render, split the way the writer takes it: dca-data and the sealed content
- * beside it, as `asJson()` hands them over with the ciphertext under a member.
+ * beside it. `asJson()` carries the ciphertext as `{contentName, content}`
+ * records; the writer takes it by name, as the Sealer returns it.
  *
  * @param {any} page
  * @returns {{ dcaData: any, sealedContent: Record<string, string> }}
  */
 function renderValues(page) {
-  const { sealedContent, ...dcaData } = page.asJson();
-  return { dcaData, sealedContent };
+  const { sealedContent: records, ...dcaData } = page.asJson();
+  return { dcaData, sealedContent: sealedContentByName({ sealedContent: records }) };
 }
 
 describe("The markup placement contract, writer to reader", () => {

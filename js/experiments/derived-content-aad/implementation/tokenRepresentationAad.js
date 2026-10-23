@@ -1,6 +1,7 @@
 // @ts-check
 // Historical full-token and signing-input comparators, plus the current
 // render/name transcript used to open authentic production renders.
+import { recordsByName } from "../../../core-shared--client-publisher/deliveryRecords.js";
 import { contentAad } from "../../../core-shared--client-publisher/contentAad.js";
 import { decodeCompactJwt } from "../../../core-shared/compactJwt.js";
 
@@ -74,18 +75,11 @@ export function adoptedContentAad(delivery, contentName) {
 function selectedRecord(delivery, contentName) {
   const contentData =
     Object.hasOwn(delivery, "contentData") && /** @type {any} */ (delivery).contentData;
-  if (
-    contentData === null ||
-    typeof contentData !== "object" ||
-    Array.isArray(contentData) ||
-    !Object.hasOwn(contentData, contentName)
-  ) {
+  const records = recordsByName(contentData, "contentName", (name) => typeof name === "string");
+  if (records === null || !records.has(contentName)) {
     throw new TypeError("selected item is absent");
   }
-  const record = contentData[contentName];
-  if (record === null || typeof record !== "object" || Array.isArray(record)) {
-    throw new TypeError("selected item is malformed");
-  }
+  const record = records.get(contentName);
   return record;
 }
 

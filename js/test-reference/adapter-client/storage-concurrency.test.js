@@ -39,6 +39,7 @@ import { INHERITED } from "../../test-lib/fixtures/inherited-names.js";
 import { actorWorld } from "../../demo/scenarios/world.js";
 import { rootFromPage } from "../../demo/support/queryableRoot.js";
 import { ARTICLES, CONTENT_NAME, T_NOW } from "../../demo/scenarios/fixtures.js";
+import { contentKeyWrapNonceOctets } from "../support/contentKeyWrapNonceOctets.js";
 
 const T10 = "251023T1000";
 const T11 = "251023T1100";
@@ -795,25 +796,27 @@ test("a failed trial unwrap evicts nothing", async () => {
 
   const contentKey = new Uint8Array(16).fill(7);
   const nonce = new Uint8Array(12).fill(3);
-  const wrapped = await encrypt(periodKey(10), nonce, contentKey);
+  // Wrap nonces derive from a canonical 16-octet render ID and the coordinate.
+  const renderIds = ["AAAAAAAAAAAAAAAAAAAAAA", "AQAAAAAAAAAAAAAAAAAAAA"];
+  /** @param {string} renderId @param {string} accessGroup @param {string} t */
+  const wrapNonce = (renderId, accessGroup, t) =>
+    contentKeyWrapNonceOctets({ renderId, contentName: "bodytext", accessGroup, t });
+  const wrapped = await encrypt(periodKey(10), wrapNonce(renderIds[0], PREMIUM, T10), contentKey);
 
   const dcaData = {
     version: "1",
-    resource: { renderId: "123456", domain: PUB },
-    resourceJWT: `eyJhbGciOiJFUzI1NiIsImtpZCI6ImsxIn0.${base64urlEncode(utf8Encode(JSON.stringify({ renderId: "123456" })))}.c2lnbmF0dXJl`,
-    contentData: {
-      bodytext: {
+    resource: { renderId: renderIds[0], domain: PUB },
+    resourceJWT: `eyJhbGciOiJFUzI1NiIsImtpZCI6ImsxIn0.${base64urlEncode(utf8Encode(JSON.stringify({ renderId: renderIds[0] })))}.c2lnbmF0dXJl`,
+    contentData: [
+      {
+        contentName: "bodytext",
         contentType: "text/html",
         nonce: base64urlEncode(nonce),
         aad: "123456|1|bodytext",
-        keys: {
-          [PREMIUM]: [{ t: T10, nonce: base64urlEncode(nonce), key: base64urlEncode(wrapped) }],
-        },
+        keys: [{ accessGroup: PREMIUM, period: T10, key: base64urlEncode(wrapped) }],
       },
-    },
-    issuerData: {
-      [ISSUER_NAME]: { sealed: {}, unlockUrl: UNLOCK_URL, keyId: KEY_ID },
-    },
+    ],
+    issuerData: [{ issuerName: ISSUER_NAME, sealed: {}, unlockUrl: UNLOCK_URL, keyId: KEY_ID }],
   };
 
   const unsealer = new Client({ cache, publisherOrigin: PUB });
@@ -838,25 +841,28 @@ test("a failed trial unwrap evicts nothing", async () => {
   // not a reason to drop anything. The next article may be what those keys
   // were cut for. This one is wrapped under a period the cache has never
   // held, so every candidate of both families is tried and every one fails.
-  const foreign = base64urlEncode(await encrypt(periodKey(99), nonce, contentKey));
+  /** @param {string} accessGroup */
+  const foreign = async (accessGroup) =>
+    base64urlEncode(
+      await encrypt(periodKey(99), wrapNonce(renderIds[1], accessGroup, T15), contentKey),
+    );
   const other = {
     version: "1",
-    resource: { renderId: "123457", domain: PUB },
-    resourceJWT: `eyJhbGciOiJFUzI1NiIsImtpZCI6ImsxIn0.${base64urlEncode(utf8Encode(JSON.stringify({ renderId: "123457" })))}.c2lnbmF0dXJl`,
-    contentData: {
-      bodytext: {
+    resource: { renderId: renderIds[1], domain: PUB },
+    resourceJWT: `eyJhbGciOiJFUzI1NiIsImtpZCI6ImsxIn0.${base64urlEncode(utf8Encode(JSON.stringify({ renderId: renderIds[1] })))}.c2lnbmF0dXJl`,
+    contentData: [
+      {
+        contentName: "bodytext",
         contentType: "text/html",
         nonce: base64urlEncode(nonce),
         aad: "123457|1|bodytext",
-        keys: {
-          [PREMIUM]: [{ t: T15, nonce: base64urlEncode(nonce), key: foreign }],
-          [FREE]: [{ t: T15, nonce: base64urlEncode(nonce), key: foreign }],
-        },
+        keys: [
+          { accessGroup: PREMIUM, period: T15, key: await foreign(PREMIUM) },
+          { accessGroup: FREE, period: T15, key: await foreign(FREE) },
+        ],
       },
-    },
-    issuerData: {
-      [ISSUER_NAME]: { sealed: {}, unlockUrl: UNLOCK_URL, keyId: KEY_ID },
-    },
+    ],
+    issuerData: [{ issuerName: ISSUER_NAME, sealed: {}, unlockUrl: UNLOCK_URL, keyId: KEY_ID }],
   };
   const { missing } = await unsealer.resolve(other, ["bodytext"]);
   assert.deepEqual(missing, ["bodytext"]);

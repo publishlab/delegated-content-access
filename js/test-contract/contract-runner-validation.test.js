@@ -7,6 +7,8 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 
+import { ASSERTED_HTML_WRITER_NEGATIVE_PROOF } from "./html-writer/html-writer-negative-proof.test.js";
+import { dcaTestBinding as htmlWriterBinding } from "./html-writer/bindings/reference-html-writer-binding.js";
 import { ASSERTED_GREEN_OUTER_PROOF } from "./issuer-core/issuer-core-negative-proof.test.js";
 import { ASSERTED_ENDPOINT_NEGATIVE_PROOF } from "./issuer-endpoint/issuer-endpoint-negative-proof.test.js";
 import { dcaTestBinding as browserOriginBinding } from "./issuer-browser-origin/bindings/reference-issuer-browser-origin-binding.js";
@@ -32,6 +34,7 @@ const target = {
 const CONTRACT_VALIDATOR =
   'node --experimental-test-isolation="${DCA_NODE_TEST_ISOLATION:-process}" --test --test-reporter=spec --test-reporter-destination=stdout --test-reporter=./test-tools/test-verdict-reporter.mjs --test-reporter-destination=stderr test-contract/contract-runner-validation.test.js';
 
+void ASSERTED_HTML_WRITER_NEGATIVE_PROOF;
 void ASSERTED_GREEN_OUTER_PROOF;
 void ASSERTED_ENDPOINT_NEGATIVE_PROOF;
 
@@ -178,6 +181,7 @@ test("the manifest runners and local binding commands are explicit", () => {
       { name: "reference-base", targets: referenceBaseBinding.targets },
       { name: "fixture-issuer-endpoint", targets: fixtureEndpointBinding.targets },
       { name: "reference-issuer-browser-origin", targets: browserOriginBinding.targets },
+      { name: "reference-html-writer", targets: htmlWriterBinding.targets },
     ]),
   );
 });
@@ -216,6 +220,7 @@ test("every contract test file belongs to a declared target or the validator", (
   const expected = [
     "contract-runner-validation.test.js",
     "issuer-core/issuer-core-negative-proof.test.js",
+    "html-writer/html-writer-negative-proof.test.js",
     "issuer-endpoint/issuer-endpoint-negative-proof.test.js",
     ...Object.values(manifest).map(({ directory, test: testFile }) => `${directory}/${testFile}`),
   ].sort();
@@ -228,7 +233,7 @@ test("every contract test file belongs to a declared target or the validator", (
 test("script coverage rejects baked-in bindings and masked local aggregates", () => {
   const manifest = { alpha: { runner: "test:contract:alpha" } };
   const scripts = {
-    "test:contract": `${CONTRACT_VALIDATOR} && npm run test:contract:reference:base && npm run test:contract:fixture:issuer-endpoint && npm run test:contract:reference:issuer-browser-origin`,
+    "test:contract": `${CONTRACT_VALIDATOR} && npm run test:contract:reference:base && npm run test:contract:fixture:issuer-endpoint && npm run test:contract:reference:issuer-browser-origin && npm run test:contract:reference:html-writer`,
     "test:contract:base": "node test-contract/run-contract-target.js",
     "test:contract:reference:base":
       "npm run test:contract:base -- test-contract/bindings/reference-base-binding.js",
@@ -236,6 +241,8 @@ test("script coverage rejects baked-in bindings and masked local aggregates", ()
       "npm run test:contract:issuer-endpoint -- test-contract/issuer-endpoint/bindings/fixture-issuer-endpoint-binding.js",
     "test:contract:reference:issuer-browser-origin":
       "npm run test:contract:issuer-browser-origin -- test-contract/issuer-browser-origin/bindings/reference-issuer-browser-origin-binding.js",
+    "test:contract:reference:html-writer":
+      "npm run test:contract:html-writer -- test-contract/html-writer/bindings/reference-html-writer-binding.js",
     "test:contract:alpha": "node test-contract/run-contract-target.js",
   };
 
@@ -270,7 +277,7 @@ test("script coverage rejects baked-in bindings and masked local aggregates", ()
 
 test("script coverage rejects a shared or missing target selector", () => {
   const scripts = {
-    "test:contract": `${CONTRACT_VALIDATOR} && npm run test:contract:reference:base && npm run test:contract:fixture:issuer-endpoint && npm run test:contract:reference:issuer-browser-origin`,
+    "test:contract": `${CONTRACT_VALIDATOR} && npm run test:contract:reference:base && npm run test:contract:fixture:issuer-endpoint && npm run test:contract:reference:issuer-browser-origin && npm run test:contract:reference:html-writer`,
     "test:contract:base": "node test-contract/run-contract-target.js",
     "test:contract:reference:base":
       "npm run test:contract:base -- test-contract/bindings/reference-base-binding.js",
@@ -278,6 +285,8 @@ test("script coverage rejects a shared or missing target selector", () => {
       "npm run test:contract:issuer-endpoint -- test-contract/issuer-endpoint/bindings/fixture-issuer-endpoint-binding.js",
     "test:contract:reference:issuer-browser-origin":
       "npm run test:contract:issuer-browser-origin -- test-contract/issuer-browser-origin/bindings/reference-issuer-browser-origin-binding.js",
+    "test:contract:reference:html-writer":
+      "npm run test:contract:html-writer -- test-contract/html-writer/bindings/reference-html-writer-binding.js",
     "test:contract:alpha": "node test-contract/run-contract-target.js",
   };
   assert.throws(
@@ -304,13 +313,17 @@ test("script coverage rejects a shared or missing target selector", () => {
   );
 });
 
-test("selected browser-Origin evidence is never inferred by the base selector", () => {
+test("selected profile evidence is never inferred by the base selector", () => {
   const manifest = JSON.parse(
     readFileSync(new URL("./contract-targets.json", import.meta.url), "utf8"),
   );
   assert.deepEqual(
     declaredBaseTargets(manifest, {
-      targets: { ...referenceBaseBinding.targets, ...browserOriginBinding.targets },
+      targets: {
+        ...referenceBaseBinding.targets,
+        ...browserOriginBinding.targets,
+        ...htmlWriterBinding.targets,
+      },
     }),
     Object.keys(referenceBaseBinding.targets),
   );

@@ -42,6 +42,21 @@ import { EXTENSION_NAME } from "../extensions/content-key-seal-omission/core-sha
 
 const { subtle } = globalThis.crypto;
 
+/**
+ * The ciphertext a page carries for one item, read from its
+ * `[{contentName, content}]` records.
+ *
+ * @param {any[]} sealedContent
+ * @param {string} contentName
+ * @returns {string|null}
+ */
+function ciphertextOf(sealedContent, contentName) {
+  return (
+    sealedContent.find((/** @type {any} */ record) => record.contentName === contentName)
+      ?.content ?? null
+  );
+}
+
 const ISSUER_NAME = "paywall_subscription_service";
 const KEY_ID = "2025-10";
 const SIGNING_KID = "sign-2025-10";
@@ -100,7 +115,14 @@ async function world() {
   sealer.content(NAME, ARTICLE, "text/html", { accessGroups: [GROUP] });
   const sealed = await sealer.seal();
   const page = JSON.parse(
-    JSON.stringify({ ...sealed.dcaData, sealedContent: sealed.sealedContent }),
+    JSON.stringify({
+      ...sealed.dcaData,
+      // The page carries ciphertexts as named records; the sealer hands a map.
+      sealedContent: Object.entries(sealed.sealedContent).map(([contentName, content]) => ({
+        contentName,
+        content,
+      })),
+    }),
   );
 
   const keyStore = {
@@ -148,6 +170,17 @@ function policyFor(sourceLabels) {
   };
 }
 
+/**
+ * The records of `collection` whose `member` equals `value`.
+ *
+ * @param {any[]} collection
+ * @param {string} member
+ * @param {string} value
+ */
+function recordsWith(collection, member, value) {
+  return collection.filter((record) => record[member] === value);
+}
+
 /** @param {any} result */
 function chainEntries(result) {
   assert.equal(result.capabilities.length, 1);
@@ -175,11 +208,11 @@ test("one issuer answers chain keys and an omitted content key from its own chai
   const asked = [];
   // One issuer's capability, held for the publisher registration this request
   // authenticates against and selected by it.
-  /** @type {WeakMap<object, (accessGroup: string, t: string) => Promise<Uint8Array>>} */
+  /** @type {WeakMap<object, (accessGroup: string, t: string) => Promise<Uint8Array|Uint8Array[]>>} */
   const periodKeyLookup = new WeakMap();
-  periodKeyLookup.set(registration, (accessGroup, t) => {
+  periodKeyLookup.set(registration, async (accessGroup, t) => {
     asked.push([accessGroup, t]);
-    return generation.periodKey(accessGroup, t);
+    return [new Uint8Array(16), await generation.periodKey(accessGroup, t)];
   });
 
   const engine = new ChainKeyOmissionIssuerEngine({
@@ -195,12 +228,15 @@ test("one issuer answers chain keys and an omitted content key from its own chai
   assert.ok(Object.keys(chainEntries(result)).length > 0);
 
   // The omission half: the item the publisher sealed no content key for.
-  assert.deepEqual(Object.keys(result.contentKeys), [NAME]);
-  assert.deepEqual(result.errors, {});
+  assert.deepEqual(
+    result.contentKeys.map((/** @type {any} */ record) => record.contentName),
+    [NAME],
+  );
+  assert.deepEqual(result.errors, []);
 
   // And the period key the omission source opened its candidate under is no
   // part of the answer. A period key used as a source is not a grant.
-  assert.deepEqual(result.periodKeys, {});
+  assert.deepEqual(result.periodKeys, []);
   assert.equal(
     asked.length > 0,
     true,
@@ -208,9 +244,9 @@ test("one issuer answers chain keys and an omitted content key from its own chai
   );
 
   const plaintext = await openContent(
-    base64urlDecode(result.contentKeys[NAME]),
+    base64urlDecode(result.contentKeys[0].key),
     NAME,
-    page.sealedContent[NAME],
+    ciphertextOf(page.sealedContent, NAME),
     contentAadOctets(page, NAME),
   );
   assert.equal(utf8Decode(plaintext), ARTICLE);
@@ -232,7 +268,7 @@ test("either extension alone answers only its own half of that composition", asy
   });
   const chained = await chainOnly.unlock(request, registration);
   assert.ok(Object.keys(chainEntries(chained)).length > 0);
-  assert.deepEqual(chained.contentKeys, {}, "the chain half opens no omitted content key");
+  assert.deepEqual(chained.contentKeys, [], "the chain half opens no omitted content key");
 
   /** @type {WeakMap<object, (accessGroup: string, t: string) => Promise<Uint8Array>>} */
   const periodKeyLookup = new WeakMap();
@@ -254,7 +290,10 @@ test("either extension alone answers only its own half of that composition", asy
     periodKeyLookup,
   });
   const omitted = await omissionOnly.unlock(request, registration);
-  assert.deepEqual(Object.keys(omitted.contentKeys), [NAME]);
+  assert.deepEqual(
+    omitted.contentKeys.map((/** @type {any} */ record) => record.contentName),
+    [NAME],
+  );
   assert.deepEqual(omitted.capabilities, [], "the omission half returns no chain capability");
 });
 
@@ -314,14 +353,15 @@ test("an omission issuer narrowed to one group drops the other groups' chain del
     sealer.content("teaser", "<p>teaser</p>", "text/html", { accessGroups: ["free"] });
     const { dcaData } = await sealer.seal();
     const label = extensions.length ? "active" : "inactive";
-    const sealed = dcaData.issuerData[ISSUER_NAME].sealed;
-    assert.deepEqual(Object.keys(sealed.chainKeys), [GROUP], label);
+    const sealedFor = (/** @type {string} */ issuerName) =>
+      recordsWith(dcaData.issuerData, "issuerName", issuerName)[0].sealed;
+    // The chain groups each issuer was sealed, as a set: record order means nothing.
+    const chainGroups = (/** @type {any} */ sealed) =>
+      new Set(sealed.chainKeys.map((/** @type {any} */ record) => record.accessGroup));
+    const sealed = sealedFor(ISSUER_NAME);
+    assert.deepEqual(chainGroups(sealed), new Set([GROUP]), label);
     assert.equal(Object.hasOwn(sealed, "periodKeys"), false, label);
-    assert.deepEqual(
-      Object.keys(dcaData.issuerData.free_desk.sealed.chainKeys),
-      [GROUP, "free"],
-      label,
-    );
+    assert.deepEqual(chainGroups(sealedFor("free_desk")), new Set([GROUP, "free"]), label);
   }
 });
 
@@ -344,7 +384,7 @@ test("omission outside a chain relay preserves projected period-key admission", 
     reader: {
       dcaData: delivery,
       publisherOrigin: PUB,
-      extract: (name) => sealedContent[name] ?? null,
+      extract: (name) => ciphertextOf(sealedContent, name),
     },
     issuerName: ISSUER_NAME,
     unlockUrl: "https://issuer.example/unlock",
@@ -357,7 +397,7 @@ test("omission outside a chain relay preserves projected period-key admission", 
       async post(_url, request) {
         const result = await issuer.endpoint.handleDocument(JSON.stringify(request), registration);
         assert.equal(result.response.status, 200);
-        assert.ok(Object.keys(result.response.body.keys.periodKeys[GROUP]).length);
+        assert.ok(recordsWith(result.response.body.keys.periodKeys, "accessGroup", GROUP).length);
         exchanges.push(request);
         return { ...result.response, contentType: "application/json" };
       },
@@ -370,7 +410,7 @@ test("omission outside a chain relay preserves projected period-key admission", 
     undefined,
     "the issuer had to project from chain-only supply",
   );
-  assert.ok(Object.keys(exchanges[0].sealed.chainKeys[GROUP]).length);
-  assert.ok(exchanges[0].boundCandidates[NAME].length);
+  assert.ok(recordsWith(exchanges[0].sealed.chainKeys, "accessGroup", GROUP).length);
+  assert.ok(recordsWith(exchanges[0].boundCandidates, "contentName", NAME).length);
   assert.equal(utf8Decode((await client.openLocal(NAME)).bytes), ARTICLE);
 });

@@ -4,7 +4,7 @@ Status: phase-1 prototype extension; implementation-discovery evidence, not prot
 
 An issuer already entrusted with an access-group period capability returns one item `contentKey`
 without the publisher also sealing that content key to it. The publisher omits that
-issuer's whole `sealed.contentKeys` map, the client forwards the bound `contentData` candidate, and
+issuer's whole `sealed.contentKeys` collection, the client forwards the bound `contentData` candidate, and
 the issuer opens its own period material, rebuilds the binding and unwraps.
 
 Everything named here is extension-owned and provisional. The wire members, the binding constant
@@ -113,8 +113,14 @@ The value is the AAD of the `contentData` wrap. `core-shared/aead.js` already ta
 wrap does not pass, so the bound wrap costs no new primitive and no new field on the entry beyond
 its marker.
 
-The bound entry is `{ t, nonce, key, bind: 'dca-bind-seal-omission' }`. The marker tells the two
-representations apart: a base reader sees an entry it can describe and cannot open, and this
+The same octets are the `wrap_aad` input of the wrap-nonce transcript in
+[`spec--content-protection.md`](../../../docs/spec--content-protection.md#41-wrap-nonce) § 4.1. Publisher,
+client and issuer each derive the bound wrap's nonce from the render ID, content name, access group,
+`t` and this binding, and pass the same binding octets to AES-GCM. A bound wrap therefore gets a
+different nonce from an ordinary wrap at the same coordinate, and no member carries either nonce.
+
+The bound record in an item's `keys` is `{ accessGroup, period, key, bind: 'dca-bind-seal-omission' }`.
+The marker tells the two representations apart: a base reader sees an entry it can describe and cannot open, and this
 extension refuses an entry without the marker rather than trying it unbound. The two are never
 mixed at one coordinate. A render with any active issuer carries the bound wrap for every item,
 because `contentData` is one shared representation for every reader of that render. A page with an
@@ -140,8 +146,12 @@ The request gains two members:
 
 - `extensions: ['content-key-seal-omission']`, the client's support signal. It is offered rather
   than demanded, grants nothing, and changes nothing the issuer verifies or decides.
-- `boundCandidates`, keyed by contentName, each an array of bound entries carrying the
-  `accessGroup` and `t` they were read at.
+- `boundCandidates`, an array of bound candidate records. Each names its `contentName` and
+  carries the `accessGroup` and `period` it was read at, the wrapped `key` and the marker. Several
+  records at one item, group and period stay candidates. A candidate carries no
+  nonce: the issuer derives it from the verified renderId, the policy's contentName, the
+  candidate's `accessGroup` and `period`, and the inner binding it rebuilds. A carried `nonce` is ignored
+  and supplies no IV.
 
 The request builder reports bound candidates as item-key coordinates through
 `keyFamilies`, even when the request relays no period or chain keys. It preserves
@@ -150,11 +160,13 @@ kinds, not authorization: issuer policy still decides what to release. A
 family-only denial cannot suppress a later unanswered item-key request.
 
 The order is base's and it is load-bearing. Base checks version, registration by exact header kid,
-signature and renderId, then calls the policy, and opens nothing before that. The policy interface is
-unchanged: it answers `contentNames` out of what the request presented, where presented now means
+signature and renderId, then calls the policy, and opens nothing before that. The policy answers `contentNames` out of what the request presented, where presented now means
 the union of `sealed.contentKeys` and the forwarded candidates, because an active issuer's request
 carries no sealed contentKeys at all.
 
+The policy receives `sourcePeriodCoordinates`, a copied map of canonical forwarded-candidate labels,
+separately from `periodCoordinates` (which still names only sealed ordinary period records).
+A held-key-only request therefore exposes source labels without authorizing ordinary period delivery.
 The policy also decides the coordinates a granted item may be opened through. Its decision carries
 `sourceGrants`, a list of `{ accessGroup, periods }` with explicit labels. This engine intersects
 those labels with canonical labels from the request's sealed period keys and forwarded candidates.
@@ -167,14 +179,23 @@ period blob proves the blob sits at its coordinate, not that this caller may be 
 and an injected period-key source proves neither, so neither can stand in for the decision.
 
 Within the selected set the issuer walks that item's candidates in the order they arrived.
-Only repeated identical nonce and wrapped-key material at the same coordinate
+Only repeated identical wrapped-key material at the same coordinate
 is skipped. Distinct admitted material remains an alternative after an earlier
 authentication failure, even when its access group and period label match.
-Coordinate deduplication does not establish an authenticated match or bound
-trial work. The request byte limit remains separate from candidate entry/trial
-accounting; this composition does not claim that accounting gap is fixed.
+Coordinate deduplication does not establish an authenticated match.
+Issuer hosts selecting omission must spread `omissionProcessorOptions()` from
+`core-issuer/omissionAdmission.js` into their `IssuerProcessor` options. It selects both coordinate
+admission and request bounds atomically. Present `boundCandidates` must be an array; record identities
+require own valid `contentName`, `accessGroup` and `period`. An invalid identity refuses the whole
+request with `binding_failed` before policy, signature or opening-key work. Non-record elements are
+skipped; bad key bytes or an unsupported bind marker remain candidate-local failures. An absent
+member contributes nothing and unknown record members are ignored. Every raw array element counts
+against the reference-local `DEFAULT_REQUEST_LIMITS.maxEntries` cap (currently 16), before deduplication;
+excess refuses with `too_many_entries`. Body-byte limits remain the processor host’s responsibility.
+The source also validates before policy for direct engine composition; the base trusted-source
+fault boundary reports malformed source input there as `internal_error`.
 The
-`accessGroup` and `t` on a candidate are labels: they select which sealed period blob this issuer
+`accessGroup` and `period` on a candidate are labels: they select which sealed period blob this issuer
 tries to open under the outer BIND, and nothing more. The inner binding is then rebuilt from the
 verified renderId, the policy's contentName and that same pair. A candidate carried to another
 render, content name, access group or period fails authentication and yields no key. There is one
@@ -190,7 +211,13 @@ together.
 
 Base asks for that view once per unlock, against the registration it verified this request against,
 and only the selected view travels on. That view takes `(accessGroup, t)` and carries no publisher
-selector a caller could get wrong. A registration with no view held is a miss, and no global source
+selector a caller could get wrong. Each coordinate callback returns `Promise<Uint8Array|null>` or
+`Promise<readonly Uint8Array[]>`: the original single-key form remains supported explicitly. Internally every
+result becomes one copied list, memoized for that coordinate within this unlock. Distinct 16-byte
+keys are tried in either order; duplicates count once. The reference-local maximum is four distinct
+held keys per coordinate, chosen to bound work rather than define a protocol ceiling. A malformed
+trusted return or excess distinct keys refuses the whole unlock as `internal_error`; no list is
+silently trimmed. Snapshots are discarded between unlocks. A registration with no view held is a miss, and no global source
 sits under it as a fallback. `(accessGroup, t)` is a coordinate inside one publisher's render and
 not a global one, so two registered publishers spelling the same access group and the same period
 label would otherwise share one period key: a registered publisher can copy another's public
@@ -224,7 +251,7 @@ sealed, with no marker. Sealed and unwrapped content keys are never mixed within
 
 The contribution's wrapper turns the three members into one supply plan per issuer. An active issuer gets
 the groups selected by its inner plan, narrowed by any configured `accessGroups`, no `sealed.contentKeys`
-map, the marker as its block's extra member, and its grantable names as the content names it must
+collection, the marker as its block's extra member, and its grantable names as the content names it must
 reach. An inactive issuer keeps its inner content-key selection and its supplied groups,
 also narrowed by any configured `accessGroups`. The wrap strategy belongs to the render rather
 than to an issuer: any active issuer selects the bound wrap for every entry of the page, and a
@@ -246,7 +273,7 @@ as the request builder. The `omissionSealing` convenience configuration carries
 its `itemPreparations` relay as well; retain that member when passing the
 configuration to `Sealer`. Plan refusal
 precedes the render's first random draw, supply acquisition, sealing and
-signing, so no partial content-key map is emitted.
+signing, so no partial content-key collection is emitted.
 
 This extension spells the narrower set `accessGroups`. It intersects that set with the inner plan's
 required `suppliedAccessGroups`; omitting the inner selection is refused. The explicit
@@ -290,3 +317,7 @@ node extensions/content-key-seal-omission/test-lib/load.js
 ```
 
 A test needing another extension belongs in `../../test-extensions/`.
+
+The load harness uses relayed sealed period keys on its active route and checks the exact returned
+content-name set before counting crypto work. Run `node test-lib/load.js --smoke` from this directory
+for two one-unlock operation samples without the throughput workload.

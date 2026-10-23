@@ -7,6 +7,8 @@
 import { decrypt } from "../../core-shared/aead.js";
 import { base64urlDecode, base64urlEncode } from "../../core-shared/codec.js";
 import { dcaError } from "../../core-shared/errors.js";
+import { decodeCompactJwt } from "../../core-shared/compactJwt.js";
+import { contentKeyWrapNonce } from "../../core-shared/contentKeyWrapNonce.js";
 
 /**
  * Recompute every key a render is made of from the publisher's own
@@ -34,24 +36,40 @@ export async function keyMaterialInPlay(wire, periodKeySupply, options = {}) {
   const material = [];
   /** @type {Set<string>} */
   const seenContentKeys = new Set();
+  // Each wrap's nonce derives from the render and its coordinate; no entry carries one.
+  const renderId = decodeCompactJwt(wire.resourceJWT).payload.renderId;
 
-  for (const [contentName, record] of Object.entries(wire.contentData)) {
-    for (const [accessGroup, entries] of Object.entries(/** @type {any} */ (record).keys ?? {})) {
-      for (const entry of /** @type {any[]} */ (entries)) {
-        const periodKey = await periodKeySupply.derive(accessGroup, entry.t);
-        material.push({ label: `the periodKey for ${accessGroup}/${entry.t}`, bytes: periodKey });
+  // The scan has to see every wrap, so a page it cannot walk throws rather
+  // than reporting no material.
+  if (!Array.isArray(wire.contentData))
+    throw dcaError("bad_page", "keyMaterialInPlay needs contentData as an array of item records");
+  for (const record of wire.contentData) {
+    const contentName = record?.contentName;
+    const keys = record?.keys ?? [];
+    if (typeof contentName !== "string" || !Array.isArray(keys))
+      throw dcaError("bad_page", "keyMaterialInPlay needs named item records with keys arrays");
+    for (const entry of keys) {
+      const { accessGroup, period } = entry ?? {};
+      if (typeof accessGroup !== "string" || typeof period !== "string")
+        throw dcaError("bad_page", `a wrap of ${contentName} names no accessGroup and period`);
+      const periodKey = await periodKeySupply.derive(accessGroup, period);
+      material.push({ label: `the periodKey for ${accessGroup}/${period}`, bytes: periodKey });
 
-        const contentKey = await decrypt(
-          periodKey,
-          base64urlDecode(entry.nonce),
-          base64urlDecode(entry.key),
-          options.additionalDataFor?.({ contentName, accessGroup, value: entry }),
-        );
-        const spelling = base64urlEncode(contentKey);
-        if (seenContentKeys.has(spelling)) continue;
-        seenContentKeys.add(spelling);
-        material.push({ label: `the contentKey for ${contentName}`, bytes: contentKey });
-      }
+      // `value` is the wire record, so a caller reads `value.period`.
+      const aad = options.additionalDataFor?.({ contentName, accessGroup, value: entry });
+      const nonce = await contentKeyWrapNonce({
+        renderId,
+        contentName,
+        accessGroup,
+        t: period,
+        aad,
+      });
+      if (nonce === null) throw dcaError("bad_page", `no wrap nonce for ${contentName}/${period}`);
+      const contentKey = await decrypt(periodKey, nonce, base64urlDecode(entry.key), aad);
+      const spelling = base64urlEncode(contentKey);
+      if (seenContentKeys.has(spelling)) continue;
+      seenContentKeys.add(spelling);
+      material.push({ label: `the contentKey for ${contentName}`, bytes: contentKey });
     }
   }
 

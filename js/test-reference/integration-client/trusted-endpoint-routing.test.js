@@ -5,6 +5,7 @@ import { DcaData } from "../../core-client/DcaData.js";
 import { ISSUER_NAME, UNLOCK_URL } from "../../demo/scenarios/fixtures.js";
 import { world, PUB, BODYTEXT } from "../../test-lib/fixtures/wire-policy-world.js";
 import { unlockThroughAdmission } from "../../test-lib/harnesses/unlockThroughAdmission.js";
+import { issuerBlockOf } from "../../test-lib/helpers/inspect.js";
 
 async function setup() {
   const fixture = await world();
@@ -31,7 +32,7 @@ async function setup() {
 
 test("publisher emits no endpoint; every carried URL type is ignored and the host route opens content", async () => {
   const fx = await setup();
-  assert.equal(Object.hasOwn(fx.reader.dcaData.issuerData[ISSUER_NAME], "unlockUrl"), false);
+  assert.equal(Object.hasOwn(issuerBlockOf(fx.reader.dcaData, ISSUER_NAME), "unlockUrl"), false);
   for (const value of [
     undefined,
     null,
@@ -43,7 +44,7 @@ test("publisher emits no endpoint; every carried URL type is ignored and the hos
     "https://hostile.example/unlock",
   ]) {
     const reader = { ...fx.reader, dcaData: structuredClone(fx.reader.dcaData) };
-    if (value !== undefined) reader.dcaData.issuerData[ISSUER_NAME].unlockUrl = value;
+    if (value !== undefined) issuerBlockOf(reader.dcaData, ISSUER_NAME).unlockUrl = value;
     const page = new DcaData(reader.dcaData, { publisherOrigin: PUB });
     assert.equal(page.hasIssuer(ISSUER_NAME), true);
     const urls = [];
@@ -65,7 +66,7 @@ test("publisher emits no endpoint; every carried URL type is ignored and the hos
 
 test("wire endpoint cannot supply a missing host route; configured issuer with no material sends nothing", async () => {
   const fx = await setup();
-  fx.reader.dcaData.issuerData[ISSUER_NAME].unlockUrl = "https://hostile.example/unlock";
+  issuerBlockOf(fx.reader.dcaData, ISSUER_NAME).unlockUrl = "https://hostile.example/unlock";
   const posts = [];
   const transport = {
     async post(url, request) {
@@ -149,7 +150,7 @@ test("pending acquisition keeps captured endpoint, delivery, transport and host 
   while (seen.length === 0) await new Promise((resolve) => setImmediate(resolve));
   config.unlockUrl = "https://replacement.example/unlock";
   fx.reader.publisherOrigin = "https://other-publisher.example";
-  fx.reader.dcaData.issuerData[ISSUER_NAME].unlockUrl = "https://hostile.example/unlock";
+  issuerBlockOf(fx.reader.dcaData, ISSUER_NAME).unlockUrl = "https://hostile.example/unlock";
   transport.post = async () => {
     throw new Error("replacement transport must not own pending response");
   };

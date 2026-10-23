@@ -490,6 +490,8 @@ describe("Section 8: capability scope", () => {
       "cacheKeyBy",
       "chainCache",
       "resolverFactory",
+      "reader",
+      "denialCache",
       "root",
       "transport",
       "issuerName",

@@ -4,8 +4,8 @@
 // Every parser in reach keeps the last occurrence of a repeated member name and
 // hands back a value the duplicate cannot be read out of, so the check runs on
 // text and so do these tests: real render vectors, the reject vector built
-// around one repeated `bodytext`, and a duplicate injected deep inside an
-// honest render.
+// around one record that carries `key` twice, and a duplicate injected deep
+// inside an honest render.
 //
 // These tests also measure what the cheap version of the same check would cost.
 // DCA reuses member names across sibling objects on purpose, so a scan that only
@@ -50,13 +50,13 @@ describe("The duplicate-member tokenizer", () => {
   // names drowns in false positives. The tokenizer is tools/duplicateMembers.js;
   // what follows feeds it real renders and a real attack.
   //
-  // The canonical dca-data block has 14 repeated names (nonce x9, t x6, key x6,
-  // one `keys` per item record, and the content and group names). The v1 fixture
-  // is a two-item render where the spec's block has three, and it names its one
-  // issuer once, so it yields 10: the same names, one content item's worth
-  // fewer, no repeated issuerName, and no `aad`, which item records no longer
-  // carry. The actual count is asserted below; the delta is
-  // the fixture, not a disagreement about the finding.
+  // The v1 fixture is a two-item render that names its one issuer once. Every
+  // collection is an array of records, so its block repeats six names, each
+  // once per record: `contentName`, `contentType` and `keys` in the item
+  // records and the sealed content-key records, `accessGroup`, `period` and
+  // `key` in every wrap and sealed key record. Wrap records carry no `nonce`,
+  // which derives from the wrap's coordinate, and item records no `aad`. The
+  // count is asserted below.
 
   /** The render vectors, which carry a real `dcaData` block each. */
   function renderVectors() {
@@ -83,47 +83,32 @@ describe("The duplicate-member tokenizer", () => {
     }
   });
 
-  test("the flat name scan calls ten names duplicates on the same block, and every one is false", async () => {
+  test("the flat name scan calls six names duplicates on the same block, and every one is false", async () => {
     const { vector } = renderVectors().find(({ file }) => file === "seal-ecdh.json") ?? {};
     assert.ok(vector, "the canonical render vector");
     const text = JSON.stringify(vector.expected.dcaData, null, 2);
 
     const flat = flatNameScan(text);
-    assert.equal(flat.length, 10, "ten names repeat somewhere in the document");
+    assert.equal(flat.length, 6, "six names repeat somewhere in the document");
     assert.deepEqual(
       flat.map(({ name }) => name).sort(),
-      [
-        "251023T1400",
-        "251023T1500",
-        "bodytext",
-        "contentType",
-        "key",
-        "keys",
-        "locked-data",
-        "nonce",
-        "premium",
-        "t",
-      ],
-      "the names DCA reuses on purpose - wrap records, item records, content " +
-        "items, and a contentName that is also an accessGroup",
+      ["accessGroup", "contentName", "contentType", "key", "keys", "period"],
+      "the names DCA reuses on purpose - the identity and key fields of every " +
+        "record in a collection",
     );
 
-    // Where the false positives come from, made explicit: `nonce` appears four
-    // times, in four different objects, and no object holds two of them.
-    const nonces = memberNames(text).filter(({ name }) => name === "nonce");
-    assert.equal(nonces.length, 4);
-    assert.equal(
-      new Set(nonces.map(({ parent }) => parent)).size,
-      4,
-      "four parents, one nonce each",
-    );
+    // Where the false positives come from, made explicit: `key` appears ten
+    // times, in ten different records, and no record holds two of them.
+    const keys = memberNames(text).filter(({ name }) => name === "key");
+    assert.equal(keys.length, 10);
+    assert.equal(new Set(keys.map(({ parent }) => parent)).size, 10, "ten parents, one key each");
 
     // And the same document again, with the nesting taken into account.
-    assert.deepEqual(scanDuplicateMembers(text), [], "zero duplicates - all ten were false");
+    assert.deepEqual(scanDuplicateMembers(text), [], "zero duplicates - all six were false");
 
     // The count is a snapshot of a fixture, so it is worth knowing it is not a
     // fluke of the walk: the same names come out under either serialization.
-    assert.equal(flatNameScan(JSON.stringify(vector.expected.dcaData)).length, 10);
+    assert.equal(flatNameScan(JSON.stringify(vector.expected.dcaData)).length, 6);
   });
 
   test("the scan catches the duplicate the reject vector is built around, at its exact path", async () => {
@@ -131,22 +116,43 @@ describe("The duplicate-member tokenizer", () => {
       readFileSync(REGRESSION_DIR + "reject-duplicate-member-name.json", "utf8"),
     );
 
-    // The vector is built around `rawBody`: a body carrying `bodytext` twice
-    // inside one object, which no parsed value can express. It is scanned as
-    // the string it is, because a re-serialization would have destroyed it
-    // first.
+    // The vector is built around `rawBody`: one bodytext record carrying `key`
+    // twice, which no parsed value can express. It is scanned as the string it
+    // is, because a re-serialization would have destroyed it first.
     assert.equal(typeof vector.rawBody, "string");
 
     const duplicates = scanDuplicateMembers(vector.rawBody);
     assert.equal(duplicates.length, 1, "one duplicate, and the scan says which");
-    assert.equal(duplicates[0].name, "bodytext");
-    assert.equal(duplicates[0].parent, "$.sealed.contentKeys", "the object the attack is inside");
+    assert.equal(duplicates[0].name, "key");
+    assert.equal(
+      duplicates[0].parent,
+      "$.sealed.contentKeys[0]",
+      "the one record the attack is inside",
+    );
     assert.equal(duplicates[0].occurrence, 2);
 
     // The evidence really is gone after a parse, which is why the check runs on
-    // text: the same body round-tripped through JSON.parse scans clean.
+    // text: the same body round-tripped through JSON.parse scans clean, and
+    // the one record keeps its last `key` and no trace of the first.
+    const record = JSON.parse(vector.rawBody).sealed.contentKeys;
+    assert.equal(record.length, 1, "still one record, not two rival ones");
+    assert.deepEqual(Object.keys(record[0]), ["contentName", "key"]);
+    const written = vector.rawBody.match(
+      /\{"contentName":\s*"bodytext"((?:,\s*"key":\s*"[^"]+")+)\s*\}/,
+    );
+    assert.ok(written, "the bodytext record carries only key members after its name");
+    const occurrences = [...written[1].matchAll(/"key":\s*"([^"]+)"/g)].map((m) => m[1]);
+    assert.equal(occurrences.length, 2);
+    assert.equal(record[0].key, occurrences[1], "the parser keeps the last field");
     const parsed = JSON.stringify(JSON.parse(vector.rawBody), null, 2);
     assert.deepEqual(scanDuplicateMembers(parsed), [], "last-wins left one member and no trace");
+
+    // Rejecting the duplicate is the other conformant reading, and the vector
+    // records it beside the last-field answer.
+    assert.deepEqual(
+      vector.expected.alsoConformant.map((/** @type {any} */ entry) => entry.code),
+      ["invalid_json"],
+    );
 
     // And the honest body it was cut from is clean, so the finding above is the
     // attack rather than the scanner objecting to unlock requests.
@@ -160,35 +166,32 @@ describe("The duplicate-member tokenizer", () => {
     const clean = JSON.stringify(vector.expected.dcaData, null, 2);
 
     // Deep inside a wrap record, at the far end of the document from where a
-    // top-level scan would be looking, and the place a second `key` member
-    // would decide which contentKey a client unwraps.
+    // top-level scan would be looking, and the place a second `period` member
+    // would decide which periodKey a client unwraps with. The first match in
+    // the text is bodytext's first wrap record.
     const attacked = clean.replace(
-      '"t": "251023T1400",\n            "nonce"',
-      '"t": "251023T1400",\n            "t": "251023T1500",\n            "nonce"',
+      '"period": "251023T1400",\n          "key"',
+      '"period": "251023T1400",\n          "period": "251023T1500",\n          "key"',
     );
     assert.notEqual(attacked, clean, "the injection landed");
 
     const duplicates = scanDuplicateMembers(attacked);
     assert.equal(duplicates.length, 1);
-    assert.equal(duplicates[0].name, "t");
-    assert.equal(
-      duplicates[0].parent,
-      "$.contentData.bodytext.keys.premium[0]",
-      "inside one wrap record",
-    );
+    assert.equal(duplicates[0].name, "period");
+    assert.equal(duplicates[0].parent, "$.contentData[0].keys[0]", "inside one wrap record");
 
-    // "And only there", spelled out. The render carries four wrap records with
-    // one `t` each; after the injection five `t` members sit across those same
-    // four records, so exactly one record holds two of them and the other three
-    // are untouched. A scan that widened its idea of "one object" (grouping by
-    // path, say, where the two `[0]` records of two different contentNames read
-    // alike) would land on a different parent count here.
-    const ts = memberNames(attacked).filter(({ name }) => name === "t");
-    assert.equal(ts.length, 5, "the four records' own t members, plus the injected one");
+    // "And only there", spelled out. The render carries eight records with one
+    // `period` each, four wrap records and four sealed period-key records;
+    // after the injection nine `period` members sit across those same eight
+    // records, so exactly one record holds two of them and the other seven are
+    // untouched. A scan that widened its idea of "one object" (grouping by
+    // path, say, or by name) would land on a different parent count here.
+    const periods = memberNames(attacked).filter(({ name }) => name === "period");
+    assert.equal(periods.length, 9, "the eight records' own period members, plus the injected one");
     assert.equal(
-      new Set(ts.map(({ parentId }) => parentId)).size,
-      4,
-      "five members, four records: one holds the duplicate, three hold one each",
+      new Set(periods.map(({ parentId }) => parentId)).size,
+      8,
+      "nine members, eight records: one holds the duplicate, seven hold one each",
     );
   });
 

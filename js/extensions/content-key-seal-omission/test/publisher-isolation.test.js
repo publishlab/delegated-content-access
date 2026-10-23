@@ -43,6 +43,48 @@ import { wholeRenderIssuerSupplyPlan } from "../../../core-publisher/issuerSuppl
 const { subtle } = globalThis.crypto;
 
 /**
+ * The period labels of the candidates a request forwards for one content name.
+ *
+ * @param {any} request
+ * @param {string} contentName
+ */
+function candidatePeriods(request, contentName) {
+  return request
+    .toObject()
+    .boundCandidates.filter((/** @type {any} */ record) => record.contentName === contentName)
+    .map((/** @type {any} */ { period }) => period);
+}
+
+/**
+ * The content names an unlock delivers keys for, one per record.
+ *
+ * @param {any[]} contentKeys
+ */
+function deliveredNames(contentKeys) {
+  return contentKeys.map(({ contentName }) => contentName);
+}
+
+/**
+ * The key an unlock delivers at one content name.
+ *
+ * @param {any[]} contentKeys
+ * @param {string} contentName
+ */
+function keyAt(contentKeys, contentName) {
+  return contentKeys.find((record) => record.contentName === contentName)?.key;
+}
+
+/**
+ * The error record an unlock reports at one coordinate.
+ *
+ * @param {any[]} errors
+ * @param {string} coordinate
+ */
+function errorAt(errors, coordinate) {
+  return errors.find((record) => record.coordinate === coordinate);
+}
+
+/**
  * One registered publisher: its signing key, its own issuer opening keyset, its
  * own period material, one active render and the request a client builds from
  * it. Two of these share nothing but the issuer name and the keyId label.
@@ -144,7 +186,7 @@ async function issuerApplication() {
     );
   }
 
-  const sourcePeriods = a.request.toObject().boundCandidates.bodytext.map(({ t }) => t);
+  const sourcePeriods = candidatePeriods(a.request, "bodytext");
 
   const engine = omissionIssuerEngine({
     operatingIssuerNames: [ISSUER_A],
@@ -163,14 +205,14 @@ test("each publisher opens its own item through its own period-key material", as
   const mine = await engine.unlock(a.request, a.registration);
   const theirs = await engine.unlock(b.request, b.registration);
 
-  assert.deepEqual(Object.keys(mine.contentKeys), ["bodytext"]);
-  assert.deepEqual(Object.keys(theirs.contentKeys), ["bodytext"]);
-  assert.deepEqual(mine.errors, {});
-  assert.deepEqual(theirs.errors, {});
+  assert.deepEqual(deliveredNames(mine.contentKeys), ["bodytext"]);
+  assert.deepEqual(deliveredNames(theirs.contentKeys), ["bodytext"]);
+  assert.deepEqual(mine.errors, []);
+  assert.deepEqual(theirs.errors, []);
 
   // Different material, so "the same key came back" cannot pass for "the
   // partition held".
-  assert.notEqual(mine.contentKeys.bodytext, theirs.contentKeys.bodytext);
+  assert.notEqual(keyAt(mine.contentKeys, "bodytext"), keyAt(theirs.contentKeys, "bodytext"));
 
   // Each unlock reached exactly its own publisher's period keys.
   assert.deepEqual([...new Set(asked.map(({ publisher: name }) => name))].sort(), ["A", "B"]);
@@ -181,7 +223,7 @@ test("a publisher signing another publisher's renderId over its copied candidate
 
   const honest = await engine.unlock(a.request, a.registration);
   assert.deepEqual(
-    Object.keys(honest.contentKeys),
+    deliveredNames(honest.contentKeys),
     ["bodytext"],
     "A's period key is in this issuer application and does open A's candidate",
   );
@@ -200,9 +242,9 @@ test("a publisher signing another publisher's renderId over its copied candidate
 
   const result = await engine.unlock(b.request, b.registration);
 
-  assert.deepEqual(result.contentKeys, {}, "no content key of A's comes back to B");
-  assert.equal(result.errors.bodytext.error, "unseal_failed");
-  assert.deepEqual(result.periodKeys, {});
+  assert.deepEqual(result.contentKeys, [], "no content key of A's comes back to B");
+  assert.equal(errorAt(result.errors, "bodytext")?.error, "unseal_failed");
+  assert.deepEqual(result.periodKeys, []);
 
   // B's registration selects B's capability. A's period keys are held by the
   // same issuer application and were never asked for this request.
@@ -227,7 +269,7 @@ test("a publisher registration with no period-key capability is a miss and reach
       sourceGrants: [
         {
           accessGroup: "premium",
-          periods: a.request.toObject().boundCandidates.bodytext.map(({ t }) => t),
+          periods: candidatePeriods(a.request, "bodytext"),
         },
       ],
     }),
@@ -236,6 +278,6 @@ test("a publisher registration with no period-key capability is a miss and reach
 
   const result = await engine.unlock(b.request, b.registration);
 
-  assert.deepEqual(result.contentKeys, {});
-  assert.equal(result.errors.bodytext.error, "unseal_failed");
+  assert.deepEqual(result.contentKeys, []);
+  assert.equal(errorAt(result.errors, "bodytext")?.error, "unseal_failed");
 });

@@ -144,6 +144,18 @@ function expectedPerFamily(spec, route) {
 // ---------------------------------------------------------------------------
 // Form checks
 
+/** @param {any} records @param {number} groups @param {number} members @param {string} where */
+function checkFamilyCounts(records, groups, members, where) {
+  check(Array.isArray(records), `${where}: record array`);
+  const families = new Set(records.map((record) => record.accessGroup));
+  check(families.size === groups, `${where}: families`);
+  for (const family of families)
+    check(
+      records.filter((record) => record.accessGroup === family).length === members,
+      `${where}: ${members} per family`,
+    );
+}
+
 /**
  * The render carries exactly the supply form its spec names, for every issuer
  * and access group, and wraps the item under every planned period.
@@ -152,30 +164,30 @@ function expectedPerFamily(spec, route) {
  */
 function checkDeliveryForm(rendered) {
   const { spec, dcaData } = rendered;
-  const groups = Object.keys(dcaData.contentData[NAME].keys ?? {});
+  const item = dcaData.contentData.find((record) => record.contentName === NAME);
+  const wraps = item.keys ?? [];
+  const groups = [...new Set(wraps.map((record) => record.accessGroup))];
   const floor = spec.form === "content-key-only";
   check(groups.length === (floor ? 0 : spec.groups), `${spec.form}: wrapped groups`);
   for (const group of groups) {
-    check(dcaData.contentData[NAME].keys[group].length === spec.slots, `${spec.form}: wraps`);
+    check(
+      wraps.filter((record) => record.accessGroup === group).length === spec.slots,
+      `${spec.form}: wraps`,
+    );
   }
-  check(Object.keys(dcaData.issuerData).length === spec.issuers, `${spec.form}: issuer blocks`);
-  for (const [issuerName, block] of Object.entries(dcaData.issuerData)) {
+  check(dcaData.issuerData.length === spec.issuers, `${spec.form}: issuer blocks`);
+  for (const block of dcaData.issuerData) {
+    const { issuerName } = block;
     const sealed = /** @type {any} */ (block).sealed;
     const where = `${spec.form} ${issuerName}`;
-    check(Object.keys(sealed.contentKeys).length === 1, `${where}: content-key route`);
+    check(sealed.contentKeys.length === 1, `${where}: content-key route`);
     if (hasPeriodKeys(spec.form)) {
-      check(Object.keys(sealed.periodKeys).length === spec.groups, `${where}: period-key families`);
-      for (const members of Object.values(sealed.periodKeys)) {
-        check(Object.keys(members).length === spec.slots, `${where}: period-key members`);
-      }
+      checkFamilyCounts(sealed.periodKeys, spec.groups, spec.slots, `${where}: period-key`);
     } else {
       check(sealed.periodKeys === undefined, `${where}: carries no period-key members`);
     }
     if (hasChain(spec.form)) {
-      check(Object.keys(sealed.chainKeys).length === spec.groups, `${where}: chain families`);
-      for (const members of Object.values(sealed.chainKeys)) {
-        check(Object.keys(members).length === spec.chainWindows, `${where}: chain members`);
-      }
+      checkFamilyCounts(sealed.chainKeys, spec.groups, spec.chainWindows, `${where}: chain`);
     } else {
       check(sealed.chainKeys === undefined, `${where}: carries no chain members`);
     }
@@ -243,10 +255,7 @@ function checkResponseForm(spec, route, result) {
   const chainOutput = route.issuer === "chain>chain";
   const section = chainOutput ? keys.chainKeys : keys.periodKeys;
   const other = chainOutput ? keys.periodKeys : keys.chainKeys;
-  check(section !== undefined && Object.keys(section).length === spec.groups, `${where}: families`);
-  for (const members of Object.values(section)) {
-    check(Object.keys(members).length === want, `${where}: ${want} per family`);
-  }
+  checkFamilyCounts(section, spec.groups, want, where);
   check(other === undefined, `${where}: carries no other period representation`);
   check(result.body.periodGeometry === undefined, `${where}: response omits geometry echo`);
   check(result.application.issues.length === 0, `${where}: client admitted it without issues`);
@@ -302,19 +311,17 @@ function parts(dcaData) {
     return whole - JSON.stringify(copy).length;
   };
   return {
-    wraps: without((copy) => delete copy.contentData[NAME].keys),
+    wraps: without(
+      (copy) => delete copy.contentData.find((record) => record.contentName === NAME).keys,
+    ),
     periodKeys: without((copy) => {
-      for (const block of Object.values(copy.issuerData)) delete block.sealed.periodKeys;
+      for (const block of copy.issuerData) delete block.sealed.periodKeys;
     }),
     chain: without((copy) => {
-      if (copy.periodGeometry !== undefined) {
-        if (Object.values(copy.issuerData).some((block) => block.sealed.periodKeys !== undefined)) {
-          delete copy.periodGeometry.chainsPerDay;
-        } else {
-          delete copy.periodGeometry;
-        }
-      }
-      for (const block of Object.values(copy.issuerData)) delete block.sealed.chainKeys;
+      // Geometry belongs to chain processing; a period-key-only delivery
+      // carries neither member of the pair.
+      delete copy.periodGeometry;
+      for (const block of copy.issuerData) delete block.sealed.chainKeys;
     }),
   };
 }

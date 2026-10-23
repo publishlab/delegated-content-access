@@ -124,8 +124,8 @@ its host environment. It decides which presented coordinates the caller may
 receive, then opens only those coordinates.
 
 Signature verification authenticates publisher claims. It does not authorize
-the caller. Possession of a sealed value, a `keyId`, an `issuerName` or a
-previously unseen member name likewise grants nothing.
+the caller. Possession of a sealed value, a `keyId`, an `issuerName`, a
+previously unseen member name or an array position likewise grants nothing.
 
 ### 2.4. Obtaining and delivering keys
 
@@ -308,7 +308,8 @@ unknown-member handling follows
 The client builds the request only from the core members and the
 selected-profile members specified below. Finite deployment resource limits
 apply to the request as received, including ignored optional members; those
-members grant nothing and are not interpreted.
+members grant nothing and are not interpreted. The issuer counts raw records
+against those limits before it drops a copy or merges a selection.
 
 The core request has this structure:
 
@@ -320,12 +321,15 @@ The core request has this structure:
 | `keyId` | string | Required non-empty opaque value |
 | `envelope` | string | Optional; selected [compact ECDH profile](spec-profile--compact-ecdh.md#32-unlock-request) procedure |
 | `sealed` | object | Required |
-| `sealed.contentKeys` | object | Required; may be empty beside a non-empty section the receiving issuer selected |
-| `sealed.periodKeys` | object | Optional period-key section |
+| `sealed.contentKeys` | array | Required; may be empty beside a non-empty section the receiving issuer selected |
+| `sealed.periodKeys` | array | Optional period-key section |
 | extension members | object | Optional; defined by a selected capability extension (Section 10) |
 
-`sealed.contentKeys` maps `contentName` to the publisher-supplied sealed value.
-`sealed.periodKeys` maps `accessGroup` to a map from `t` to sealed values. A
+`sealed.contentKeys` holds records `{contentName, key}`, where `key` is the
+publisher-supplied sealed value. `sealed.periodKeys` holds records
+`{accessGroup, period, key}`, where `period` is the label `t`. Both follow the
+collection rules of
+[data format Section 2.3](spec--data-format.md#23-collections-of-named-records). A
 selected capability extension defines any further section or request member and
 its relay; for chain keys see
 [chain keys Section 12.3](spec-profile--chain-keys.md#request-member).
@@ -343,13 +347,18 @@ BIND construction, envelope opening or a response error coordinate. A selected
 period extension defines admission of its own coordinates and the scope of
 their failures.
 
-Every named map the issuer processes is a non-array object and applies the
-identifier rules of the data-format specification. When period-key input is
-selected, `sealed.periodKeys` is non-empty and each access-group map in it is
-non-empty. A conforming client emits every sealed entry
+Every collection the issuer processes is an array, and the identity fields of
+its records follow the identifier rules of the data-format specification. A
+collection that is not an array, or a record whose `contentName` or
+`accessGroup` is missing, is not a string or fails those rules, is a
+whole-request structural failure. In `sealed.contentKeys`, an element that is
+not a non-array object presents no coordinate: the issuer skips it, and its
+siblings keep their admission. In `sealed.periodKeys`, such an element is a
+whole-request structural failure. When period-key input is selected,
+`sealed.periodKeys` is non-empty. A conforming client emits every sealed entry
 as a canonical binary string; the applicable envelope or capability
-specification constrains its decoded bytes. Sealed entry type and spelling are
-not structural admission checks: they receive the per-coordinate treatment in
+specification constrains its decoded bytes. Sealed `key` presence, type and
+spelling are not structural admission checks: they receive the per-coordinate treatment in
 Section 7.1 after authorization.
 
 The client MUST copy `version`, `resourceJWT`, `issuerName` and `keyId` from the
@@ -377,10 +386,10 @@ authorized capability to return.
 At least one item content-key coordinate or selected-profile coordinate MUST
 be present. An empty request is a whole-request failure and MUST NOT reach
 opening-key lookup. A selected profile defines which of its inputs count as
-presented for this test. Under the chain-key profile, each grammar-valid own
-family name in an admitted `sealed.chainKeys` outer object presents an access
-group even if its family or members subsequently fail their scoped admission;
-an empty outer collection presents none
+presented for this test. Under the chain-key profile, each grammar-valid
+`accessGroup` in an admitted `sealed.chainKeys` collection presents an access
+group even if its family or records subsequently fail their scoped admission;
+an empty collection presents none
 ([chain keys Sections 12.1 and 12.3](spec-profile--chain-keys.md#123-request-member)).
 Unsupported chain fields remain ignored and cannot make an otherwise empty
 baseline request usable.
@@ -398,6 +407,12 @@ admit versions whose authentication, authorization or coordinate meanings
 differ unless every affected signed assertion and cryptographic transcript
 authenticates or domain-separates the selected version. A new spelling alone
 does not create that separation.
+
+The current unreleased v1 draft uses `"1"` for this draft's grammar. Earlier
+unreleased drafts that used indexed maps are not compatible with the current
+named-record arrays, even if they also used `"1"`. Deployment peers MUST agree
+on the same draft revision outside the wire protocol. This transition defines
+no dual parser, shape-based retry or additional unsigned selector.
 
 Authors need a new `version` when a change alters accepted syntax, the
 authenticated transcript, authorization meaning or failure meaning. Clarifying
@@ -479,9 +494,13 @@ authenticate it explicitly.
 
 ### 6.1. Presented coordinates
 
-A presented coordinate is one own member of an admitted key-bearing request
-map. The issuer MUST use own-property lookup for every request-selected map and
-MUST apply the identifier admission rules before policy.
+A presented coordinate is the coordinate that one record of an admitted
+key-bearing request collection names. The issuer MUST read every record field
+as an own member and MUST apply the identifier admission rules before policy.
+Several records at one coordinate present it once; each record is a source
+candidate for it
+([data format Section 2.3](spec--data-format.md#23-collections-of-named-records)).
+Array position is not part of a coordinate.
 
 The issuer constructs a presented set of `contentName` coordinates for the item
 content-key section and `(accessGroup, t)` coordinates for a selected
@@ -596,6 +615,14 @@ requires. Envelope construction, BIND bytes, algorithm selection and opening
 failure are defined by
 [spec--sealed-key-envelopes.md](spec--sealed-key-envelopes.md).
 
+When several source records present one permitted coordinate, the issuer
+applies that same opening procedure to each usable record. Several records can
+open and yield different keys. The issuer carries each distinct key it produced
+into the result as a candidate (Section 7); a successful first opening does not
+make that key the coordinate's only result. Policy decides the coordinate once,
+however many records present it, and each record consumes the applicable finite
+work budget.
+
 A selected mechanism may use a trusted issuer source to produce an
 already-authorized result. The composed issuer MUST confine both the source's
 input use and its returned result to the authorization required by that
@@ -632,17 +659,20 @@ The issuer core produces this transport-independent semantic document:
 ```json
 {
   "keys": {
-    "contentKeys": {}
+    "contentKeys": []
   }
 }
 ```
 
-`keys` and `keys.contentKeys` are required objects. `keys.periodKeys` is present
-only when at least one period key is delivered. `errors`, when present,
-MUST be a non-empty non-array object. Each member name is an error coordinate,
-and each value MUST be a non-array object with a non-empty string `error`
-member and an optional string `message` member. Unknown members inside an
-error object are ignored.
+`keys` is a required object and `keys.contentKeys` a required array that may be
+empty. `keys.periodKeys` is present only when at least one period key is
+delivered. `errors`, when present, MUST be a non-empty array of error records.
+Each error record MUST be a non-array object with a string `coordinate` member
+holding an error coordinate (Section 7.1), a non-empty string `error` member
+and an optional string `message` member. Unknown members inside an error record
+are ignored. The issuer emits one error record per coordinate. A client that
+finds several records for one `coordinate` uses the last whole record
+([data format Section 2.3](spec--data-format.md#23-collections-of-named-records)).
 
 <a id="72-not-delivered-access-group-families"></a>
 The result MAY also carry the top-level member `notDelivered`. It is a base
@@ -651,10 +681,14 @@ member of the core result protected by Section 10;
 defines its grammar and every client's admission duty. Every client admits
 `notDelivered` as that section requires.
 
-`keys.contentKeys` maps `contentName` to one delivered content key.
-`keys.periodKeys` maps `accessGroup` and `t` to delivered period keys.
-Each core-result key entry is canonical unpadded base64url. A selected response
-binding may replace each key entry with its protected carrier before delivery.
+`keys.contentKeys` holds records `{contentName, key}` and `keys.periodKeys`
+holds records `{accessGroup, period, key}`, where `key` is the delivered key.
+Several records at one coordinate are candidate keys for it: the issuer emits
+each distinct key it produced for an authorized coordinate (Section 6.3), and
+the client keeps or tries each admitted candidate within its finite bounds.
+Each core-result key entry, the `key` member of a record, is canonical unpadded
+base64url. A selected response binding may replace each key entry with its
+protected carrier before delivery.
 
 A selected capability extension may add result sections and top-level members;
 its specification defines them and the admissible result set they draw from
@@ -680,24 +714,26 @@ reusable authority.
 The issuer may fail one trusted, authorized coordinate and still return its
 successful siblings. Its error object contains no key material.
 
-Each core error entry MUST correspond to exactly one admitted request entry
-included in the policy-granted set, and that entry MUST have produced no
-delivered key; a selected capability extension states how opening failures of
+Each core error record MUST correspond to exactly one admitted presented
+coordinate included in the policy-granted set, and none of the source records
+at that coordinate may have produced a delivered key; a selected capability extension
+states how opening failures of
 its source members map onto these coordinates, or reports them in an error
 grammar of its own result section. A content coordinate is its
 `contentName`; a period-key coordinate is its `(accessGroup, t)` pair.
-The coordinate named by an `errors` entry MUST NOT also appear in any `keys`
+The coordinate named by an `errors` record MUST NOT also appear in any `keys`
 section in that result. The issuer omits policy-denied coordinates from `keys`
 and `errors` and does not report them as opening failures; period keys Section
 5.6 states what a result may carry for a family it names in `notDelivered`.
 
 An issuer that encounters a non-string, noncanonical or otherwise malformed
-entry after the request and coordinate are authorized MUST report
-`unseal_failed` for that coordinate and MUST NOT decode or open it. That
-failure does not suppress successful siblings. Malformed request containers and member names remain
+entry after the request and coordinate are authorized MUST NOT decode or open
+it. It MUST report `unseal_failed` for that coordinate when no other record
+there produced a delivered key. That failure does not suppress successful siblings.
+Malformed request containers, records and identity fields remain
 whole-request admission failures.
 
-The error-map key grammar is:
+The `coordinate` grammar is:
 
 ```text
 error-coordinate        = contentName / period-error-coordinate
@@ -709,7 +745,8 @@ period-capability specification admits. An empty or malformed `t` and a
 group-only spelling such as
 `accessGroup "|"` are not core error coordinates. Because `contentName`,
 `accessGroup` and admitted `t` exclude `|`, the two forms are unambiguous. The
-client treats the key as a coordinate, not free-form diagnostic text.
+client treats the `coordinate` value as a coordinate, not free-form diagnostic
+text.
 
 An issuer reports family-level non-delivery only through the `notDelivered`
 member ([period keys Section 5.6](spec-profile--period-keys.md#56-family-reports-notdelivered)).
@@ -727,6 +764,7 @@ Core processing distinguishes:
 | retired opening key | Per coordinate after a trusted request | `key_retired`; successful siblings may remain |
 | envelope/BIND opening failure | Per coordinate after a trusted request | `unseal_failed`; successful siblings may remain |
 | chain admission failure | Per family or member, silent | None for it; unrelated members and sections unaffected |
+| selected-profile finite output processing limit exceeded | Whole request | None; successful sibling keys are suppressed |
 | issuer configuration or internal failure | Whole request | None |
 
 Failure detail MUST NOT turn an untrusted request into a key-existence or policy
@@ -765,7 +803,7 @@ matching period capability; their presence does not promise acquisition of
 that capability from this delivery.
 
 A usable issuer block for this core satisfies the data-format requirements for
-`issuerName`, `keyId`, `sealed` and the applicable sealed map. Its `keyId` is
+`issuerName`, `keyId`, `sealed` and the applicable sealed collection. Its `keyId` is
 non-empty. Publisher-side delegation completeness requires suitable sealed
 material, not an endpoint URL in the delivery.
 

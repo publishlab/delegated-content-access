@@ -1,5 +1,9 @@
 # Porting the JavaScript reference
 
+[Reference architecture](design--reference.md) defines JavaScript source and
+composition boundaries. This document defines paired Reference/Port API
+contracts and shared verification obligations.
+
 A port implements the reference's exported behavior in another language. The
 reference tests protocol ideas and supplies behavior that implementations can
 follow and test against. Its APIs should therefore be clear in JavaScript and
@@ -8,6 +12,12 @@ behavior; keep objects when state or composition is part of it.
 Choose the API shape that ports and cross-language tests can use simply, even
 when that shape is less idiomatic JavaScript. If a particular behavior warrants
 a more complex shape, state that reason and test the behavior it preserves.
+
+Supported JavaScript entry points must also be usable directly as library APIs.
+Keep their contracts explicit and their responsibilities separate from
+demonstration setup, while preserving practical native implementations and
+shared verification. SDK packaging and release promises are separate work;
+deferring them does not defer the quality of these entry points.
 
 The reference implementation, its tests, and the test bridges form one porting
 system. The main goal is to run the JavaScript reference tests as written
@@ -41,6 +51,11 @@ checking that one object's fixed time, random draws and collected content do
 not change the other's result. A process restart between the two objects is
 not evidence of this property.
 
+Capturing an API input owns the captured values, not arbitrary mutable state
+inside application callbacks. Preserve collaborator identity when composition
+requires it; specify and test any stronger snapshot or lifetime guarantee at
+the boundary that owns it.
+
 The shared bridge's wire schema, operation vocabulary, codecs, dispatch, and
 proxy implementation describe language-neutral operations and values. They
 contain no domain class names, fields, reconstruction rules, or protocol
@@ -69,6 +84,15 @@ reference as it stands.
   class carries JSDoc parameter and return types, and `pnpm run check:types`
   checks its module through `jsconfig.json`. Exported values have declared
   shapes too.
+- **Reference extraction:** core-only selections support declaration emission
+  independently of assembled actor copy manifests. Select universal shared,
+  the role core and pairwise cores naming that role, with the same formula for
+  selected extensions and required siblings. Structural collaborator contracts
+  stay in core; assembled publisher and integration aliases stay with assembly.
+  `test-tools/check-core-declarations.test.js` physically isolates affected
+  role selections and compiles consumers against emitted declarations alone.
+  The existing source/emitted actor consumer checks prove their assembly seams
+  separately. These are reference packaging promises, not new wire requirements.
 - **Port:** expresses the same input and result contract with native types
   where possible, and a checked or reviewed declaration where the language
   version has no type syntax for it.
@@ -122,6 +146,19 @@ reference as it stands.
   publishes do not mix render inputs. A port may use native record classes,
   arrays or other typed containers; preserve this own-field contract and
   per-render isolation without requiring JavaScript prototype behavior.
+- **Low-level seal capture:** each `Sealer.seal()` captures the admitted
+  resource ID/data and item set before invoking the clock or any other host
+  callback or awaiting work. The same resource capture reaches item preparations
+  and the signed/readable resource. Later `resource()` replacement and `content()`
+  additions belong to later calls. Each result owns its mutable resource data.
+- **Reuse and failure:** the JS builder supports sequential and overlapping
+  asynchronous seals with independent operation captures. A failed seal returns
+  no render and leaves the builder available for another call; host callbacks'
+  effects are not rolled back. Clock, entropy, supply and sealing collaborators
+  retain their own identity, state and supported concurrency requirements.
+  Separate native instances or host serialization are valid; a native port
+  offering concurrent shared-instance use must preserve operation isolation.
+  This is no blanket native thread-safety or memory-erasure promise.
 - **Content encryption:** the Sealer uses each fresh independent item key for
   one AES-128-GCM encryption with twelve zero nonce bytes and
   `LP(renderId) || LP(contentName)` as AAD (see
@@ -132,6 +169,26 @@ reference as it stands.
   Keep the descriptor's content type and encoding list attached to its bytes;
   do not infer those values from arbitrary object shape or silently accept an
   unsupported field.
+
+## Markup writer values
+
+`adapter-publisher/writeMarkupDelivery.js` and `inertJsonScript` emit inert
+JSON script carriers; [data format Section 3](../docs/spec--data-format.md#3-markup-delivery)
+owns the wire rules. Ports preserve admitted decoded JSON values and carrier
+placement: object member order is immaterial, array order is preserved, strings,
+booleans and null are unchanged, and finite numbers retain their numeric value.
+Native JSON encoders may differ in whitespace, escapes and equivalent number
+spellings. Preserve object/list distinctions, reserved carrier classes and
+inertness, including embedded `</script` and `<!--` strings. Signed JWT strings,
+ciphertext and cryptographic inputs remain exact; they are never reserialized
+as part of this allowance.
+
+The JS writer uses `JSON.stringify`; its exact spelling and JS-only value
+normalization tests describe that implementation. Shared port assertions compare
+decoded values and parse the surrounding HTML to check inert carrier behavior;
+they do not require emulating JS number formatting or object enumeration.
+Native admission and refusal tests still apply to values outside the port's
+supported JSON domain.
 
 ## Bytes
 
@@ -411,6 +468,11 @@ opened coverage. A port preserves this ordering and side-effect boundary, and
 does not run representation transforms during route selection. Normal
 `open({item, ciphertext, resolveKey})` performs the same preflight before
 resolving a key, then decrypts and runs the selected decoders in reverse order.
+`resolveKey` receives a predicate `authenticate(candidate, origin?)` that opens
+the item with one candidate and keeps the opened bytes, so a resolver holding
+rival candidates tries each. When none opens, the item fails `decrypt_failed`
+if a failed candidate had an origin other than `recovered-content-key`, and
+`no_key` when only recovered guesses or candidates without an origin failed.
 The exported `ContentDecoder` typedef in `core-client/ContentRepresentationOpener.js`
 is also the composition option's callback contract. Each decoder receives
 `decode(bytes, {maxOutputBytes})`, where the allowance is
@@ -421,18 +483,26 @@ type and size. Injected decoders are trusted code; the allowance does not sandbo
 their other allocations or execution time.
 
 `ContentKeyResolver.contentKeyForAuthenticatedItem(dcaData, contentName,
-authenticate)` tries the held item key and then the existing cache-derived
-wrapped-key alternative. The async `authenticate(candidate)` predicate answers
-boolean and is a trusted, side-effect-free check. The first accepted candidate
+authenticate)` tries each held item key, newest first, then the cache-derived
+wrapped-key alternatives and then the recovery sources. The async
+`authenticate(candidate, origin)` predicate answers boolean and is a trusted,
+side-effect-free check; `origin` names where the candidate came from, such as
+`held-content-key`. The first accepted candidate
 is retained under that publisher, render and item, so a later ordinary
 `contentKeyFor` call uses it. Predicate exceptions propagate. If every
 candidate is refused, existing held-key state remains intact. The ordinary
 `contentKeyFor` method keeps its established held-key-first acquisition
 behavior. A port preserves candidate order, scoped retention and no-mutation
 on refusal; it does not expose a candidate list or a general-purpose setter.
+Delivery-client resolver factories MUST provide authenticated candidate
+selection at construction, including compositions that use only single-issuer
+`open`. A plain newest-key lookup cannot substitute for that duty. The HTML map
+opener requires the same collaborator. Synchronous collaborator results remain
+supported; optional reader-context cleanup has its separate lifecycle contract.
+
 `resolveAuthenticated(dcaData, contentNames, authenticate, application?)` performs
 that authenticated selection for all requested items under one captured response
-application lease. Its predicate takes `(contentName, candidate)` and answers a
+application lease. Its predicate takes `(contentName, candidate, origin)` and answers a
 promise of boolean; the result is `{covered, missing, origins}` metadata.
 A refused wrapped candidate does not stop later candidates or replace the held
 key. Authentication precedes retaining a successful key. The three leased
@@ -471,13 +541,13 @@ and `periodGeometry` that no declared section starts at. A port keeps both
 refusals, so an undeclared section never leaves unwrapped.
 A section may declare an optional trusted `errorPath`: a non-base member path
 that neither equals nor overlaps another declared path, where the issuer reports
-a retired opening key per coordinate, nested at the section's `depth`. Each leaf
-there is exactly `{ "error": "key_retired" }` (`isRetirementLeaf`).
+a retired opening key per coordinate as one record in an array. Each record
+there holds exactly the section's coordinate `fields` and `"error": "key_retired"`.
 `createIssuerCore` settles it with its section and returns it in
 `core.responseSections`. In client-bound mode `KeyDelivery.prepare` passes those
-leaves unwrapped, because an error record is never a key entry, and refuses with
-`bad_config` any other leaf, a map not nested to the section's depth, or an
-error map no section declares.
+records unwrapped, because an error record is never a key entry, and refuses with
+`bad_config` any other record, a value that is not such an array, or an
+error collection no section declares.
 
 At construction, `IssuerEngine` copies and freezes each response source's
 declared metadata and captures its `presented` and `respond` functions with the
@@ -487,7 +557,7 @@ either source property does not replace the callback, and construction does not
 freeze the caller's source object. A port preserves both callback identity and
 receiver while keeping the copied metadata immutable.
 
-A client consumer walks the map with `core-client/responseSectionEntries.js`
+A client consumer walks those error records with `core-client/responseSectionEntries.js`
 `composedSectionErrors`. `createBrowserIssuer` adds
 HTTP admission for ordinary direct responses; `admitBrowserRequest` exposes
 the admission step for host-owned response preparation and commit flows.
@@ -699,6 +769,38 @@ memoization is partitioned by capacity as well as request/response identity.
 The client cache's existing `maxMembersPerMessage` must also admit the intended
 response, and ordinary request byte/entry budgets remain independently active.
 
+The period-capability source's `capabilities(unlock, invocation)` receives the
+actual deduplicated ordinary fallback `periodKeyCount` and the complete immutable
+`selectedCapabilities` list for that invocation, alongside the request and
+coordinate-confined opener. Base treats each selection payload as opaque.
+Selection and budget state belong to that invocation; reusing a request object
+must not share them between overlapping calls.
+
+The chain source reserves actual mandatory article candidates across all
+families after ordinary fallback, then spends remaining capacity on optional
+future coordinates. Each coordinate's complete distinct candidate set must fit;
+failed envelopes and identical keys do not consume candidate slots. An optional
+horizon stops before a set that cannot fit, preserving all its rivals together.
+A source may explicitly answer `{kind: "omitted"}` when optional production is
+clamped to no output; this emits no key, error or unavailable report. Mandatory
+output cannot be silently omitted, and an empty ordinary representation remains
+invalid. No omission marker is transmitted.
+
+The chain source checks the actual distinct projected period-key candidates
+against the 288-key family maximum. It also supplies the optional synchronous
+`checkPeriodKeyOutput(count)` source postcondition. `IssuerEngine` captures this
+callback at construction and calls it with the final ordinary period-key count,
+including base fallback families, on every successful unlock. The chain source
+refuses counts above 512. Custom compositions retain this check automatically
+when they install the source; source decorators forward the callback. A callback
+must return undefined synchronously or throw; any other return is `bad_config`.
+The base engine defines no numeric profile limit of its own.
+Overflow throws `too_many_entries` for the whole
+exchange; no already-ready sibling keys leave. Errors and dedicated
+content-group or chain-key records do not count as ordinary period keys.
+The 288-key maximum does not apply to ordinary fallback families, and neither
+maximum adds a base-client admission rule.
+
 Values above 16 are an implementation capacity override for explicitly matched
 peers and measurement. They exceed the current chain-key specification's bound;
 they do not change that specification, profile identity, wire format or default
@@ -719,7 +821,7 @@ before the requested large carrier is projected to a smaller subset.
   uses the baseline version guard; an engine with a different supported set
   provides its own pure guard. Version errors remain bounded `bad_version`
   refusals; other guard faults are not silently converted into that refusal.
-  The request must contain its own `sealed.contentKeys` object, which may be
+  The request must contain its own `sealed.contentKeys` array, which may be
   empty beside a selected nonempty section. Optional omission of that member
   in a publisher delivery block does not waive the request requirement.
 - **Port:** preserves the same carrier/version/member order and selected
@@ -903,10 +1005,12 @@ opens this item. A client without recovery sources keeps the held-key-first
 path unchanged. A port keeps that split: a derived candidate is never used
 before it authenticates.
 
-Content-group chain responses put the delivered key value directly at
-`contentGroups.chainKeys.<contentName>.<group>.<cutoffLabel>`, as period responses
-do. The response descriptor keeps depth 3 and `contentGroupChainKey` with no
-`leafKey`. Derive the internal position from the cutoff and captured request
+Content-group chain responses put the delivered key value directly in the
+`key` member of a `{contentName, group, cutoff, key}` record in
+`contentGroupKeys.chainKeys`, as period responses do with `period`.
+The response descriptor names the coordinate fields
+`["contentName", "group", "cutoff"]` and the kind `contentGroupChainKey`.
+Derive the internal position from the cutoff and captured request
 geometry; retain it in staged capabilities and caches. No wire position or outer
 key wrapper is interpreted. Both transport classification and key wrapping walk
 the direct value under that same descriptor.
@@ -917,6 +1021,17 @@ its publisher adapter `periodKeySupplyFor` lives separately in
 `extensions/chain-keys/core-publisher/periodKeySupplyFor.js`. The generator's
 inputs, derived bytes and retained-generation behavior are unchanged by this
 source split. A client-only slice imports neither implementation.
+
+A generation handle owns its copied secret/geometry/construction inputs and,
+by default (`cache: true`), retains derived group/window entries for that handle's
+lifetime. It promises no automatic expiry or eviction. `cache: false` disables
+retention between operations while permitting reuse within one expansion; derived
+bytes are identical and returned buffers do not alias retained entries. The host
+chooses handle reuse, replacement and release, including in long-running services.
+Releasing a host reference does not cancel operations that still hold the handle.
+Native shared-instance concurrency requires the port's documented synchronization
+contract; neither request teardown nor GC timing supplies it. Releasing a handle
+makes no complete-erasure guarantee.
 
 Content-group role entries use stock chain construction through their required
 implementation dependency. Omitted `chain` configuration selects those stock
@@ -934,10 +1049,12 @@ holds `requestBuilderFactory`, `recoverySources` and `responseSections`, ready
 to spread into the composition options. The two kind members refuse with
 `bad_config` a set that is not frozen or lacks either content-group kind; the
 host settles it first with its transport's `settleKindDescriptors`. The
-client passes `maxResponseMembers` and `maxWindowsPerGroup` to its
-`ChainKeyCache` as `maxMembersPerMessage` and `maxMembersPerFamily`; a port's
-chain cache takes these per-answer bounds from the composing profile, not the
-chain-keys defaults of 16 and 2. The issuer and publisher zero the seed
+client passes `maxResponseMembers` to its `ChainKeyCache` as both
+`maxMembersPerMessage` and `maxMembersPerFamily`, and `maxWindowsPerGroup` as
+`maxWindowsPerFamily`. A port takes the member bounds from the composing
+profile, not the chain-keys defaults of 16 and 2. Several pending candidates
+at one cutoff count as one window; pending member bounds and durable retained
+rival capacity remain independent. The issuer and publisher zero the seed
 handles' owned buffers when the exchange or publish ends and release the local
 handles. A chain port owns cleanup of any further copies it makes; the stock
 port releases its generation but does not explicitly overwrite its internal
@@ -977,10 +1094,11 @@ filed under one never has it.
 
 `applyResponse` checks a `notDelivered` family against the response's key
 entries and admitted errors only. A family has a key entry only when its key
-section and its family are non-array objects and the family has an own
-member; an empty, array or scalar container conflicts with nothing, and a
-nonempty family conflicts before its labels or leaves are admitted
-(response binding Section 3). Only an admitted period-coordinate error
+section is an array holding a non-array object record whose `accessGroup` is
+the family; an empty section, a non-array section or a scalar element
+conflicts with nothing, and a record naming the family conflicts before its
+label or `key` is admitted (period keys Section 5.6). Several report entries
+for one family resolve to the last whole entry before this check. Only an admitted period-coordinate error
 conflicts with a family; a malformed, unsolicited or wrongly shaped error is
 an issue of its own and never refuses the report. When the client-bound
 transport is unusable, such as a missing, wrong or unknown method or malformed
@@ -999,10 +1117,11 @@ item grants and unrelated extension sections still apply after representation
 admission. Classify original entries before suppressing family grants. The walk
 authenticates that item progress and gives the invalid report no conditional
 retry or denial-cache meaning. Previously retained keys stay unchanged.
-The mixed check classifies every entry in supported, admitted key-map containers
-by JSON type before coordinate admission: a string is direct and a non-null,
-non-array object is wrapped, so `{}` or `{"key": 7}` beside a string refuses
-the response even at an unsolicited coordinate. An array, `null`, number or
+The mixed check classifies the `key` member of every record in supported,
+admitted key collections by JSON type before coordinate admission: a string is
+direct and a non-null, non-array object is wrapped, so a `key` of `{}` or
+`{"key": 7}` beside a string refuses the response even at an unsolicited
+coordinate. An array, `null`, number or
 boolean establishes no representation and fails only at its own entry.
 Unsupported sections are discarded. This scan neither opens nor retains keys;
 only entries that subsequently pass coordinate, request-association and geometry
@@ -1044,6 +1163,13 @@ RSA-OAEP client opening checks that the canonical ciphertext decodes to exactly
 `ceil(privateKey.algorithm.modulusLength / 8)` bytes before calling `unwrapKey`
 or `decrypt`. A width mismatch is reported as `unwrap_failed` for that delivered
 entry and does not trigger another key kind or method attempt.
+
+A content-key source may present `sourcePeriodCoordinates` as a map of access
+groups to canonical period labels beside its content names. The engine copies,
+deduplicates and sorts those labels for policy input. They stay separate from
+`periodCoordinates`, which describes ordinary sealed period records, and cannot
+expand an ordinary period grant. The selected mechanism still authorizes each
+auxiliary coordinate explicitly.
 
 An issuer `contentKeySource` receives an opener that separates authorization
 from the envelope's BIND coordinate. For a direct content-key envelope, the
@@ -1135,7 +1261,74 @@ arbitrary application JSON.
   issuer verification and authorization remain mandatory on unlock. Cached
   opening need not contact the issuer. This mandatory baseline procedure has
   no toggle or legacy retry; old random-content-nonce readers/deliveries need
-  a separately selected old reader. Wrap and envelope nonces are unchanged.
+  a separately selected old reader. An ordinary ECDH-P256 envelope carries no
+  nonce: the reference writes 97 bytes and seals and opens under a
+  twelve-zero-byte AES-GCM nonce. Period-key wraps derive their nonce as
+  [Derived wrap nonce](#derived-wrap-nonce) describes.
+
+### Derived wrap nonce
+
+- **Transcript:** publisher and client derive every period-key wrap nonce, so
+  an ordinary item key record is `{accessGroup, period, key}` and a marked
+  omission record `{accessGroup, period, key, bind}`.
+  `LPB` frames bytes; the content AAD's `LP` frames a string's UTF-8 bytes.
+
+  ```text
+  LPB(b)  = U32BE(byteLength(b)) || b
+  context = UTF8("dca-derivation-content-key-wrap-nonce") || 0x00
+         || RID
+         || LPB(UTF8(contentName)) || LPB(UTF8(accessGroup)) || LPB(UTF8(t))
+         || LPB(wrapAad)
+  nonce   = first 12 bytes of SHA-256(context)
+  ```
+
+  `RID` is the 16 bytes the canonical render ID decodes to, raw and without a
+  length prefix; the content AAD instead frames the 22-character render ID
+  string. `wrapAad` is empty for an ordinary wrap and the exact omission
+  binding bytes for a marked one. The normative text is
+  [content protection Section 4.1](../docs/spec--content-protection.md#41-wrap-nonce).
+- **Vector:** render ID `AAECAwQFBgcICQoLDA0ODw`, item `bodytext`, group
+  `premium`, `t` `251023T1400`, empty `wrapAad`. The 96-byte context in hex,
+  as two halves to concatenate:
+
+  ```text
+  6463612d64657269766174696f6e2d636f6e74656e742d6b65792d777261702d6e6f6e636500000102030405060708090a0b
+  0c0d0e0f00000008626f647974657874000000077072656d69756d0000000b323531303233543134303000000000
+  ```
+
+  The nonce is `5bc590cb902de4d359b2c28b` in hex. With a period key of 16 `03`
+  bytes and a content key of 16 `07` bytes, the entry's `key` is
+  `or3lLd47H4ELVxwMVP2fnSsMZlYpaOT2YFd1WXVZfBE`.
+- **Reference:** one helper, `contentKeyWrapNonce({renderId, contentName,
+  accessGroup, t, aad})` in `core-shared/contentKeyWrapNonce.js` and exported
+  from `reference.mjs`, serves the publisher, the client and the omission
+  issuer. It resolves to the 12 nonce bytes, or to null when an input is
+  outside the admitted grammar or `aad` is neither absent nor bytes. It sits in
+  the universal slice because that issuer derives the nonce too. The Sealer
+  calls the render's synchronous wrap-strategy `aad` once per wrap, copies the
+  bytes, derives the nonce from the copy and encrypts with the same copy; the
+  strategy's `entry` callback receives `{t, key}`. The client derives after it
+  selects the entry interpretation, from the captured render ID, the item
+  name, the entry's `accessGroup` and its `period` label, inside the
+  existing reset check, and then calls `attemptContentKeyWrap(entry,
+  periodKey, nonce, aad)` from `core-client/contentKeyWrapAttempt.js`. That
+  attempt reads only the entry's `key` and refuses a nonce that is not 12
+  bytes with `bad_config`. The client never derives from the label under
+  which a cache filed a candidate, so rival, relabelled and chain-derived
+  candidates for one entry share one nonce. The omission issuer derives from the verified render ID, the
+  policy's content name, the candidate's `accessGroup` and `period`, and the binding it
+  rebuilds. A carried `nonce` is ignored whatever its type and selects no IV,
+  procedure or retry.
+- **Port:** produce these exact bytes. Admit the 16-byte render ID, names and
+  labels before hashing and hash their admitted spellings without
+  normalization. Capture inputs before the first await. The nonce is public,
+  so raw period keys and non-extractable AES-GCM handles both open the wrap
+  unchanged. Keep the aggregate ceiling of `2^32` wraps per period-key bytes
+  across all producers and a lower local ceiling
+  ([period keys Section 6.2](../docs/spec-profile--period-keys.md#62-wrapping-and-rollover));
+  the reference keeps no count. There is no toggle or legacy retry: readers
+  that expect a carried random wrap nonce and readers of this procedure do not
+  open each other's entries.
 
 ### Recipient-grant bearer admission
 
@@ -1379,10 +1572,19 @@ not promises, and are not counted.
 
 ## Browser denied-unlock scheduling
 
-`createBrowserClient` installs `DeniedUnlockCache` unless `denialCache: false` is
-selected. The default is ten minutes, 256 hints and in-memory storage. An injected
-instance accepts `context`, `durationMs`, epoch-millisecond `now`, optional standard
-`Storage`, `namespace` and `maxEntries`. `setContext(nonemptyString)` invalidates
+`createBrowserClient` and `createDeliveryClient` use denial hints only when a
+`denialCache` collaborator is explicitly injected. Omission installs no owner
+and reads no persisted hints; the browser entry also accepts `false` for omission.
+This is a deployment-time composition choice;
+no runtime toggle is required. Positive item-key retention and period-key and
+chain-key reuse remain independent of this scheduling feature.
+
+The optional adapter remains at `adapter-client/DeniedUnlockCache.js`; its
+`denialCache` injection seam keeps the ordinary browser assembly independent of
+the concrete adapter. `new DeniedUnlockCache()` defaults to ten minutes, 256 hints
+and in-memory storage. A fresh memory instance does not persist across page
+reloads. An injected instance accepts `context`, `durationMs`, epoch-millisecond
+`now`, optional standard `Storage`, `namespace` and `maxEntries`. `setContext(nonemptyString)` invalidates
 hints and pending recordings; `invalidate()` does the same within a context.
 Storage is optional scheduling persistence and may fail without failing access.
 `denyContext({publisherOrigin,issuerName,unlockUrl})` is an asynchronous explicit
@@ -1398,9 +1600,9 @@ also requires `denyContext(scope)`, `invalidate()` and `setContext(context)`. Th
 delivery entry needs only `capture` and `deny`. Custom implementations need no
 subclass and preserve these scope, lifecycle and no-authority semantics.
 
-The browser exposes its instance as `client.denialCache` (null when disabled).
-The carrier-independent delivery entry accepts this collaborator only when
-explicitly injected. Its default behavior is unchanged. An equivalent suppressed
+The browser exposes its instance as `client.denialCache` (null when omitted or
+`false`). The carrier-independent delivery entry likewise accepts this
+collaborator only when explicitly injected. An equivalent suppressed
 unlock returns `{skipped:"cached-denial",retryAt,application:null}`, with an epoch-
 millisecond deadline and no HTTP status or body. Route walks record outcome
 `cached-denial` without a status and do not activate conditional fallback.
@@ -1421,6 +1623,16 @@ and retains local memory only, so a later stale snapshot cannot undo local
 invalidation. The host must still invalidate each live context instance when
 storage cannot communicate a lifecycle change. This is best-effort scheduling storage, not an atomic cross-tab
 state store or authorization boundary.
+
+Choose this adapter when repeated equivalent denied requests justify its lifecycle
+handling. Bounded expiry limits suppression after entitlement changes that the
+client cannot observe. For an explicit host retry, await
+`client.clearAccessDecisions()` and then start acquisition; clearing alone sends
+no request. A new acquisition call alone does not bypass an unexpired hint.
+Without the adapter, later attempts request unresolved capability normally, subject
+to their configured finite route sequence and transport behavior. The composition
+examples in [README.md](README.md#browser-denied-unlock-cache) show omission and
+explicit injection.
 
 ## Browser reader-context lifecycle
 

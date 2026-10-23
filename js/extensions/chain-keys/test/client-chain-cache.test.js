@@ -454,7 +454,8 @@ for (const [order, oldCutoffT, replacementCutoffT] of [
     );
 
     // Each render wraps its own content key under its own generation's period key
-    // at the same coordinate; the trial opens each wrap with one candidate.
+    // at the same coordinate; the trial opens each wrap with one candidate. The
+    // attempt takes the nonce its caller derived, so any fixed nonce serves here.
     const nonce = new Uint8Array(12).fill(1);
     for (const { render, periodKey, contentKey } of [
       { render: "old", periodKey: oldPeriodKey, contentKey: new Uint8Array(16).fill(0x0a) },
@@ -462,12 +463,11 @@ for (const [order, oldCutoffT, replacementCutoffT] of [
     ]) {
       const entry = {
         t: TARGET_T,
-        nonce: base64urlEncode(nonce),
         key: base64urlEncode(await encrypt(periodKey, nonce, contentKey)),
       };
       const opened = [];
       for (const candidate of candidates) {
-        const key = await attemptContentKeyWrap(entry, candidate);
+        const key = await attemptContentKeyWrap(entry, candidate, nonce);
         opened.push(key instanceof Uint8Array ? base64urlEncode(key) : key);
       }
       assert.deepEqual(

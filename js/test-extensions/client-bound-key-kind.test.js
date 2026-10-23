@@ -32,6 +32,8 @@ import * as ecdhProfile from "../extensions/client-bound-transport/ecdhP256.js";
 import * as rsaProfile from "../extensions/client-bound-transport/rsaOaep.js";
 import { clientBoundKeyCapability } from "../extensions/client-bound-transport/core-client/clientBoundKeyCapability.js";
 import { ACCESS_GROUP, CONTENT_NAME, ISSUER_NAME as PRIMARY } from "../demo/scenarios/fixtures.js";
+import { issuerBlockOf } from "../test-lib/helpers/inspect.js";
+import { keyAt, setKeyAt } from "../test-reference/support/namedRecords.js";
 
 const { subtle } = globalThis.crypto;
 const PUBLISHER_ORIGIN = "https://www.news-site.example";
@@ -140,16 +142,16 @@ async function kindFixture(profile) {
     },
   });
   const rawPage = (await stage.render("A")).asJson();
-  rawPage.issuerData[PRIMARY].sealed.chainKeys = {
-    [ACCESS_GROUP]: {
-      "251023T1145": "AQ",
-      "251023T2345": "Ag",
-    },
-  };
+  issuerBlockOf(rawPage, PRIMARY).sealed.chainKeys = [
+    { accessGroup: ACCESS_GROUP, cutoff: "251023T1145", key: "AQ" },
+    { accessGroup: ACCESS_GROUP, cutoff: "251023T2345", key: "Ag" },
+  ];
   rawPage.periodGeometry = { chainsPerDay: 2, periodMinutes: 15 };
   const page = client.parse(rawPage);
   const request = client.buildRequest(page, PRIMARY, [CONTENT_NAME]);
-  const [periodT] = Object.keys(request.sealed.periodKeys[ACCESS_GROUP]);
+  const periodT = request.sealed.periodKeys.find(
+    (/** @type {any} */ record) => record.accessGroup === ACCESS_GROUP,
+  )?.period;
   assert.ok(periodT, "the request presents a period-key coordinate");
 
   const delivery = new KeyDelivery({
@@ -160,37 +162,44 @@ async function kindFixture(profile) {
   const response = await delivery.prepare(
     {
       keys: {
-        contentKeys: { [CONTENT_NAME]: base64urlEncode(new Uint8Array(16).fill(1)) },
-        periodKeys: { [ACCESS_GROUP]: { [periodT]: base64urlEncode(new Uint8Array(16).fill(2)) } },
-        chainKeys: {
-          [ACCESS_GROUP]: {
-            [CHAIN_SIBLING]: base64urlEncode(new Uint8Array(16).fill(3)),
-            [CHAIN_CUTOFF]: base64urlEncode(new Uint8Array(16).fill(4)),
+        contentKeys: [
+          { contentName: CONTENT_NAME, key: base64urlEncode(new Uint8Array(16).fill(1)) },
+        ],
+        periodKeys: [
+          {
+            accessGroup: ACCESS_GROUP,
+            period: periodT,
+            key: base64urlEncode(new Uint8Array(16).fill(2)),
           },
-        },
+        ],
+        chainKeys: [
+          {
+            accessGroup: ACCESS_GROUP,
+            cutoff: CHAIN_SIBLING,
+            key: base64urlEncode(new Uint8Array(16).fill(3)),
+          },
+          {
+            accessGroup: ACCESS_GROUP,
+            cutoff: CHAIN_CUTOFF,
+            key: base64urlEncode(new Uint8Array(16).fill(4)),
+          },
+        ],
       },
       periodGeometry: rawPage.periodGeometry,
     },
     view,
   );
 
-  /** @type {Record<'contentKey'|'periodKey'|'chainKey', { section: string, path: string[] }>} */
+  /** @type {Record<'contentKey'|'periodKey'|'chainKey', { section: string, identity: Record<string, string> }>} */
   const slots = {
-    contentKey: { section: "contentKeys", path: ["contentKeys", CONTENT_NAME] },
-    periodKey: { section: "periodKeys", path: ["periodKeys", ACCESS_GROUP, periodT] },
-    chainKey: { section: "chainKeys", path: ["chainKeys", ACCESS_GROUP, CHAIN_CUTOFF] },
+    contentKey: { section: "contentKeys", identity: { contentName: CONTENT_NAME } },
+    periodKey: { section: "periodKeys", identity: { accessGroup: ACCESS_GROUP, period: periodT } },
+    chainKey: {
+      section: "chainKeys",
+      identity: { accessGroup: ACCESS_GROUP, cutoff: CHAIN_CUTOFF },
+    },
   };
   return { client, page, request, response, calls, slots };
-}
-
-/** @param {any} keys @param {string[]} path */
-function keyEntryAt(keys, path) {
-  return path.reduce((node, name) => node[name], keys);
-}
-
-/** @param {any} keys @param {string[]} path @param {any} value */
-function setKeyEntry(keys, path, value) {
-  keyEntryAt(keys, path.slice(0, -1))[/** @type {string} */ (path.at(-1))] = value;
 }
 
 const DELIVERED_KEYS = 4;
@@ -225,8 +234,9 @@ for (const profile of [ecdhProfile, rsaProfile]) {
       const { client, page, request, calls, slots } = fixture;
       const moved = structuredClone(fixture.response);
       // Same method, same recipient, same transport: only the section differs.
-      const keyEntry = keyEntryAt(moved.keys, slots[from].path);
-      setKeyEntry(moved.keys, slots[to].path, structuredClone(keyEntry));
+      // The whole carried `{key, nonce}` value moves into the other record.
+      const keyEntry = keyAt(moved.keys[slots[from].section], slots[from].identity);
+      setKeyAt(moved.keys[slots[to].section], slots[to].identity, structuredClone(keyEntry));
       const label = `${from} entry in ${slots[to].section}`;
 
       const { result, inputs } = await metered(() =>

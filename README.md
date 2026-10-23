@@ -393,15 +393,17 @@ present in the page for a CSS or DOM change to reveal.
 
 ## Running the JavaScript checks
 
-Use Node 22.22.2 and pnpm 10.23.0, as pinned in `js/.node-version` and
-`js/package.json`, plus headless Chromium with its runtime libraries. The
-[JavaScript setup instructions](js/README.md#browser-prerequisite) describe browser
+Use the latest maintained Node 22 release, selected by `js/.node-version`,
+and pnpm 10.x selected by `js/package.json`, plus headless
+Chromium with its runtime libraries. Keep the installed Node runtime updated through your version
+manager or development image; the major selector does not install security
+fixes. The [JavaScript setup instructions](js/README.md#browser-prerequisite) describe browser
 installation and executable/library selection. With those prerequisites installed
-and `pnpm` available on your PATH, run from this repository's root:
+and Corepack available on your PATH, run from this repository's root:
 
 ```sh
-pnpm --dir js install --frozen-lockfile --ignore-scripts
-sh js/check
+(cd js && corepack pnpm install --frozen-lockfile --ignore-scripts)
+(cd js && corepack pnpm run check)
 ```
 
 The command checks JavaScript lint, formatting, admitted types, source
@@ -434,8 +436,10 @@ evidence checks; passing `sh js/check` does not establish full DCA conformance.
 DCA is a public working draft and may change before v1. Current draft
 priorities are listed in
 [roadmap--draft-period.md](roadmap--draft-period.md).
-[CHANGELOG.md](CHANGELOG.md) records key-opening changes since the
-21 September 2026 public draft and the roles that need updated code.
+[CHANGELOG.md](CHANGELOG.md) records compatibility changes and the roles that
+need updated code. Its v1.0.0-alpha.3 section covers changes since
+v1.0.0-alpha.2, published on 20 October 2026; earlier publications retain their
+own entries.
 
 Developed at Labrador CMS AS. Specification editor: Geir Bostad.
 

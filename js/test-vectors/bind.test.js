@@ -33,12 +33,6 @@ async function importEcdh({ publicKeyJwk, privateKeyJwk }) {
   };
 }
 
-/** @param {string} base64url */
-function pinnedNonce(base64url) {
-  const nonce = base64urlDecode(base64url);
-  return { bytes: () => nonce };
-}
-
 /** Uncompressed P-256 point, the first field of an ECDH blob. */
 const EPHEMERAL_BYTES = 65;
 
@@ -66,8 +60,8 @@ async function blobAesKey(blob, issuerPrivateKey) {
 
   return {
     key: await subtle.importKey("raw", shared, { name: "AES-GCM" }, false, ["decrypt"]),
-    nonce: bytes.subarray(EPHEMERAL_BYTES, EPHEMERAL_BYTES + NONCE_BYTES),
-    ciphertext: bytes.subarray(EPHEMERAL_BYTES + NONCE_BYTES),
+    nonce: new Uint8Array(NONCE_BYTES),
+    ciphertext: bytes.subarray(EPHEMERAL_BYTES),
   };
 }
 
@@ -105,20 +99,18 @@ describe("The bound-carrier vector", () => {
       issuer.publicKey,
       "ecdh-p256",
       {
-        random: pinnedNonce(input.ecdh.contentNonceBase64url),
         ephemeralKeyPair: await importEcdh(input.ecdh.contentEphemeral),
         binding: { renderId: input.renderId, contentName: input.contentName },
       },
     );
     assert.equal(contentBlob, expected.ecdh.contentBlob);
-    assert.equal(base64urlDecode(contentBlob).length, 109);
+    assert.equal(base64urlDecode(contentBlob).length, 97);
 
     const periodBlob = await boundSealing.seal(
       base64urlDecode(input.periodKeyBase64url),
       issuer.publicKey,
       "ecdh-p256",
       {
-        random: pinnedNonce(input.ecdh.periodNonceBase64url),
         ephemeralKeyPair: await importEcdh(input.ecdh.periodEphemeral),
         binding: { renderId: input.renderId, accessGroup: input.accessGroup, t: input.t },
       },

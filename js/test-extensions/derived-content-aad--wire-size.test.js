@@ -3,9 +3,9 @@
 // What dropping the carried item `aad` saves on one representative delivery: three
 // items under period keys, one of them gzip-encoded, written by the stock JSON
 // writer. The old form is the same delivery with each record's retired
-// `resourceId|1|contentName` member put back where the old publisher wrote it
-// (after `nonce`) and each item resealed under that string with the same key and
-// nonce, so it is a delivery an old reader would open.
+// `resourceId|1|contentName` member added after contentType and each item resealed
+// under that string with the same key and zero nonce. This isolates the AAD
+// member cost; it does not restore the historical carried-nonce format.
 //
 // Two differences are kept apart. AES-GCM output is as long as its input plus the
 // tag whatever the AAD, so resealing changes ciphertext bytes and no lengths; the
@@ -21,6 +21,7 @@ import { decrypt, encrypt } from "../core-shared/aead.js";
 import { base64urlDecode, base64urlEncode, utf8Encode } from "../core-shared/codec.js";
 import { writeJsonDelivery } from "../adapter-publisher/writeJsonDelivery.js";
 import { contentAadOctets } from "../test-reference/support/contentAadOctets.js";
+import { contentRecordOf } from "../test-lib/helpers/inspect.js";
 import { exchangeWorld } from "./support/derivedContentAadExchanges.js";
 
 const RESOURCE_ID = "article-42";
@@ -46,7 +47,7 @@ const gzipLength = (bytes) => gzipSync(bytes).length;
 test("removing the item aad saves its member bytes on one delivery; ciphertext length is unchanged", async (t) => {
   const w = await exchangeWorld({ route: "period", transport: "direct", resourceId: RESOURCE_ID });
   const rendered = JSON.parse(JSON.stringify(await w.render({ items: ITEMS, gzip: ["bodytext"] })));
-  assert.deepEqual(rendered.dcaData.contentData.bodytext.contentEncodings, ["gzip"]);
+  assert.deepEqual(contentRecordOf(rendered.dcaData, "bodytext").contentEncodings, ["gzip"]);
 
   // The measured delivery is a working one: the public client opens every item,
   // and the period grant it takes yields each raw content key.
@@ -61,14 +62,12 @@ test("removing the item aad saves its member bytes on one delivery; ciphertext l
   }
 
   /** @type {Record<string, any>} */
-  const oldContentData = {};
-  /** @type {Record<string, any>} */
-  const carriedOnly = {};
+  const oldRecords = {};
   /** @type {Record<string, string>} */
   const oldSealed = {};
   let memberBytes = 0;
   for (const item of ITEMS) {
-    const record = rendered.dcaData.contentData[item.name];
+    const record = contentRecordOf(rendered.dcaData, item.name);
     const aad = `${RESOURCE_ID}|1|${item.name}`;
     const nonce = new Uint8Array(12);
     const encoded = await decrypt(
@@ -88,16 +87,19 @@ test("removing the item aad saves its member bytes on one delivery; ciphertext l
     assert.notEqual(resealed, rendered.sealedContent[item.name]);
     oldSealed[item.name] = resealed;
 
-    // The old publisher's member order: contentType, nonce, aad, then the rest.
-    const { contentType, nonce: n, ...rest } = record;
-    oldContentData[item.name] = { contentType, nonce: n, aad, ...rest };
-    carriedOnly[item.name] = oldContentData[item.name];
+    // Add only the AAD member after contentType.
+    const { contentName, contentType, ...rest } = record;
+    oldRecords[item.name] = { contentName, contentType, aad, ...rest };
     memberBytes += utf8Encode(`,"aad":${JSON.stringify(aad)}`).length;
   }
 
+  // The old records in the delivery's own record order.
+  const oldContentData = rendered.dcaData.contentData.map(
+    (/** @type {any} */ record) => oldRecords[record.contentName],
+  );
   const current = writeJsonDelivery(rendered);
   const withMembers = writeJsonDelivery({
-    dcaData: { ...rendered.dcaData, contentData: carriedOnly },
+    dcaData: { ...rendered.dcaData, contentData: oldContentData },
     sealedContent: rendered.sealedContent,
   });
   const old = writeJsonDelivery({

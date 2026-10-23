@@ -273,6 +273,38 @@ export async function world({ route = "period" } = {}) {
 }
 
 /**
+ * Put a whole item record into the slot `contentName` names on a delivery,
+ * over the last record of that name, or after the others when no record has
+ * it. The record goes in under `contentName` whatever name it carried, which
+ * is how a test moves a complete record to another slot.
+ *
+ * @param {any} dcaData
+ * @param {string} contentName
+ * @param {any} record
+ */
+export function putItemRecord(dcaData, contentName, record) {
+  const placed = { ...record, contentName };
+  const index = dcaData.contentData.findLastIndex(
+    (/** @type {any} */ entry) => entry.contentName === contentName,
+  );
+  if (index === -1) dcaData.contentData.push(placed);
+  else dcaData.contentData[index] = placed;
+}
+
+/**
+ * The period-key records one unlock answer carries for `accessGroup`.
+ *
+ * @param {any} body - the issuer's answer
+ * @param {string} accessGroup
+ * @returns {any[]}
+ */
+export function periodKeysAnswered(body, accessGroup) {
+  return body.keys.periodKeys.filter(
+    (/** @type {any} */ record) => record.accessGroup === accessGroup,
+  );
+}
+
+/**
  * One JSON value as a base64url segment.
  *
  * @param {unknown} value

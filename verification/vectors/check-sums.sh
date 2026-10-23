@@ -21,10 +21,10 @@
 # of the set's set.json (by pattern, so this stays parser-free) and prints it
 # with every result:
 #
-#   devel   the bytes are what the generator last wrote. make-vectors.js may
-#           rewrite this set at any time and rewrites SHA256SUMS with it, so a
-#           match says the tree is self-consistent, not that anything is
-#           frozen.
+#   devel   the bytes match their recorded SHA256SUMS. The set may be maintained
+#           by a generator, independent producer or manual recording; this check
+#           establishes recorded-byte integrity, not its producer or correctness.
+#           These bytes are not frozen.
 #   stable  the bytes are frozen. Nothing may rewrite them, so a mismatch is
 #           an edit or a bad merge, and changed bytes after a freeze are a new
 #           version rather than a regeneration.
@@ -212,9 +212,8 @@ for set_name in $sets; do
             echo "  Changed bytes after a freeze are a new version, not a regeneration."
             ;;
         devel)
-            echo "  devel: a match says the bytes are what the generator last wrote."
-            echo "  It is not a freeze - make-vectors.js may rewrite this set, and it"
-            echo "  rewrites $sums_file with it."
+            echo "  devel: a match establishes recorded-byte integrity, not producer provenance."
+            echo "  The bytes are not frozen; consult the owning producer or recording notes."
             ;;
         *)
             echo "  $phase: the set declares no phase, so a match says only that these"

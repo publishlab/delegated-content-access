@@ -65,7 +65,10 @@ test("query capture cleans only its carrier and opens unresolved original bytes 
   );
   assert.equal(w.calls.length, 1);
   assert.equal(w.calls[0].url, URL);
-  assert.deepEqual(Object.keys(w.calls[0].request.sealed.contentKeys), ["body"]);
+  assert.deepEqual(
+    w.calls[0].request.sealed.contentKeys.map((/** @type {any} */ record) => record.contentName),
+    ["body"],
+  );
   assert.equal(w.calls[0].init.headers.Authorization, `Bearer ${REFERENCE}`);
   assert.equal(w.calls[0].init.credentials, "omit");
 });

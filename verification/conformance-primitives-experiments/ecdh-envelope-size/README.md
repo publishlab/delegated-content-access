@@ -4,8 +4,9 @@ Three publisher-to-issuer ECDH envelope shapes, sealed and opened in six runtime
 The question is whether independent runtimes produce and open the same bytes once the nonce is derived
 instead of carried, and once the ephemeral point travels compressed. If the runtimes agree here, the shapes are
 implementable on stock crypto libraries. The experiment selects none of them:
-[spec--sealed-key-envelopes.md](../../../docs/spec--sealed-key-envelopes.md) still fixes the 109-byte transcript,
-and the HKDF transcript below exists only inside this directory.
+[spec--sealed-key-envelopes.md](../../../docs/spec--sealed-key-envelopes.md) defines the current 97-octet
+ordinary envelope with an implicit zero nonce and no HKDF. The frozen 109-octet control and both HKDF
+transcripts below remain experimental; matching the current envelope's width does not select its construction.
 
 ## Profiles
 
@@ -21,7 +22,7 @@ All three agree a 32-byte fixed-width P-256 ECDH x-coordinate and encrypt one 16
 AES-256-GCM with the complete BIND string as additional data. The BIND string is one canonical content
 coordinate, `dca-bind-v1|c|<renderId>|bodytext`.
 
-`control-109` records the former BIND spelling while reproducing the unchanged
+`control-109` records the former BIND spelling and carried-nonce
 ECDH/AES-GCM carrier: the agreed x-coordinate is the AES-256-GCM key and the
 fixture supplies the nonce. Current envelopes use `dca-bind-key-envelope`;
 these experimental bytes remain frozen.

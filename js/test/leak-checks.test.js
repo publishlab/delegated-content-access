@@ -68,6 +68,13 @@ import { Client } from "../test-lib/harnesses/client.js";
 import { PeriodKeyCache } from "../adapter-client/PeriodKeyCache.js";
 import { MarkupDeliveryReader } from "../adapter-client/MarkupDeliveryReader.js";
 import { writeMarkupDelivery } from "../adapter-publisher/writeMarkupDelivery.js";
+import {
+  contentNamesOn,
+  contentRecordOf,
+  sealedContentByName,
+  sealedContentOf,
+  wrapGroupsOn,
+} from "../test-lib/helpers/inspect.js";
 import { openAndPlace } from "../test-lib/harnesses/openAndPlace.js";
 import { base64urlDecode, base64urlEncode, utf8Decode, utf8Encode } from "../core-shared/codec.js";
 import { isContentName } from "../core-shared/names.js";
@@ -98,8 +105,11 @@ const SECOND = 1000;
  * @returns {string}
  */
 function markupOf(page) {
-  const { sealedContent, ...dcaData } = page.asJson();
-  return writeMarkupDelivery({ dcaData, sealedContent });
+  const { sealedContent: records, ...dcaData } = page.asJson();
+  return writeMarkupDelivery({
+    dcaData,
+    sealedContent: sealedContentByName({ sealedContent: records }),
+  });
 }
 
 /** One resourceId across every render here, so renders differ only where a test says. */
@@ -333,7 +343,11 @@ describe("The placement seam, direct transport", () => {
     const inTheBody = leaks(answer.body, material);
     assert.ok(
       ITEMS.every((item) =>
-        inTheBody.some((line) => line.startsWith(`$.keys.contentKeys.${item.name}:`)),
+        inTheBody.some(
+          (line) =>
+            line.startsWith("$.keys.contentKeys[") &&
+            line.includes(`: the contentKey for ${item.name}, as text`),
+        ),
       ),
       inTheBody.join("; "),
     );
@@ -458,11 +472,11 @@ describe("The placement seam, direct transport", () => {
     const material = await keyMaterialInPlay(stage.wire, stage.periodKeySupply);
     assert.deepEqual(leaks(placements, material), []);
     assert.deepEqual(
-      leaks({ dcaData, fetchedCiphertext: stage.wire.sealedContent[deferredName] }, material),
+      leaks({ dcaData, fetchedCiphertext: sealedContentOf(stage.wire, deferredName) }, material),
       [],
     );
 
-    const fetched = stage.wire.sealedContent[deferredName];
+    const fetched = sealedContentOf(stage.wire, deferredName);
     assert.equal(
       utf8Decode(await unsealer.decrypt(dcaData, deferredName, fetched)),
       ITEMS.find((item) => item.name === deferredName).value,
@@ -485,15 +499,15 @@ describe("Extraction, and what reaches the crypto", () => {
     // This demo can hold the byte-transparency half of that guarantee: a
     // markup extractor arriving later has one pinned set of inputs to be
     // identical to.
-    const record = dcaData.contentData[contentName];
+    const record = contentRecordOf(dcaData, contentName);
 
     assert.deepEqual(
       base64urlDecode(/** @type {string} */ (unsealer.extract(json, contentName))),
-      base64urlDecode(wire.sealedContent[contentName]),
+      base64urlDecode(sealedContentOf(wire, contentName)),
       "ciphertext bytes",
     );
     assert.equal(Object.hasOwn(record, "nonce"), false, "no carried content nonce");
-    assert.equal(Object.hasOwn(wire.contentData[contentName], "nonce"), false);
+    assert.equal(Object.hasOwn(contentRecordOf(wire, contentName), "nonce"), false);
     // The content AAD is rebuilt from the read delivery, never carried: the
     // bytes the client builds equal the transcript of the shipped delivery.
     assert.equal(Object.hasOwn(record, "aad"), false, "no carried aad");
@@ -507,8 +521,11 @@ describe("Extraction, and what reaches the crypto", () => {
     // which periods, and the wrapped bytes at each. A reordering here picks
     // a different key with nothing else changed, which is why they are
     // pinned beside the ciphertext.
-    assert.deepEqual(dcaData.contentData[contentName].keys, wire.contentData[contentName].keys);
-    assert.deepEqual(Object.keys(dcaData.contentData[contentName].keys), ITEMS[0].accessGroups);
+    assert.deepEqual(
+      contentRecordOf(dcaData, contentName).keys,
+      contentRecordOf(wire, contentName).keys,
+    );
+    assert.deepEqual(wrapGroupsOn(dcaData, contentName), ITEMS[0].accessGroups);
     assert.equal(dcaData.resource.renderId, wire.resource.renderId);
   });
 
@@ -545,13 +562,13 @@ describe("Extraction, and what reaches the crypto", () => {
       );
       assert.deepEqual(
         base64urlDecode(/** @type {string} */ (fromSelector)),
-        base64urlDecode(wire.sealedContent[contentName]),
+        base64urlDecode(sealedContentOf(wire, contentName)),
         "the sealer bytes",
       );
 
-      const record = fromMarkup.dcaData.contentData[contentName];
+      const record = contentRecordOf(fromMarkup.dcaData, contentName);
       assert.equal(Object.hasOwn(record, "nonce"), false, "no carried content nonce");
-      assert.equal(Object.hasOwn(wire.contentData[contentName], "nonce"), false);
+      assert.equal(Object.hasOwn(contentRecordOf(wire, contentName), "nonce"), false);
       assert.deepEqual(
         new DcaData(fromMarkup.dcaData).contentItemFor(contentName)?.contentAad,
         contentAadOctets(wire, contentName),
@@ -561,13 +578,10 @@ describe("Extraction, and what reaches the crypto", () => {
       // Which groups, in which order: a reordering here picks a different
       // key with nothing else changed.
       assert.deepEqual(
-        fromMarkup.dcaData.contentData[contentName].keys,
-        wire.contentData[contentName].keys,
+        contentRecordOf(fromMarkup.dcaData, contentName).keys,
+        contentRecordOf(wire, contentName).keys,
       );
-      assert.deepEqual(
-        Object.keys(fromMarkup.dcaData.contentData[contentName].keys),
-        item.accessGroups,
-      );
+      assert.deepEqual(wrapGroupsOn(fromMarkup.dcaData, contentName), item.accessGroups);
     }
 
     // And through to the plaintext: the same read run twice over one render,
@@ -664,14 +678,14 @@ describe("Extraction, and what reaches the crypto", () => {
     // through: the name that comes back is the name that went in - in
     // contentData, in sealedContent, and as the accessGroup key beneath
     // it, where the colon remains part of the exact group coordinate.
-    assert.deepEqual(Object.keys(json.contentData), [COLON_NAME]);
-    assert.deepEqual(Object.keys(json.sealedContent), [COLON_NAME]);
-    assert.deepEqual(Object.keys(json.contentData[COLON_NAME].keys), [COLON_GROUP]);
+    assert.deepEqual(contentNamesOn(json), [COLON_NAME]);
+    assert.deepEqual(Object.keys(sealedContentByName(json)), [COLON_NAME]);
+    assert.deepEqual(wrapGroupsOn(json, COLON_NAME), [COLON_GROUP]);
 
     // And in the content AAD, where the AEAD authenticates it: a colon
     // rewritten anywhere between the publisher and the client is a decrypt
     // failure and not a cosmetic difference. The read below opens it.
-    assert.equal(Object.hasOwn(json.contentData[COLON_NAME], "aad"), false);
+    assert.equal(Object.hasOwn(contentRecordOf(json, COLON_NAME), "aad"), false);
 
     // The whole read driven through the colon name - unlock, unwrap, decrypt
     // - ending at the three values a placement adapter would be handed.

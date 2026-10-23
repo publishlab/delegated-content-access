@@ -67,8 +67,8 @@ async function world() {
   };
 }
 
-/** @param {any} w @param {Record<string, unknown>} [extra] @param {Record<string, string>} [contentKeys] */
-function requestText(w, extra = {}, contentKeys = {}) {
+/** @param {any} w @param {Record<string, unknown>} [extra] @param {{contentName: string, key: string}[]} [contentKeys] */
+function requestText(w, extra = {}, contentKeys = []) {
   return JSON.stringify({
     version: "1",
     issuerName: "issuerA",
@@ -106,7 +106,7 @@ async function fakeOpener(sealed, privateKey, aad) {
 
 /** A fake section source; `seen` records what it was handed. */
 /** The fake source's one key-bearing section, declared for client-bound wrapping. */
-const FAKE_SECTIONS = [{ path: ["fakeSection"], depth: 1, keyKind: "contentKey" }];
+const FAKE_SECTIONS = [{ path: ["fakeSection"], fields: ["contentName"], keyKind: "contentKey" }];
 
 function fakeSource(/** @type {any[]} */ seen, overrides = {}) {
   return {
@@ -199,7 +199,7 @@ test("a bound that throws a non-request code is a server fault, not a refusal co
           version: "1",
           issuerName: "issuerA",
           keyId: "a1",
-          sealed: { contentKeys: { a: "x" } },
+          sealed: { contentKeys: [{ contentName: "a", key: "x" }] },
         }),
       ),
     /bug/,
@@ -268,14 +268,18 @@ test("a section source gets verified frozen claims and an opener, never the priv
   const { endpoint } = issuerWith(fakeSource(seen));
   const envelope = await fakeEnvelope(w.issuer.publicKey, utf8Encode("fake-aad"));
   const { response } = await endpoint.handleDocument(
-    requestText(w, { fakeAsk: { envelope } }, { purchase: w.sealedContentKey }),
+    requestText(w, { fakeAsk: { envelope } }, [
+      { contentName: "purchase", key: w.sealedContentKey },
+    ]),
     /** @type {any} */ (w.registration),
   );
   assert.equal(response.status, 200);
   const body = /** @type {any} */ (response.body);
   assert.deepEqual(Object.keys(body), ["keys", "fakeSection", "periodGeometry"]);
   assert.deepEqual(body.fakeSection, { opened: 32 });
-  assert.equal(body.keys.contentKeys.purchase, base64urlEncode(new Uint8Array(16).fill(7)));
+  assert.deepEqual(body.keys.contentKeys, [
+    { contentName: "purchase", key: base64urlEncode(new Uint8Array(16).fill(7)) },
+  ]);
 
   const [unlock] = seen;
   assert.deepEqual(Object.keys(unlock).sort(), [
@@ -355,7 +359,9 @@ test("a source refusal withholds the whole answer, base keys included", async ()
   const w = await world();
   const { endpoint } = issuerWith(fakeSource([]));
   const result = await endpoint.handleDocument(
-    requestText(w, { fakeAsk: { refuse: true } }, { purchase: w.sealedContentKey }),
+    requestText(w, { fakeAsk: { refuse: true } }, [
+      { contentName: "purchase", key: w.sealedContentKey },
+    ]),
     /** @type {any} */ (w.registration),
   );
   assert.equal(result.code, "binding_failed");
@@ -366,13 +372,17 @@ test("a base denial is no whole-request denial while a source answers; nothing a
   const envelope = await fakeEnvelope(w.issuer.publicKey, utf8Encode("fake-aad"));
   const { endpoint } = issuerWith(fakeSource([]), denyAll);
   const partial = await endpoint.handleDocument(
-    requestText(w, { fakeAsk: { envelope } }, { purchase: w.sealedContentKey }),
+    requestText(w, { fakeAsk: { envelope } }, [
+      { contentName: "purchase", key: w.sealedContentKey },
+    ]),
     /** @type {any} */ (w.registration),
   );
   assert.equal(partial.response.status, 200);
-  assert.deepEqual(/** @type {any} */ (partial.response.body).keys, { contentKeys: {} });
+  assert.deepEqual(/** @type {any} */ (partial.response.body).keys, { contentKeys: [] });
   const denied = await endpoint.handleDocument(
-    requestText(w, { fakeAsk: { deny: true } }, { purchase: w.sealedContentKey }),
+    requestText(w, { fakeAsk: { deny: true } }, [
+      { contentName: "purchase", key: w.sealedContentKey },
+    ]),
     /** @type {any} */ (w.registration),
   );
   assert.equal(denied.code, "denied");
@@ -405,7 +415,9 @@ test("two sources agree on periodGeometry by field, not by member order", async 
       { name: "fake2", responseSectionSource: source },
     );
     const result = await endpoint.handleDocument(
-      requestText(w, { fakeAsk: { envelope } }, { purchase: w.sealedContentKey }),
+      requestText(w, { fakeAsk: { envelope } }, [
+        { contentName: "purchase", key: w.sealedContentKey },
+      ]),
       /** @type {any} */ (w.registration),
     );
     const label = JSON.stringify(geometry);
@@ -424,7 +436,7 @@ test("a source that is not presented is not asked", async () => {
   const seen = /** @type {any[]} */ ([]);
   const { endpoint } = issuerWith(fakeSource(seen));
   const result = await endpoint.handleDocument(
-    requestText(w, {}, { purchase: w.sealedContentKey }),
+    requestText(w, {}, [{ contentName: "purchase", key: w.sealedContentKey }]),
     /** @type {any} */ (w.registration),
   );
   assert.equal(result.response.status, 200);

@@ -21,7 +21,7 @@ import {
 } from "../implementation/contentAad.js";
 import { DerivingUnsealer } from "../test-lib/harnesses/DerivingUnsealer.js";
 import { CarriedAadClient } from "../test-lib/harnesses/CarriedAadClient.js";
-import { oldCarriedAad, resealOldFormat } from "../test-lib/oldFormat.js";
+import { oldCarriedAad, resealOldFormat, openOldPeriodRecord } from "../test-lib/oldFormat.js";
 import { Sealer } from "../../../core-publisher/Sealer.js";
 import { wholeRenderIssuerSupplyPlan } from "../../../core-publisher/issuerSupplyPlan.js";
 import { randomPeriodKeySupply } from "../../../demo/support/randomPeriodKeySupply.js";
@@ -44,6 +44,19 @@ import { Clock } from "../../../demo/actors/Clock.js";
 import { Random } from "../../../demo/actors/Random.js";
 import { AllowAllPolicy } from "../../../demo/support/AllowAllPolicy.js";
 import { adoptedContentAad } from "../implementation/tokenRepresentationAad.js";
+
+// Ciphertext remains the Sealer's local name map; descriptor wire collections
+// use named records. Looking up a descriptor follows last-whole-record order.
+const contentRecord = (page, name) =>
+  page.contentData.findLast((record) => record.contentName === name);
+const issuerRecord = (page, name) =>
+  page.issuerData.findLast((record) => record.issuerName === name);
+const contentNames = (page) => page.contentData.map((record) => record.contentName);
+const replaceRecord = (page, name, record) => {
+  page.contentData = page.contentData.map((current) =>
+    current.contentName === name ? { ...record, contentName: name } : current,
+  );
+};
 
 const { subtle } = globalThis.crypto;
 
@@ -200,10 +213,10 @@ async function refuses(work, code, why) {
  * @param {string} [resourceId]
  * @returns {Promise<any>}
  */
-async function oldFormatOf(unlock, page, resourceId = "123456") {
+async function oldFormatOf(unlock, page, resourceId = "123456", periodKeys = undefined) {
   const reader = new Client({ publisherOrigin: ORIGIN });
   const data = reader.parse(page);
-  const names = Object.keys(page.contentData);
+  const names = contentNames(page);
   await unlock(reader, data, names);
   /** @type {Record<string, Uint8Array|CryptoKey>} */
   const keys = {};
@@ -212,7 +225,7 @@ async function oldFormatOf(unlock, page, resourceId = "123456") {
     assert.ok(key, `the real grant reached the "${name}" key`);
     keys[name] = key;
   }
-  return resealOldFormat(page, keys, resourceId);
+  return resealOldFormat(page, keys, resourceId, periodKeys);
 }
 
 // ---------------------------------------------------------------------------
@@ -222,11 +235,11 @@ async function oldFormatOf(unlock, page, resourceId = "123456") {
 test("old and new formats do not open each other's seals on a fresh render", async () => {
   const { render, unlock } = await world();
   const page = await render();
-  const names = Object.keys(page.contentData);
+  const names = contentNames(page);
   assert.deepEqual(names, ["bodytext", "locked-data"], "both items ship a record");
   for (const contentName of names) {
     assert.equal(
-      Object.hasOwn(page.contentData[contentName], "aad"),
+      Object.hasOwn(contentRecord(page, contentName), "aad"),
       false,
       `${contentName}: the current publisher carries no aad`,
     );
@@ -262,8 +275,27 @@ test("old and new formats do not open each other's seals on a fresh render", asy
   assert.equal(contentAadFor(page, "bodytext"), "123456|1|bodytext");
   const old = await oldFormatOf(unlock, page);
   for (const contentName of names) {
-    assert.equal(old.contentData[contentName].aad, contentAadFor(old, contentName));
+    assert.equal(contentRecord(old, contentName).aad, contentAadFor(old, contentName));
   }
+
+  const carried = new CarriedAadClient({ publisherOrigin: ORIGIN });
+  const carriedData = carried.parse(old);
+  await unlock(carried, carriedData, names);
+  for (const [contentName, expected] of [
+    ["bodytext", BODYTEXT],
+    ["locked-data", LOCKED_DATA],
+  ]) {
+    assert.equal(
+      utf8Decode(await carried.decrypt(carriedData, contentName, old.sealedContent[contentName])),
+      expected,
+      `${contentName}: the old carried AAD opens the same zero-nonce ciphertext`,
+    );
+  }
+  await assert.rejects(
+    carried.decrypt(carried.parse(page), "bodytext", page.sealedContent.bodytext),
+    { code: "bad_page", message: 'the contentData record for "bodytext" carries no aad' },
+    "a current record reaches the carried-AAD guard before its absent nonce matters",
+  );
 
   // The old-format page does not open on the stock client: it ignores the
   // carried string and builds the adopted transcript.
@@ -313,8 +345,8 @@ test("disagreeingShippedAad rewrites every aad and leaves the caller's page alon
   const page = await oldFormatOf(unlock, await render());
   const disagreeing = disagreeingShippedAad(page);
 
-  for (const contentName of Object.keys(disagreeing.contentData)) {
-    const record = disagreeing.contentData[contentName];
+  for (const contentName of contentNames(disagreeing)) {
+    const record = contentRecord(disagreeing, contentName);
     assert.equal(
       record.aad,
       DISAGREEING_AAD,
@@ -327,28 +359,28 @@ test("disagreeingShippedAad rewrites every aad and leaves the caller's page alon
     );
     assert.equal(
       record.contentType,
-      page.contentData[contentName].contentType,
+      contentRecord(page, contentName).contentType,
       "contentType stays",
     );
-    assert.equal(record.nonce, page.contentData[contentName].nonce, "nonce stays");
+    assert.equal(record.nonce, contentRecord(page, contentName).nonce, "nonce stays");
   }
 
   // The record is structurally admitted, but violates the old producer rule:
   // the carried AAD differs from the transcript it was sealed under. The
   // current reader admits it because it ignores the member.
   const reader = new DcaData(disagreeing);
-  for (const contentName of Object.keys(disagreeing.contentData)) {
+  for (const contentName of contentNames(disagreeing)) {
     assert.equal(
       reader.contentDataFor(contentName),
-      disagreeing.contentData[contentName],
+      contentRecord(disagreeing, contentName),
       `${contentName}: a record the base reader accepts`,
     );
   }
 
   // The input is the comparison, so it has to survive being rewritten.
-  for (const contentName of Object.keys(page.contentData)) {
+  for (const contentName of contentNames(page)) {
     assert.equal(
-      page.contentData[contentName].aad,
+      contentRecord(page, contentName).aad,
       contentAadFor(page, contentName),
       `${contentName}: the publisher's value is still on the original`,
     );
@@ -357,8 +389,11 @@ test("disagreeingShippedAad rewrites every aad and leaves the caller's page alon
   // Everything else on the page is carried through, ciphertext included.
   assert.deepEqual(disagreeing.sealedContent, page.sealedContent);
   assert.deepEqual(disagreeing.issuerData, page.issuerData);
-  for (const contentName of Object.keys(page.contentData)) {
-    assert.deepEqual(disagreeing.contentData[contentName].keys, page.contentData[contentName].keys);
+  for (const contentName of contentNames(page)) {
+    assert.deepEqual(
+      contentRecord(disagreeing, contentName).keys,
+      contentRecord(page, contentName).keys,
+    );
   }
 });
 
@@ -366,9 +401,9 @@ test("structurally admitted but nonconforming AAD passes issuer and opens only u
   const { render, unlock } = await world("item-only");
   const page = disagreeingShippedAad(await oldFormatOf(unlock, await render()));
 
-  for (const contentName of Object.keys(page.contentData)) {
+  for (const contentName of contentNames(page)) {
     assert.equal(
-      page.contentData[contentName].aad,
+      contentRecord(page, contentName).aad,
       DISAGREEING_AAD,
       "the field is wrong, not absent",
     );
@@ -507,7 +542,7 @@ test("the deriving client keeps the base class's misses", async () => {
   // carry and a ciphertext that is not base64url are the same bad page here as
   // on the base class: a typed refusal and not a TypeError out of the codec.
   const noNonce = structuredClone(dcaData);
-  delete noNonce.contentData.bodytext.nonce;
+  delete contentRecord(noNonce, "bodytext").nonce;
   await refuses(
     unsealer.decrypt(noNonce, "bodytext", page.sealedContent.bodytext),
     "bad_page",
@@ -590,7 +625,7 @@ test("a tampered carried aad fails the old-format client and cannot steer the st
   const tamperings = ["123457|1|bodytext", "123456|2|bodytext", "123456|1|locked-data", ""];
   for (const aad of tamperings) {
     const tampered = structuredClone(oldData);
-    tampered.contentData.bodytext.aad = aad;
+    contentRecord(tampered, "bodytext").aad = aad;
     await refuses(
       carried.decrypt(tampered, "bodytext", old.sealedContent.bodytext),
       "decrypt_failed",
@@ -605,7 +640,7 @@ test("a tampered carried aad fails the old-format client and cannot steer the st
   await unlock(stock, stockData, ["bodytext"]);
   for (const aad of [...tamperings, oldCarriedAad("123456", "bodytext"), 42, null, { a: 1 }]) {
     const carrying = structuredClone(stockData);
-    carrying.contentData.bodytext.aad = aad;
+    contentRecord(carrying, "bodytext").aad = aad;
     assert.equal(
       utf8Decode(await stock.decrypt(carrying, "bodytext", page.sealedContent.bodytext)),
       BODYTEXT,
@@ -631,7 +666,7 @@ test("a tampered carried aad fails the old-format client and cannot steer the st
  */
 async function pageWithAad(aad, value) {
   const contentKey = new Uint8Array(16).fill(11);
-  const nonce = new Uint8Array(NONCE_BYTES).fill(3);
+  const nonce = new Uint8Array(NONCE_BYTES);
   const ciphertext = await encrypt(contentKey, nonce, utf8Encode(value), utf8Encode(aad));
 
   return {
@@ -645,18 +680,21 @@ async function pageWithAad(aad, value) {
         data: {},
       },
       resourceJWT: `eyJhbGciOiJFUzI1NiIsImtpZCI6InNpZ24tMjAyNS0xMCJ9.${base64urlEncode(utf8Encode(JSON.stringify({ renderId: "AAAAAAAAAAAAAAAAAAAAAA", domain: DOMAIN, issuedAt: AT, resourceId: "123456", data: {} })))}.c2lnbmF0dXJl`,
-      issuerData: {
-        [ISSUER_NAME]: {
+      issuerData: [
+        {
+          issuerName: ISSUER_NAME,
           keyId: KEY_ID,
           unlockUrl: "https://issuer.example/unlock",
           sealed: {
-            contentKeys: { bodytext: base64urlEncode(utf8Encode("sealed-placeholder")) },
+            contentKeys: [
+              { contentName: "bodytext", key: base64urlEncode(utf8Encode("sealed-placeholder")) },
+            ],
           },
         },
-      },
-      contentData: {
-        bodytext: { contentType: "text/html", nonce: base64urlEncode(nonce), aad },
-      },
+      ],
+      contentData: [
+        { contentName: "bodytext", contentType: "text/html", nonce: base64urlEncode(nonce), aad },
+      ],
       sealedContent: { bodytext: base64urlEncode(ciphertext) },
     },
     contentKey,
@@ -672,9 +710,10 @@ async function pageWithAad(aad, value) {
  * @returns {Promise<void>}
  */
 async function handOver(unsealer, dcaData, contentKeys) {
-  const delivered = Object.fromEntries(
-    Object.entries(contentKeys).map(([name, key]) => [name, base64urlEncode(key)]),
-  );
+  const delivered = Object.entries(contentKeys).map(([contentName, key]) => ({
+    contentName,
+    key: base64urlEncode(key),
+  }));
   unsealer.buildRequest(dcaData, ISSUER_NAME, Object.keys(contentKeys));
   await unsealer.applyResponse(dcaData, ISSUER_NAME, { keys: { contentKeys: delivered } });
 }
@@ -786,8 +825,8 @@ test("per-slot aads stop a ciphertext swap, and so does a per-slot key on its ow
 async function sharedKeyPage() {
   const contentKey = new Uint8Array(16).fill(13);
 
-  /** @type {Record<string, any>} */
-  const contentData = {};
+  /** @type {any[]} */
+  const contentData = [];
   /** @type {Record<string, string>} */
   const sealedContent = {};
 
@@ -799,7 +838,7 @@ async function sharedKeyPage() {
     const aad = `123456|1|${contentName}`;
     const ciphertext = await encrypt(contentKey, nonce, utf8Encode(value), utf8Encode(aad));
 
-    contentData[contentName] = { contentType, nonce: base64urlEncode(nonce), aad };
+    contentData.push({ contentName, contentType, nonce: base64urlEncode(nonce), aad });
     sealedContent[contentName] = base64urlEncode(ciphertext);
   }
 
@@ -807,25 +846,29 @@ async function sharedKeyPage() {
     page: {
       version: "1",
       resource: {
-        renderId: "sharedKeyRender1",
+        renderId: "AAAAAAAAAAAAAAAAAAAAAA",
         domain: DOMAIN,
         issuedAt: AT,
         resourceId: "123456",
         data: {},
       },
-      resourceJWT: `eyJhbGciOiJFUzI1NiIsImtpZCI6InNpZ24tMjAyNS0xMCJ9.${base64urlEncode(utf8Encode(JSON.stringify({ renderId: "sharedKeyRender1", domain: DOMAIN, issuedAt: AT, resourceId: "123456", data: {} })))}.c2lnbmF0dXJl`,
-      issuerData: {
-        [ISSUER_NAME]: {
+      resourceJWT: `eyJhbGciOiJFUzI1NiIsImtpZCI6InNpZ24tMjAyNS0xMCJ9.${base64urlEncode(utf8Encode(JSON.stringify({ renderId: "AAAAAAAAAAAAAAAAAAAAAA", domain: DOMAIN, issuedAt: AT, resourceId: "123456", data: {} })))}.c2lnbmF0dXJl`,
+      issuerData: [
+        {
+          issuerName: ISSUER_NAME,
           keyId: KEY_ID,
           unlockUrl: "https://issuer.example/unlock",
           sealed: {
-            contentKeys: {
-              bodytext: base64urlEncode(utf8Encode("sealed-placeholder")),
-              "locked-data": base64urlEncode(utf8Encode("sealed-placeholder")),
-            },
+            contentKeys: [
+              { contentName: "bodytext", key: base64urlEncode(utf8Encode("sealed-placeholder")) },
+              {
+                contentName: "locked-data",
+                key: base64urlEncode(utf8Encode("sealed-placeholder")),
+              },
+            ],
           },
         },
-      },
+      ],
       contentData,
       sealedContent,
     },
@@ -845,10 +888,10 @@ async function sharedKeyPage() {
 function swapSlots(page) {
   const swapped = structuredClone(page);
 
-  swapped.contentData = {
-    bodytext: page.contentData["locked-data"],
-    "locked-data": page.contentData.bodytext,
-  };
+  swapped.contentData = [
+    { ...contentRecord(page, "locked-data"), contentName: "bodytext" },
+    { ...contentRecord(page, "bodytext"), contentName: "locked-data" },
+  ];
   swapped.sealedContent = {
     bodytext: page.sealedContent["locked-data"],
     "locked-data": page.sealedContent.bodytext,
@@ -860,14 +903,14 @@ function swapSlots(page) {
 test("a real period grant opens a moved complete record only under the old carried AAD", async () => {
   const { render, unlock } = await world("period-only");
   const page = await render();
-  assert.deepEqual(Object.keys(page.issuerData[ISSUER_NAME].sealed), ["periodKeys"]);
-  assert.equal(Object.hasOwn(page.contentData.bodytext, "aad"), false);
+  assert.deepEqual(Object.keys(issuerRecord(page, ISSUER_NAME).sealed), ["periodKeys"]);
+  assert.equal(Object.hasOwn(contentRecord(page, "bodytext"), "aad"), false);
 
   const original = new Client({ publisherOrigin: ORIGIN });
   const originalData = original.parse(page);
   const grant = await unlock(original, originalData, ["bodytext"]);
-  assert.deepEqual(grant.keys.contentKeys, {}, "the issuer delivered no direct item key");
-  assert.ok(Object.keys(grant.keys.periodKeys[GROUP]).length > 0);
+  assert.deepEqual(grant.keys.contentKeys, [], "the issuer delivered no direct item key");
+  assert.ok(grant.keys.periodKeys.filter((record) => record.accessGroup === GROUP).length > 0);
   assert.deepEqual(
     (await original.resolve(originalData, ["bodytext", "locked-data"])).covered,
     ["bodytext", "locked-data"],
@@ -888,37 +931,44 @@ test("a real period grant opens a moved complete record only under the old carri
     LOCKED_DATA,
   );
 
-  // Adopted: the stock client recovers B's key through the moved wrap, and the
-  // transcript it builds for A's slot refuses B's ciphertext.
+  // Current wraps bind the authored slot before the content tag is reached.
   const moved = swapSlots(page);
   const reader = new Client({ publisherOrigin: ORIGIN });
   const movedData = reader.parse(moved);
   await unlock(reader, movedData, ["bodytext"]);
-  assert.deepEqual(
-    await reader.contentKeyFor(movedData, "bodytext"),
-    dataKey,
-    "the moved B wrap recovers B's key under the authorized period grant",
-  );
+  assert.equal(await reader.contentKeyFor(movedData, "bodytext"), null);
   await refuses(
     reader.decrypt(movedData, "bodytext", moved.sealedContent.bodytext),
-    "decrypt_failed",
-    "the adopted transcript names the selected slot, so B's record does not open in A's",
+    "no_key",
+    "a moved wrap has another slot's derived nonce",
+  );
+  await assert.rejects(
+    decrypt(
+      dataKey,
+      new Uint8Array(NONCE_BYTES),
+      base64urlDecode(moved.sealedContent.bodytext),
+      adoptedContentAad(moved, "bodytext"),
+    ),
+    "the source item's correct key also refuses the moved ciphertext under the target slot AAD",
   );
 
   // Old-format control: the same render resealed under the carried string with
   // the same issuer-reached keys. The carried B AAD travels with its record.
-  const old = await resealOldFormat(page, { bodytext: bodyKey, "locked-data": dataKey }, "123456");
-  assert.equal(old.contentData.bodytext.aad, "123456|1|bodytext");
-  assert.equal(old.contentData["locked-data"].aad, "123456|1|locked-data");
+  const old = await resealOldFormat(
+    page,
+    { bodytext: bodyKey, "locked-data": dataKey },
+    "123456",
+    grant.keys.periodKeys,
+  );
+  assert.equal(contentRecord(old, "bodytext").aad, "123456|1|bodytext");
+  assert.equal(contentRecord(old, "locked-data").aad, "123456|1|locked-data");
   const oldMoved = swapSlots(old);
-  const carried = new CarriedAadClient({ publisherOrigin: ORIGIN });
-  const oldMovedData = carried.parse(oldMoved);
-  await unlock(carried, oldMovedData, ["bodytext"]);
-  assert.deepEqual(await carried.contentKeyFor(oldMovedData, "bodytext"), dataKey);
+  const historical = await openOldPeriodRecord(oldMoved, "bodytext", grant.keys.periodKeys);
+  assert.deepEqual(historical.key, dataKey);
   assert.equal(
-    utf8Decode(await carried.decrypt(oldMovedData, "bodytext", oldMoved.sealedContent.bodytext)),
+    utf8Decode(historical.plaintext),
     LOCKED_DATA,
-    "the carried B AAD travels with its record into A's selected slot",
+    "the historical carried wrap and AAD travel with the authorized record",
   );
   // Both source items were in the one group the issuer granted. This changes
   // which authorized plaintext fills a slot; it does not acquire an ungranted item.
@@ -927,7 +977,7 @@ test("a real period grant opens a moved complete record only under the old carri
 test("an item-key-only issuer grant does not open a moved other-item record", async () => {
   const { render, unlock } = await world("item-only");
   const page = await render();
-  assert.deepEqual(Object.keys(page.issuerData[ISSUER_NAME].sealed), ["contentKeys"]);
+  assert.deepEqual(Object.keys(issuerRecord(page, ISSUER_NAME).sealed), ["contentKeys"]);
   const moved = swapSlots(page);
   const reader = new Client({ publisherOrigin: ORIGIN });
   const data = reader.parse(moved);
@@ -947,15 +997,32 @@ test("a period grant opens another render's same-slot record only under the old 
   assert.notEqual(prior.resourceJWT, current.resourceJWT);
   assert.notEqual(prior.resource.renderId, current.resource.renderId);
 
-  // Adopted: the prior record's wrap still yields its key under the same
-  // period grant, and the current renderId refuses it.
+  const priorReader = new Client({ publisherOrigin: ORIGIN });
+  const priorData = priorReader.parse(prior);
+  await unlock(priorReader, priorData, ["bodytext"]);
+  const priorKey = await priorReader.contentKeyFor(priorData, "bodytext");
+  assert.ok(priorKey instanceof Uint8Array);
+  assert.equal(
+    utf8Decode(
+      await decrypt(
+        priorKey,
+        new Uint8Array(NONCE_BYTES),
+        base64urlDecode(prior.sealedContent.bodytext),
+        adoptedContentAad(prior, "bodytext"),
+      ),
+    ),
+    "<p>prior render</p>",
+    "the retained source key opens the original ciphertext under its original AAD",
+  );
+
+  // Current wraps refuse the prior record at key recovery, before content AAD.
   const mixed = structuredClone(current);
-  mixed.contentData.bodytext = prior.contentData.bodytext;
+  replaceRecord(mixed, "bodytext", contentRecord(prior, "bodytext"));
   mixed.sealedContent.bodytext = prior.sealedContent.bodytext;
   const reader = new Client({ publisherOrigin: ORIGIN });
   const data = reader.parse(mixed);
   await unlock(reader, data, ["bodytext"]);
-  assert.ok((await reader.contentKeyFor(data, "bodytext")) instanceof Uint8Array);
+  assert.equal(await reader.contentKeyFor(data, "bodytext"), null);
   assert.notDeepEqual(
     adoptedContentAad(prior, "bodytext"),
     adoptedContentAad(mixed, "bodytext"),
@@ -963,24 +1030,33 @@ test("a period grant opens another render's same-slot record only under the old 
   );
   await refuses(
     reader.decrypt(data, "bodytext", mixed.sealedContent.bodytext),
-    "decrypt_failed",
-    "the current renderId changes the authentication input",
+    "no_key",
+    "the current renderId changes the derived wrap nonce",
+  );
+  await assert.rejects(
+    decrypt(
+      priorKey,
+      new Uint8Array(NONCE_BYTES),
+      base64urlDecode(mixed.sealedContent.bodytext),
+      adoptedContentAad(mixed, "bodytext"),
+    ),
+    "the correct prior key also refuses its ciphertext under the current render's content AAD",
   );
 
   // Old-format control: both renders resealed under the carried string. The
   // carried AAD is equal across renders, so the earlier record opens.
-  const oldPrior = await oldFormatOf(unlock, prior);
-  const oldMixed = await oldFormatOf(unlock, current);
-  assert.equal(oldPrior.contentData.bodytext.aad, oldMixed.contentData.bodytext.aad);
-  oldMixed.contentData.bodytext = oldPrior.contentData.bodytext;
+  const original = new Client({ publisherOrigin: ORIGIN });
+  const grant = await unlock(original, original.parse(current), ["bodytext"]);
+  const oldPrior = await oldFormatOf(unlock, prior, "123456", grant.keys.periodKeys);
+  const oldMixed = await oldFormatOf(unlock, current, "123456", grant.keys.periodKeys);
+  assert.equal(contentRecord(oldPrior, "bodytext").aad, contentRecord(oldMixed, "bodytext").aad);
+  replaceRecord(oldMixed, "bodytext", contentRecord(oldPrior, "bodytext"));
   oldMixed.sealedContent.bodytext = oldPrior.sealedContent.bodytext;
-  const carried = new CarriedAadClient({ publisherOrigin: ORIGIN });
-  const oldData = carried.parse(oldMixed);
-  await unlock(carried, oldData, ["bodytext"]);
+  const historical = await openOldPeriodRecord(oldMixed, "bodytext", grant.keys.periodKeys);
   assert.equal(
-    utf8Decode(await carried.decrypt(oldData, "bodytext", oldMixed.sealedContent.bodytext)),
+    utf8Decode(historical.plaintext),
     "<p>prior render</p>",
-    "the same publisher, group and period key opens the earlier item's full record",
+    "the historical carried wrap and AAD open under the real period grant",
   );
 });
 

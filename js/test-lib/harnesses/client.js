@@ -44,6 +44,30 @@ const OPTIONS = [
   "contentDecoders",
 ];
 
+/**
+ * The object delivery for a page a test assembled from a render. Tests write
+ * `{ ...rendered.dcaData, sealedContent: rendered.sealedContent }`, which puts
+ * the Sealer's in-memory map where the wire carries `{contentName, content}`
+ * records; this writes that map as the records, so the reader under test sees
+ * the wire form. A string, or a `sealedContent` that is no plain map, passes
+ * through for the reader to judge.
+ *
+ * @param {object|string} page
+ * @returns {object|string}
+ */
+function asDelivery(page) {
+  const sealedContent = own(page, "sealedContent");
+  if (sealedContent === null || typeof sealedContent !== "object" || Array.isArray(sealedContent))
+    return page;
+  return {
+    ...page,
+    sealedContent: Object.entries(sealedContent).map(([contentName, content]) => ({
+      contentName,
+      content,
+    })),
+  };
+}
+
 export class Client {
   /** @type {import('../../core-client/ContentKeyResolver.js').ContentKeyResolver} */
   #resolver;
@@ -123,7 +147,8 @@ export class Client {
    * @returns {object} dcaData
    */
   parse(page) {
-    return new ObjectDeliveryReader(page, { publisherOrigin: this.#publisherOrigin }).dcaData;
+    return new ObjectDeliveryReader(asDelivery(page), { publisherOrigin: this.#publisherOrigin })
+      .dcaData;
   }
 
   /**
@@ -135,7 +160,12 @@ export class Client {
    * @returns {string|null} base64url ciphertext
    */
   extract(page, contentName) {
-    const value = own(own(page, "sealedContent"), contentName);
+    // The last record under the name, as a reader resolves a repeated one.
+    const records = own(asDelivery(page), "sealedContent");
+    const record = Array.isArray(records)
+      ? records.findLast((entry) => own(entry, "contentName") === contentName)
+      : undefined;
+    const value = own(record, "content");
     return typeof value === "string" ? value : null;
   }
 

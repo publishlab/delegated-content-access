@@ -172,7 +172,9 @@ test("a manifest member with no file on disk fails membership", async () => {
 test("a changed byte fails the checksums and the regeneration", async () => {
   await withCopy(async (dir) => {
     const text = read(dir, "exchange.json");
-    const chainKey = JSON.parse(text).exchanges[0].body.keys.chainKeys.premium[CUTOFF];
+    const chainKey = JSON.parse(text).exchanges[0].body.keys.chainKeys.find(
+      (/** @type {any} */ record) => record.accessGroup === "premium" && record.cutoff === CUTOFF,
+    ).key;
     const flipped = `${chainKey[0] === "A" ? "B" : "A"}${chainKey.slice(1)}`;
     writeFileSync(`${dir}exchange.json`, text.replace(`"${chainKey}"`, `"${flipped}"`));
     const result = await checkPackage(dir);

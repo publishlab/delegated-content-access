@@ -1,26 +1,45 @@
 // @ts-check
 //
 // Reading a render and a cache back out in the shapes assertions are written
-// against: lists of labels and coordinates rather than the nested maps the wire
-// carries.
+// against: lists of labels and coordinates rather than the record arrays the
+// wire carries.
 //
 // Nothing here decides anything. A helper that folded two readings into one
 // answer would let a test pass on the wrong half of it, so each of these hands
 // back what it found and the test says what that has to be.
 
-import { own } from "../../core-shared/wire.js";
 import { ACCESS_GROUP, CONTENT_NAME, ISSUER_NAME } from "../../demo/scenarios/fixtures.js";
 
 /**
- * A render as it reaches a client: plain JSON, the sealed ciphertext beside the
- * dca-data, nothing left of the objects that made it. What a `Sealer.seal()`
- * result looks like once it has crossed.
+ * An own member of a wire object, or undefined. The test side reads members
+ * itself rather than through `core-shared/wire.js`: a strict bridge run sends
+ * every reference function a test calls to the test target, and a target that
+ * ports only the Sealer does not claim `own`
+ * (js/test-bridges/_shared/CONTRACT.md, section "Modes").
  *
- * @param {{ dcaData: object, sealedContent: object }} rendered
+ * @param {any} value
+ * @param {string} key
+ * @returns {any}
+ */
+function own(value, key) {
+  if (value === null || typeof value !== "object") return undefined;
+  return Object.hasOwn(value, key) ? value[key] : undefined;
+}
+
+/**
+ * A render as it reaches a client: plain JSON, the sealed ciphertext beside the
+ * dca-data as `{contentName, content}` records, nothing left of the objects
+ * that made it. What a `Sealer.seal()` result looks like once it has crossed.
+ *
+ * @param {{ dcaData: object, sealedContent: Record<string, string> }} rendered
  * @returns {any}
  */
 export function wire(rendered) {
-  return JSON.parse(JSON.stringify({ ...rendered.dcaData, sealedContent: rendered.sealedContent }));
+  const sealedContent = Object.entries(rendered.sealedContent).map(([contentName, content]) => ({
+    contentName,
+    content,
+  }));
+  return JSON.parse(JSON.stringify({ ...rendered.dcaData, sealedContent }));
 }
 
 /**
@@ -39,6 +58,121 @@ export function withoutSignatures(dcaData) {
 }
 
 /**
+ * The last record a collection carries under one name, as a reader resolves
+ * it, or undefined. A test that edits the result edits the delivery.
+ *
+ * @param {unknown} collection - such as `page.contentData`
+ * @param {string} member - the identity field, such as `contentName`
+ * @param {string} name
+ * @returns {any}
+ */
+export function recordNamed(collection, member, name) {
+  if (!Array.isArray(collection)) return undefined;
+  return collection.findLast((record) => own(record, member) === name);
+}
+
+/**
+ * One item's record on a page, or undefined.
+ *
+ * @param {any} page
+ * @param {string} [contentName]
+ * @returns {any}
+ */
+export function contentRecordOf(page, contentName = CONTENT_NAME) {
+  return recordNamed(own(page, "contentData"), "contentName", contentName);
+}
+
+/**
+ * One issuer's block on a page, or undefined.
+ *
+ * @param {any} page
+ * @param {string} [issuerName]
+ * @returns {any}
+ */
+export function issuerBlockOf(page, issuerName = ISSUER_NAME) {
+  return recordNamed(own(page, "issuerData"), "issuerName", issuerName);
+}
+
+/**
+ * One item's ciphertext on a page's `sealedContent` records, or undefined.
+ *
+ * @param {any} page
+ * @param {string} contentName
+ * @returns {string|undefined}
+ */
+export function sealedContentOf(page, contentName) {
+  return own(recordNamed(own(page, "sealedContent"), "contentName", contentName), "content");
+}
+
+/**
+ * A page's `sealedContent` records as the contentName-to-ciphertext map the
+ * Sealer returns and the delivery writers take.
+ *
+ * @param {any} page
+ * @returns {Record<string, string>}
+ */
+export function sealedContentByName(page) {
+  const records = own(page, "sealedContent");
+  return Array.isArray(records)
+    ? Object.fromEntries(
+        records.map((record) => [own(record, "contentName"), own(record, "content")]),
+      )
+    : {};
+}
+
+/**
+ * The items a page declares, in wire order.
+ *
+ * @param {any} page
+ * @returns {string[]}
+ */
+export function contentNamesOn(page) {
+  const records = own(page, "contentData");
+  return Array.isArray(records) ? records.map((record) => own(record, "contentName")) : [];
+}
+
+/**
+ * One item's wrap records under one accessGroup, in wire order. Each is
+ * `{accessGroup, period, key, ...}` as the page carries it.
+ *
+ * @param {any} page
+ * @param {string} contentName
+ * @param {string} accessGroup
+ * @returns {any[]}
+ */
+export function wrapsOf(page, contentName, accessGroup) {
+  const entries = own(contentRecordOf(page, contentName), "keys");
+  return Array.isArray(entries)
+    ? entries.filter((entry) => own(entry, "accessGroup") === accessGroup)
+    : [];
+}
+
+/**
+ * The accessGroups one item's wraps name, each once, in first-seen order.
+ *
+ * @param {any} page
+ * @param {string} contentName
+ * @returns {string[]}
+ */
+export function wrapGroupsOn(page, contentName) {
+  const entries = own(contentRecordOf(page, contentName), "keys");
+  return Array.isArray(entries)
+    ? [...new Set(entries.map((entry) => own(entry, "accessGroup")))]
+    : [];
+}
+
+/**
+ * The issuers a page names, in wire order.
+ *
+ * @param {any} page
+ * @returns {string[]}
+ */
+export function issuerNamesOn(page) {
+  const blocks = own(page, "issuerData");
+  return Array.isArray(blocks) ? blocks.map((block) => own(block, "issuerName")) : [];
+}
+
+/**
  * The periods a page ships to the client, in wire order - the period it was
  * rendered in first, then forward.
  *
@@ -48,8 +182,12 @@ export function withoutSignatures(dcaData) {
  * @returns {string[]}
  */
 export function periodsOn(page, contentName = CONTENT_NAME, accessGroup = ACCESS_GROUP) {
-  const entries = own(own(own(own(page, "contentData"), contentName), "keys"), accessGroup);
-  return Array.isArray(entries) ? entries.map((entry) => own(entry, "t")) : [];
+  const entries = own(contentRecordOf(page, contentName), "keys");
+  return Array.isArray(entries)
+    ? entries
+        .filter((entry) => own(entry, "accessGroup") === accessGroup)
+        .map((entry) => own(entry, "period"))
+    : [];
 }
 
 /**
@@ -62,9 +200,12 @@ export function periodsOn(page, contentName = CONTENT_NAME, accessGroup = ACCESS
  * @returns {string[]}
  */
 export function issuerPeriodsOn(page, issuerName = ISSUER_NAME, accessGroup = ACCESS_GROUP) {
-  const periods = own(own(own(own(page, "issuerData"), issuerName), "sealed"), "periodKeys");
-  const group = own(periods, accessGroup);
-  return group === undefined || group === null ? [] : Object.keys(group);
+  const periods = own(own(issuerBlockOf(page, issuerName), "sealed"), "periodKeys");
+  return Array.isArray(periods)
+    ? periods
+        .filter((entry) => own(entry, "accessGroup") === accessGroup)
+        .map((entry) => own(entry, "period"))
+    : [];
 }
 
 /**

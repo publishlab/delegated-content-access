@@ -31,9 +31,9 @@ output. The limits are byte caps; nothing here bounds decoding time.
 ## Period-key nonce accounting
 
 The JS publisher
-([`Sealer.js`](../js/core-publisher/Sealer.js)) draws one fresh 12-octet
-nonce per period-key wrap from an injected random source and keeps no
-invocation count. Deployment-wide compliance with the nonce bound requires a
+([`Sealer.js`](../js/core-publisher/Sealer.js)) derives each period-key wrap
+nonce from the render ID and the wrap's coordinate and keeps no invocation
+count. Deployment-wide compliance with the invocation bound requires a
 budget mechanism around this component; the component does not enforce that
 quota itself.
 

@@ -40,7 +40,7 @@ test("chain wrapper preserves a seed-only content-group route through the real d
   });
   await client.unlockRoutes(["story"], [{ issuerName: issuer.name, unlockUrl: UNLOCK }]);
   assert.equal(sent.length, 1);
-  assert.ok(sent[0].sealed.contentWindowSeeds.story);
+  assert.ok(sent[0].sealed.contentWindowSeeds.some((seed) => seed.contentName === "story"));
   assert.equal(sent[0].sealed.chainKeys, undefined);
   assert.equal(new TextDecoder().decode((await client.openLocal("story")).bytes), "content:story");
 });

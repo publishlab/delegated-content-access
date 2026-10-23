@@ -19,7 +19,7 @@
   },
   "expected": {
     "bind": "dca-bind-key-envelope|c|uUT576O34BoGKpgXpdMucw|bodytext",
-    "blob": "Bv_rrpHAnCFcf8NeehDgUG3w9ktUCbb_1LNPIX5pT8u7s5xZErWJNnNAJfmyMYNXO4LYDDMaasFJMMGHk63Fqhosaqe6Y6UyHEziB6sXe3DGjrotDFBb6mExgzsz3ifzJqNlKZWmsZyM40Xpjg",
+    "blob": "Bv_rrpHAnCFcf8NeehDgUG3w9ktUCbb_1LNPIX5pT8u7s5xZErWJNnNAJfmyMYNXO4LYDDMaasFJMMGHk63FqhrLrCbS8cWjyd-_5YycXwh6reawuEl-NKR4Zy1-ERVuQQ",
     "error": "unseal_failed"
   }
 }

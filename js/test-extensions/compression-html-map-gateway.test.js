@@ -22,6 +22,7 @@ import {
 } from "../extensions/content-compression/core-shared--client-publisher/gzipCodec.js";
 import { writeMappedDelivery } from "../extensions/html-content-map/adapter-publisher/writeMappedDelivery.js";
 import { createHtmlGateway } from "../extensions/html-content-map/integration-client/createHtmlGateway.js";
+import { contentRecordOf } from "../test-lib/helpers/inspect.js";
 import {
   ARTICLE_MAP,
   BODYTEXT,
@@ -51,7 +52,7 @@ async function compressedArticle() {
     ],
     page: articlePage,
   });
-  assert.deepEqual(render.dcaData.contentData.bodytext.contentEncodings, [ENCODING]);
+  assert.deepEqual(contentRecordOf(render.dcaData, "bodytext").contentEncodings, [ENCODING]);
   const html = writeMappedDelivery({
     dcaData: render.dcaData,
     sealedContent: render.sealedContent,
@@ -100,10 +101,12 @@ test("a gateway with the gzip registry in clientOptions places the compressed it
   assert.ok(result.html?.includes("<p>The council voted 7-2 to rezone the harbour.</p>"));
   assert.ok(result.html?.includes("<li>Area: <b>north quay</b></li>"));
   assert.equal(world.unlocks.length, 1);
-  assert.deepEqual(Object.keys(world.unlocks[0].request.sealed.contentKeys).sort(), [
-    "bodytext",
-    "factbox",
-  ]);
+  assert.deepEqual(
+    world.unlocks[0].request.sealed.contentKeys
+      .map((/** @type {any} */ record) => record.contentName)
+      .sort(),
+    ["bodytext", "factbox"],
+  );
 });
 
 test("a gateway without a gzip decoder fails only the compressed item and opens the other", async () => {

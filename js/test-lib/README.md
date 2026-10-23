@@ -12,6 +12,14 @@ The reference test library lives here, and nothing under it imports
 an experiment's `test-lib/suites/` while it is unselected; promotion moves the
 suite here only after its requirement is selected.
 
+`suites/envelope-behavior.js` owns carrier-independent envelope recovery, saved
+envelope replay, wrong-recipient refusal and BIND relabel assertions. The stock
+key-sealing tests and nonce-free-envelope comparison each supply their own
+adapter. Period and chain coordinates here exercise supported envelope BIND
+vocabulary; they select no optional derivation implementation and establish no
+complete optional-profile conformance claim. Carrier layouts, primitive known
+answers and experimental selector controls stay with their owning tests.
+
 Each `suites/` module represents one reusable behavioral requirement. Do not
 move unrelated test code here just because a test uses it.
 
@@ -90,3 +98,8 @@ Feature-owned support stays with its owning tests. The client-bound sealed
 cache alternative lives under `../extensions/client-bound-transport/test/_lib/`,
 the lifecycle model under `../test-reference/integration-client/support/`, and
 reference endpoint-port cases and driver under `../test-vectors/support/`.
+
+The envelope behavior suite accepts the owning file's test registrar as its
+optional second argument. The baseline owner passes its selection-aware registrar,
+so ordinary reference assertions do not silently enter a portable selection.
+Extension owners use the default Node registrar for their local test runs.

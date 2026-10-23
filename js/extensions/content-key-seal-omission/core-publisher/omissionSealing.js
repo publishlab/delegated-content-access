@@ -6,7 +6,7 @@
 // is active, and wraps the selected supply planner; the sealing itself stays
 // base's.
 //
-// The wrap is one render-wide decision: `contentData[contentName].keys` is
+// The wrap is one render-wide decision: each item record's `keys` is
 // emitted once, so one issuer listing this extension makes the whole render
 // carry the bound wrap, including for the readers of an inactive issuer in the
 // same page. A per-issuer choice of representation is not available to anyone,
@@ -27,11 +27,30 @@ import { dcaError } from "../../../core-shared/errors.js";
 import { ordinaryContentKeyWrap } from "../../../core-publisher/contentKeyWrap.js";
 import { composePublisherConfig } from "../../../core-publisher/publisherComposition.js";
 import { omissionBoundCandidates } from "../core-shared--client-publisher/omissionCandidates.js";
+import { recordsByName } from "../../../core-shared--client-publisher/deliveryRecords.js";
 import {
   EXTENSION_NAME,
   OMISSION_BIND_IDENTIFIER,
   omissionBindAad,
 } from "../core-shared/omissionBind.js";
+
+/**
+ * One item record's wrap records as the `[accessGroup, entries]` families a
+ * client's view hands to the bound-candidate projection: grouped by their
+ * `accessGroup` field, each entry with its `period` label as `t`.
+ *
+ * @param {unknown} keys - the record's `keys` collection, as published
+ * @returns {[string, any[]][]}
+ */
+function wrapFamilies(keys) {
+  /** @type {Map<string, any[]>} */
+  const families = new Map();
+  for (const { accessGroup, period, ...entry } of Array.isArray(keys) ? keys : []) {
+    if (!families.has(accessGroup)) families.set(accessGroup, []);
+    families.get(accessGroup)?.push({ ...entry, t: period });
+  }
+  return [...families];
+}
 
 /** The issuer config members this extension reads beside base's. */
 const ISSUER_MEMBERS = Object.freeze(["extensions", "grantable", "accessGroups"]);
@@ -63,7 +82,7 @@ const ISSUER_MEMBERS = Object.freeze(["extensions", "grantable", "accessGroups"]
  */
 export const omissionContentKeyWrap = {
   aad: (coordinate) => omissionBindAad(coordinate),
-  entry: ({ t, nonce, key }) => ({ t, nonce, key, bind: OMISSION_BIND_IDENTIFIER }),
+  entry: ({ t, key }) => ({ t, key, bind: OMISSION_BIND_IDENTIFIER }),
 };
 
 /**
@@ -241,13 +260,14 @@ export function omissionContribution(config) {
       routes: () => [],
       prepare: async () => ({}),
       requestRelay(delivery) {
-        const boundCandidates = omissionBoundCandidates(Object.keys(delivery.contentData), (name) =>
-          Object.entries(delivery.contentData[name].keys ?? {}),
+        const items = recordsByName(delivery.contentData, "contentName", () => true) ?? new Map();
+        const boundCandidates = omissionBoundCandidates([...items.keys()], (name) =>
+          wrapFamilies(items.get(name).keys),
         );
         return {
           members: {
             extensions: [EXTENSION_NAME],
-            ...(Object.keys(boundCandidates).length > 0 ? { boundCandidates } : {}),
+            ...(boundCandidates.length > 0 ? { boundCandidates } : {}),
           },
         };
       },

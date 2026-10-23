@@ -42,6 +42,40 @@ import {
 
 const { subtle } = globalThis.crypto;
 
+/**
+ * The first key entry a page lists for one item and access group, read off
+ * the named records the way the wire carries them.
+ *
+ * @param {any} page
+ * @param {string} contentName
+ * @param {string} accessGroup
+ * @returns {any}
+ */
+function firstEntry(page, contentName, accessGroup) {
+  return page.contentData
+    .find((/** @type {any} */ record) => record.contentName === contentName)
+    ?.keys.find((/** @type {any} */ entry) => entry.accessGroup === accessGroup);
+}
+
+/**
+ * @param {any} page
+ * @param {string} issuerName
+ * @returns {any}
+ */
+function issuerRecord(page, issuerName) {
+  return page.issuerData.find((/** @type {any} */ record) => record.issuerName === issuerName);
+}
+
+/**
+ * @param {any} page
+ * @param {string} contentName
+ * @returns {string}
+ */
+function sealedContentOf(page, contentName) {
+  return page.sealedContent.find((/** @type {any} */ record) => record.contentName === contentName)
+    ?.content;
+}
+
 test("the omission interpretation owns only its marker and preserves ordinary siblings", () => {
   const context = {
     renderId: "render",
@@ -70,15 +104,20 @@ test("only the bound resolver opens a mixed render from a primed period-key cach
   // One active issuer makes the shared contentData entry bound. The inactive
   // issuer still receives its ordinary content-key seal, which proves
   // this is the mixed compatibility shape rather than an all-active render.
-  const entry = page.contentData.bodytext.keys.premium[0];
+  const entry = firstEntry(page, "bodytext", "premium");
   assert.equal(entry.bind, OMISSION_BIND_IDENTIFIER);
-  assert.equal(Object.hasOwn(page.issuerData[ISSUER_A].sealed, "contentKeys"), false);
-  assert.equal(typeof page.issuerData[ISSUER_B].sealed.contentKeys.bodytext, "string");
+  assert.equal(Object.hasOwn(issuerRecord(page, ISSUER_A).sealed, "contentKeys"), false);
+  assert.equal(
+    typeof issuerRecord(page, ISSUER_B).sealed.contentKeys.find(
+      (/** @type {any} */ record) => record.contentName === "bodytext",
+    )?.key,
+    "string",
+  );
 
   // Prime only the period-key coordinate. No issuer response, and in
   // particular no content-key answer, is applied to either resolver.
   const cache = new PeriodKeyCache();
-  await cache.put("premium", entry.t, await periodKeySupply.derive("premium", entry.t), {
+  await cache.put("premium", entry.period, await periodKeySupply.derive("premium", entry.period), {
     publisher: PUB,
   });
   const dcaData = new DcaData(page, { publisherOrigin: PUB });
@@ -97,7 +136,7 @@ test("only the bound resolver opens a mixed render from a primed period-key cach
     origins: [
       {
         contentName: "bodytext",
-        origin: { kind: "cached-period-key", accessGroup: "premium", t: entry.t },
+        origin: { kind: "cached-period-key", accessGroup: "premium", t: entry.period },
       },
     ],
   });
@@ -156,12 +195,12 @@ test("only the bound resolver opens a mixed render from a primed period-key cach
     [
       "changed period coordinate",
       (candidate) => {
-        candidate.t = "251023T0000";
+        candidate.period = "251023T0000";
       },
     ],
   ])) {
     const changed = structuredClone(page);
-    mutate(changed.contentData.bodytext.keys.premium[0]);
+    mutate(firstEntry(changed, "bodytext", "premium"));
     const changedResolver = new BoundContentKeyResolver({ cache });
     assert.deepEqual(
       await changedResolver.resolve(new DcaData(changed, { publisherOrigin: PUB }), ["bodytext"]),
@@ -175,7 +214,7 @@ test("only the bound resolver opens a mixed render from a primed period-key cach
       await openContent(
         contentKey,
         "bodytext",
-        page.sealedContent.bodytext,
+        sealedContentOf(page, "bodytext"),
         contentAadOctets(page, "bodytext"),
       ),
     ),
@@ -215,7 +254,10 @@ test("a period key filed from one unlock opens the next article bound entry loca
     accessPolicy: new AllowAllPolicy(),
   });
   const result = await engine.unlock(request, registration);
-  assert.ok(Object.keys(result.periodKeys.premium).length > 0, "the cached route was selected");
+  assert.ok(
+    result.periodKeys.some((/** @type {any} */ record) => record.accessGroup === "premium"),
+    "the cached route was selected",
+  );
 
   const firstPage = new DcaData(first, { publisherOrigin: PUB });
   const application = await resolver.applyResponse(
@@ -234,7 +276,7 @@ test("a period key filed from one unlock opens the next article bound entry loca
   const plaintext = await openContent(
     contentKey,
     "note",
-    second.sealedContent.note,
+    sealedContentOf(second, "note"),
     contentAadOctets(second, "note"),
   );
   assert.equal(utf8Decode(plaintext), NOTE);
@@ -250,18 +292,18 @@ test("the client and the issuer build the same binding string for one coordinate
     ),
   );
 
-  const entry = page.contentData.bodytext.keys.premium[0];
+  const entry = firstEntry(page, "bodytext", "premium");
   const clientSide = omissionBindValue({
     renderId: new DcaData(page, { publisherOrigin: PUB }).renderId,
     contentName: "bodytext",
     accessGroup: "premium",
-    t: entry.t,
+    t: entry.period,
   });
   const issuerSide = omissionBindValue({
     renderId: page.resource.renderId,
     contentName: "bodytext",
     accessGroup: "premium",
-    t: entry.t,
+    t: entry.period,
   });
 
   assert.equal(clientSide, issuerSide);
@@ -299,7 +341,7 @@ test("the client and the issuer build the same binding string for one coordinate
       await openContent(
         contentKey,
         "bodytext",
-        page.sealedContent.bodytext,
+        sealedContentOf(page, "bodytext"),
         contentAadOctets(page, "bodytext"),
       ),
     ),
@@ -376,7 +418,7 @@ test("omission resolver forwards period-key response coordinate selection", asyn
     ),
     { items: ["bodytext"] },
   );
-  const t = page.contentData.bodytext.keys.premium[0].t;
+  const t = firstEntry(page, "bodytext", "premium").period;
   for (const build of [
     omissionContentKeyResolverFactory,
     (options) => new BoundContentKeyResolver(options),
@@ -396,9 +438,13 @@ test("omission resolver forwards period-key response coordinate selection", asyn
       ISSUER_A,
       {
         keys: {
-          periodKeys: {
-            premium: { [t]: base64urlEncode(await periodKeySupply.derive("premium", t)) },
-          },
+          periodKeys: [
+            {
+              accessGroup: "premium",
+              period: t,
+              key: base64urlEncode(await periodKeySupply.derive("premium", t)),
+            },
+          ],
         },
       },
       new ResponseAssociation(data, ISSUER_A, request),

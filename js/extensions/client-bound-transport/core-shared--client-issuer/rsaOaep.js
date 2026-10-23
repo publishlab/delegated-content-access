@@ -66,6 +66,14 @@ export function validateClientKeyPair({ privateKey, publicKey }) {
  * @returns {JsonWebKey}
  */
 export function publicKeyForOffer(publicKey) {
+  if (
+    publicKey === null ||
+    typeof publicKey !== "object" ||
+    Array.isArray(publicKey) ||
+    ["d", "k", "p", "q", "dp", "dq", "qi", "oth"].some((member) => member in publicKey)
+  ) {
+    throw dcaError("bad_config", "a client offer requires a public JWK without private members");
+  }
   const bad = (/** @type {string} */ why) =>
     dcaError("bad_config", `an RSA-OAEP client offer ${why}`);
   if (
@@ -104,7 +112,15 @@ export function publicKeyForOffer(publicKey) {
   ) {
     throw bad("key_ops does not name only RSA-OAEP encryption or wrapping");
   }
-  return { ...publicKey, ...(Array.isArray(keyOps) ? { key_ops: [...keyOps] } : {}) };
+  return {
+    kty: "RSA",
+    n: publicKey.n,
+    e: publicKey.e,
+    ...(publicKey.alg !== undefined ? { alg: publicKey.alg } : {}),
+    ...(publicKey.use !== undefined ? { use: publicKey.use } : {}),
+    ...(publicKey.ext !== undefined ? { ext: publicKey.ext } : {}),
+    ...(Array.isArray(keyOps) ? { key_ops: [...keyOps] } : {}),
+  };
 }
 
 /**

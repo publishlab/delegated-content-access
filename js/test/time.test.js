@@ -53,6 +53,7 @@ import { countingEndpoint } from "../test-lib/harnesses/issuer-endpoint.js";
 import { held, issuerPeriodsOn, periodsOn } from "../test-lib/helpers/inspect.js";
 import { refuses } from "../test-lib/helpers/refuses.js";
 import { issuerKeypair, seededRandom, signingKeypair } from "../test-reference/support/keys.js";
+import { contentKeyMap, periodKeyMap } from "../test-reference/support/namedRecords.js";
 import { wholeRenderIssuerSupplyPlan } from "../core-publisher/issuerSupplyPlan.js";
 
 /** The second publisher of the last test, which is the only one that needs it. */
@@ -387,11 +388,11 @@ test("an article rendered periods ago still unlocks from the keys it shipped wit
   assert.equal(status, 200);
   assert.equal(body.errors, undefined, "the issuer unseals a blob; it never reads the t on it");
   assert.deepEqual(
-    Object.keys(body.keys.periodKeys.premium),
+    Object.keys(periodKeyMap(body.keys.periodKeys).premium),
     ["251023T1400", "251023T1500"],
     "the periods the page was rendered with, handed back as they are",
   );
-  assert.deepEqual(Object.keys(body.keys.contentKeys), ["bodytext"]);
+  assert.deepEqual(Object.keys(contentKeyMap(body.keys.contentKeys)), ["bodytext"]);
 
   await unsealer.applyResponse(a, ISSUER_NAME, body);
   assert.deepEqual(await held(cache), ["251023T1500", "251023T1400"]);

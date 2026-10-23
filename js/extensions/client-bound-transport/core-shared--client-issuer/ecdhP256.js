@@ -60,6 +60,14 @@ export function validateClientKeyPair({ privateKey, publicKey }) {
  * @returns {JsonWebKey}
  */
 export function publicKeyForOffer(publicKey) {
+  if (
+    publicKey === null ||
+    typeof publicKey !== "object" ||
+    Array.isArray(publicKey) ||
+    ["d", "k", "p", "q", "dp", "dq", "qi", "oth"].some((member) => member in publicKey)
+  ) {
+    throw dcaError("bad_config", "a client offer requires a public JWK without private members");
+  }
   if (publicKey.kty !== "EC" || publicKey.crv !== "P-256") {
     throw dcaError("bad_config", "an ECDH-P256 client offer uses EC/P-256");
   }

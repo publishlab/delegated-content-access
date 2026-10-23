@@ -41,6 +41,8 @@ import { requestFor } from "../test-lib/harnesses/issuer-endpoint.js";
 import { AllowAllPolicy } from "../demo/support/AllowAllPolicy.js";
 import { BrowserUnlockHttp } from "../adapter-issuer/BrowserUnlockHttp.js";
 import { sign } from "../core-shared--publisher-issuer/jwt.js";
+import { issuerBlockOf, sealedContentByName } from "../test-lib/helpers/inspect.js";
+import { keyAt } from "../test-reference/support/namedRecords.js";
 
 const OTHER_DOMAIN = "other-publisher.example";
 const OTHER_ORIGIN = `https://${OTHER_DOMAIN}`;
@@ -62,7 +64,8 @@ const LOCALHOST_ORIGIN = "http://www-default.localhost";
  * @param {(dcaData: any) => void} change
  */
 function changedPage(page, change) {
-  const { sealedContent, ...dcaData } = page.asJson();
+  const { sealedContent: records, ...dcaData } = page.asJson();
+  const sealedContent = sealedContentByName({ sealedContent: records });
   change(dcaData);
   return new Page({ publisherOrigin: page.publisherOrigin, dcaData, sealedContent });
 }
@@ -273,7 +276,10 @@ describe("browser origin and publisher registration composition", () => {
     const answer = await stage.network.post(UNLOCK_URL, requestFor(page), { origin: ORIGIN });
 
     assert.equal(answer.status, 200);
-    assert.equal(typeof answer.body.keys.contentKeys[CONTENT_NAME], "string");
+    assert.equal(
+      typeof keyAt(answer.body.keys.contentKeys, { contentName: CONTENT_NAME }),
+      "string",
+    );
   });
 
   test("two renders of one article, signed old and new, each open only at their own origin", async () => {
@@ -291,7 +297,10 @@ describe("browser origin and publisher registration composition", () => {
       const request = requestFor(/** @type {any} */ (page));
       const opened = await stage.network.post(UNLOCK_URL, request, { origin: own });
       assert.equal(opened.status, 200);
-      assert.equal(typeof opened.body.keys.contentKeys[CONTENT_NAME], "string");
+      assert.equal(
+        typeof keyAt(opened.body.keys.contentKeys, { contentName: CONTENT_NAME }),
+        "string",
+      );
 
       const refused = await stage.network.post(UNLOCK_URL, request, { origin: foreign });
       assertCodedRefusal(refused, 403, "origin_refused");
@@ -394,7 +403,10 @@ describe("browser origin and publisher registration composition", () => {
     });
 
     assert.equal(answer.status, 200);
-    assert.equal(typeof answer.body.keys.contentKeys[CONTENT_NAME], "string");
+    assert.equal(
+      typeof keyAt(answer.body.keys.contentKeys, { contentName: CONTENT_NAME }),
+      "string",
+    );
 
     const production = await actorWorld();
     const page = await production.publisher.render(article("A"));
@@ -500,7 +512,7 @@ describe("browser origin and publisher registration composition", () => {
   test("an unregistered issuer keyId cannot reach the registration opening-key view", async () => {
     const stage = await actorWorld();
     const page = changedPage(await stage.publisher.render(article("A")), (dcaData) => {
-      dcaData.issuerData[ISSUER_NAME].keyId = "co-tenant-key";
+      issuerBlockOf(dcaData, ISSUER_NAME).keyId = "co-tenant-key";
     });
 
     const answer = await stage.network.post(UNLOCK_URL, requestFor(page), { origin: ORIGIN });
@@ -519,7 +531,10 @@ describe("browser origin and publisher registration composition", () => {
     const answer = await stage.network.post(UNLOCK_URL, requestFor(page), { origin: IPV6_ORIGIN });
 
     assert.equal(answer.status, 200);
-    assert.equal(typeof answer.body.keys.contentKeys[CONTENT_NAME], "string");
+    assert.equal(
+      typeof keyAt(answer.body.keys.contentKeys, { contentName: CONTENT_NAME }),
+      "string",
+    );
   });
 
   test("another literal, port or spelling is another origin, refused before policy and opening key", async () => {
@@ -601,16 +616,6 @@ describe("browser origin and publisher registration composition", () => {
     const gated = await actorWorld({ primary: { requireAuthentication: true } });
     const gatedPage = await gated.publisher.render(article("A"));
 
-    // A transport policy that names no mode fails the transport agreement.
-    // The agreement follows the verified match, but admission still returns
-    // its fault, so it leaves without CORS permission like the refusals
-    // before it. The profile is never asked to wrap anything.
-    const undecided = await actorWorld({
-      transportPolicy: { modeFor: () => "neither" },
-      clientBoundProfile: { METHOD: "test-only", RANDOM_REQUIRED: false, seal: () => null },
-    });
-    const undecidedPage = await undecided.publisher.render(article("A"));
-
     const limited = await actorWorld({
       domains: [DOMAIN],
       signingKids: { [DOMAIN]: [SIGNING_KID] },
@@ -626,7 +631,7 @@ describe("browser origin and publisher registration composition", () => {
         send: () =>
           stage.network.post(
             UNLOCK_URL,
-            { version: "1", sealed: { contentKeys: { a: "b" } } },
+            { version: "1", sealed: { contentKeys: [{ contentName: "a", key: "b" }] } },
             { origin: ORIGIN },
           ),
         status: 400,
@@ -644,13 +649,6 @@ describe("browser origin and publisher registration composition", () => {
         send: () => gated.network.post(UNLOCK_URL, requestFor(gatedPage), { origin: ORIGIN }),
         status: 401,
         code: "unauthenticated",
-      },
-      {
-        label: "a transport agreement the issuer cannot reach",
-        send: () =>
-          undecided.network.post(UNLOCK_URL, requestFor(undecidedPage), { origin: ORIGIN }),
-        status: 500,
-        code: "bad_transport_policy",
       },
       {
         label: "a signature the registration's key refuses",

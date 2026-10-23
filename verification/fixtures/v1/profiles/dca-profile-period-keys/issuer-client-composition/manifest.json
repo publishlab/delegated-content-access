@@ -25,14 +25,14 @@
   },
   "provenance": {
     "recorder": "js/tools/record-period-key-composition.js",
-    "sourceCommit": "c69e610a70245c4ede2845b54fa4995d029c22a7",
+    "sourceCommit": "b5a3bc6e80eb8d7ec1ba1479dd5542d7815cc723",
     "sourceScenario": "js/test-profiles/dca-profile-period-keys.test.js"
   },
   "discovery": "a leaf root found by discoverFixturePackageRoots (js/test-tools/claim-index.js); verification/fixtures/v1/ and v1/profiles/ are path segments, not packages",
   "members": [
     {
       "path": "exchange.json",
-      "sha256": "57d1253978086a00ad1c183e9306864d9e84c4b68dd20257f9ca405d5d146d4a"
+      "sha256": "2f85a497c1ea73ee688bead1ecafff0d9ab82ccf89c2249931b8cf3241ca7640"
     },
     {
       "path": "expected.json",
@@ -44,7 +44,7 @@
     },
     {
       "path": "renders.json",
-      "sha256": "0377d39815dc7f7419acb2dbd208c3ee60b69ab58dcc3bacfe58f36f883a469b"
+      "sha256": "367bd00bf5e07e69a1506b9cf63f279485f3a35acd131d9f350af1246891cddb"
     }
   ],
   "consumers": [

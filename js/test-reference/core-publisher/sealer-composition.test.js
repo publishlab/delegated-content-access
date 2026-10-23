@@ -3,7 +3,7 @@
 // The Sealer's two composition roles, and the boundary they finish at.
 //
 // `contentKeyWrapStrategy` is selected once for a render, because
-// `contentData[contentName].keys` is emitted once and every issuer reads the
+// each item record's `keys` is emitted once and every issuer reads the
 // same entries. `issuerSupplyPlanFor` is asked once per issuer, and answers
 // only what that issuer is supplied: which content names receive a sealed
 // content key, which access groups its period material covers, the content
@@ -46,6 +46,7 @@ import { portableTest, test } from "../support/portable-test.js";
 import { openEcdhEnvelope } from "../support/ecdhEnvelope.js";
 import { openRsaEnvelope } from "../support/rsaEnvelope.js";
 import { contentAadOctets } from "../support/contentAadOctets.js";
+import { contentKeyWrapNonceOctets } from "../support/contentKeyWrapNonceOctets.js";
 import {
   periodKey,
   TEST_ISSUER_PRIVATE_KEY_PKCS8,
@@ -60,6 +61,15 @@ import {
   sealerOriginRender,
   sealerOriginSetup,
 } from "../support/sealerCases.js";
+import {
+  contentNamesOn,
+  contentRecordOf,
+  issuerBlockOf,
+  issuerNamesOn,
+  wrapGroupsOn,
+  wrapsOf,
+} from "../../test-lib/helpers/inspect.js";
+import { contentKeyMap, periodKeyMap } from "../support/namedRecords.js";
 
 const THIRD_ISSUER_NAME = "paywall_third_service";
 const portableSealerIssuersTest = portableTest("portable-sealer-issuers");
@@ -238,7 +248,8 @@ function assertSameCiphertext(actual, expected, why) {
 
 /**
  * A content-key-only factory render with each ECDH content-key envelope replaced
- * by its nonce and the key it opens to at its coordinate. Each render draws a fresh ephemeral key, so
+ * by its carrier width and the key it opens to at its coordinate. Each render
+ * draws a fresh ephemeral key, so
  * two renders of one stream differ in their envelope bytes and in nothing an
  * issuer reads out of them. The signature is left out: ECDSA draws its own
  * nonce.
@@ -251,23 +262,23 @@ async function comparableRender(rendered) {
   const bytesOf = (text) => new Uint8Array(Buffer.from(text, "base64url"));
   /** @param {Uint8Array} bytes */
   const text = (bytes) => Buffer.from(bytes).toString("base64url");
-  /** @type {Record<string, any>} */
-  const issuers = {};
-  for (const [issuerName, block] of Object.entries(issuerData)) {
-    /** @type {Record<string, { nonce: string, opensTo: string }>} */
-    const contentKeys = {};
-    for (const [contentName, envelope] of Object.entries(block.sealed.contentKeys)) {
+  /** @type {any[]} */
+  const issuers = [];
+  for (const block of issuerData) {
+    /** @type {{ contentName: string, key: { carrierBytes: number, opensTo: string } }[]} */
+    const contentKeys = [];
+    for (const { contentName, key: envelope } of block.sealed.contentKeys) {
       const opened = await openEcdhEnvelope(
         envelope,
         `dca-bind-key-envelope|c|${rendered.resource.renderId}|${contentName}`,
         TEST_ISSUER_PRIVATE_KEY_PKCS8,
       );
-      contentKeys[contentName] = {
-        nonce: text(bytesOf(envelope).subarray(65, 77)),
-        opensTo: text(opened),
-      };
+      contentKeys.push({
+        contentName,
+        key: { carrierBytes: bytesOf(envelope).length, opensTo: text(opened) },
+      });
     }
-    issuers[issuerName] = { ...block, sealed: { ...block.sealed, contentKeys } };
+    issuers.push({ ...block, sealed: { ...block.sealed, contentKeys } });
   }
   return { ...rest, issuerData: issuers, token: payloadOf(resourceJWT) };
 }
@@ -378,7 +389,7 @@ function watched(config) {
   };
 }
 
-test("fresh independent item keys and random wrap and ECDH envelope nonces have separate draws", async () => {
+test("fresh item keys are drawn; content and envelopes use zero nonce, period wraps derive it", async () => {
   const { sealerConfig } = await world();
   const config = sealerConfig();
   const random = config.random;
@@ -397,35 +408,44 @@ test("fresh independent item keys and random wrap and ECDH envelope nonces have 
       { name: "sidebar", accessGroups: ["premium"] },
     ],
   });
-  /** @type {Uint8Array[]} */
-  const carried = [];
-  for (const record of Object.values(page.contentData)) {
+  const renderId = page.resource.renderId;
+  /** @type {string[]} */
+  const wrapNonces = [];
+  for (const record of page.contentData) {
+    const contentName = record.contentName;
     assert.equal(Object.hasOwn(record, "nonce"), false);
-    for (const wrap of record.keys.premium) carried.push(base64urlDecode(wrap.nonce));
+    for (const wrap of wrapsOf(page, contentName, "premium")) {
+      assert.deepEqual(
+        Object.keys(wrap).sort(),
+        ["accessGroup", "key", "period"],
+        "an ordinary entry is { accessGroup, period, key }",
+      );
+      const nonce = contentKeyWrapNonceOctets({
+        renderId,
+        contentName,
+        accessGroup: "premium",
+        t: wrap.period,
+      });
+      wrapNonces.push(Buffer.from(nonce).toString("hex"));
+      const periodKey = await fixedPeriodKeySupply().derive("premium", wrap.period);
+      assert.equal((await decrypt(periodKey, nonce, base64urlDecode(wrap.key))).length, 16);
+    }
   }
-  const sealed = page.issuerData[ISSUER_NAME].sealed;
-  for (const envelope of [
-    ...Object.values(sealed.contentKeys),
-    ...Object.values(sealed.periodKeys.premium),
+  assert.equal(new Set(wrapNonces).size, 4, "two items at two periods derive four nonces");
+  const sealed = issuerBlockOf(page, ISSUER_NAME).sealed;
+  for (const { key: envelope } of [
+    ...sealed.contentKeys,
+    ...sealed.periodKeys.filter((record) => record.accessGroup === "premium"),
   ]) {
-    carried.push(base64urlDecode(/** @type {string} */ (envelope)).subarray(65, 77));
+    assert.equal(base64urlDecode(/** @type {string} */ (envelope)).length, 97);
   }
   const encode = (/** @type {Uint8Array} */ bytes) => Buffer.from(bytes).toString("base64url");
   const keyAndRenderDraws = draws.filter((draw) => draw.length === 16).map(encode);
   assert.equal(keyAndRenderDraws.length, 3, "one render id and two independent content keys");
   assert.equal(new Set(keyAndRenderDraws).size, 3, "each item gets distinct fresh key bytes");
   const nonceDraws = draws.filter((draw) => draw.length === 12).map(encode);
-  assert.equal(nonceDraws.length, 8, "four wrap and four envelope nonce invocations");
-  assert.equal(
-    new Set(nonceDraws).size,
-    8,
-    "the deterministic source distinguishes its invocations",
-  );
-  assert.deepEqual(
-    carried.map(encode).sort(),
-    nonceDraws.sort(),
-    "every carried nonce matches one distinct invocation",
-  );
+  assert.equal(nonceDraws.length, 0, "ordinary envelopes and period wraps draw no nonce");
+  assert.equal(draws.length, 3, "the render consumes only its id and two content keys");
 });
 
 describe("The whole-render composition is the render base already made", () => {
@@ -480,12 +500,12 @@ describe("The whole-render composition is the render base already made", () => {
     const { resourceJWT: expectedJwt, ...expectedRest } = expected;
     const { resourceJWT: actualJwt, ...actualRest } = actual;
     assert.equal(
-      Object.hasOwn(expected.contentData.bodytext, "contentEncodings"),
+      Object.hasOwn(contentRecordOf(expected, "bodytext"), "contentEncodings"),
       false,
       "legacy strings declare no additional representation layer",
     );
     assert.equal(
-      Object.hasOwn(actual.contentData.bodytext, "contentEncodings"),
+      Object.hasOwn(contentRecordOf(actual, "bodytext"), "contentEncodings"),
       false,
       "legacy bytes declare no additional representation layer",
     );
@@ -518,9 +538,9 @@ describe("The whole-render composition is the render base already made", () => {
       JSON.stringify({ ...sealed.dcaData, sealedContent: sealed.sealedContent }),
     );
 
-    assert.deepEqual(actual.contentData.bodytext.contentEncodings, declared);
-    const { contentEncodings: layers, ...actualRecord } = actual.contentData.bodytext;
-    assert.deepEqual(actualRecord, expected.contentData.bodytext);
+    assert.deepEqual(contentRecordOf(actual, "bodytext").contentEncodings, declared);
+    const { contentEncodings: layers, ...actualRecord } = contentRecordOf(actual, "bodytext");
+    assert.deepEqual(actualRecord, contentRecordOf(expected, "bodytext"));
     assertSameCiphertext(
       actual.sealedContent.bodytext,
       expected.sealedContent.bodytext,
@@ -545,7 +565,7 @@ describe("The whole-render composition is the render base already made", () => {
       JSON.stringify({ ...sealed.dcaData, sealedContent: sealed.sealedContent }),
     );
 
-    assert.equal(Object.hasOwn(actual.contentData.bodytext, "contentEncodings"), false);
+    assert.equal(Object.hasOwn(contentRecordOf(actual, "bodytext"), "contentEncodings"), false);
     const { resourceJWT: expectedJwt, ...expectedRest } = expected;
     const { resourceJWT: actualJwt, ...actualRest } = actual;
     assert.equal(JSON.stringify(actualRest), JSON.stringify(expectedRest));
@@ -565,7 +585,7 @@ describe("The whole-render composition is the render base already made", () => {
       const actual = await renderItemThroughFactory(bytes);
 
       for (const rendered of [expected, actual]) {
-        for (const record of Object.values(rendered.contentData)) {
+        for (const record of rendered.contentData) {
           assert.equal(Object.hasOwn(record, "contentEncodings"), false);
         }
       }
@@ -583,11 +603,11 @@ describe("The whole-render composition is the render base already made", () => {
       const expected = await renderItemThroughFactory(string);
       const actual = await renderItemThroughFactory(layered);
 
-      const [name] = Object.keys(expected.contentData);
-      assert.deepEqual(Object.keys(actual.contentData), [name]);
-      const { contentEncodings: layers, ...record } = actual.contentData[name];
+      const [name] = contentNamesOn(expected);
+      assert.deepEqual(contentNamesOn(actual), [name]);
+      const { contentEncodings: layers, ...record } = contentRecordOf(actual, name);
       assert.deepEqual(layers, declared);
-      assert.deepEqual(record, expected.contentData[name]);
+      assert.deepEqual(record, contentRecordOf(expected, name));
       assertSameCiphertext(
         actual.sealedContent[name],
         expected.sealedContent[name],
@@ -616,7 +636,7 @@ describe("The whole-render composition is the render base already made", () => {
       const expected = await renderItemThroughFactory(string);
       const actual = await renderItemThroughFactory(unlayered);
 
-      for (const record of Object.values(actual.contentData)) {
+      for (const record of actual.contentData) {
         assert.equal(Object.hasOwn(record, "contentEncodings"), false);
       }
       assert.deepEqual(await comparableRender(actual), await comparableRender(expected));
@@ -642,11 +662,7 @@ describe("The whole-render composition is the render base already made", () => {
 
     assert.equal(JSON.stringify(three.contentData), JSON.stringify(one.contentData));
     assert.equal(JSON.stringify(three.sealedContent), JSON.stringify(one.sealedContent));
-    assert.deepEqual(Object.keys(three.issuerData), [
-      ISSUER_NAME,
-      FALLBACK_ISSUER_NAME,
-      THIRD_ISSUER_NAME,
-    ]);
+    assert.deepEqual(issuerNamesOn(three), [ISSUER_NAME, FALLBACK_ISSUER_NAME, THIRD_ISSUER_NAME]);
   });
 
   portableSealerIssuersTest(
@@ -655,9 +671,9 @@ describe("The whole-render composition is the render base already made", () => {
       // Two renders of one page through the factory, on the same stream: the
       // first with the ECDH issuer alone, the second with an RSA-OAEP issuer
       // after it. The reference reads the stream in this order: render id, the
-      // content key of each item, the wrap nonce of each item and
-      // period, then for the ECDH issuer the nonce of each content-key envelope and
-      // of each period envelope. An RSA-OAEP envelope takes its padding
+      // content key of each item. ECDH envelopes use implicit zero nonces.
+      // A period wrap derives its nonce from its coordinate and draws nothing.
+      // An RSA-OAEP envelope takes its padding
       // randomness from the platform and draws nothing, so the second issuer
       // leaves every shared entry where the first render put it.
       /** @param {boolean} withRsaIssuer */
@@ -680,7 +696,7 @@ describe("The whole-render composition is the render base already made", () => {
 
       assert.equal(JSON.stringify(two.contentData), JSON.stringify(one.contentData));
       assert.equal(JSON.stringify(two.sealedContent), JSON.stringify(one.sealedContent));
-      assert.deepEqual(Object.keys(two.issuerData), [ISSUER_NAME, FALLBACK_ISSUER_NAME]);
+      assert.deepEqual(issuerNamesOn(two), [ISSUER_NAME, FALLBACK_ISSUER_NAME]);
 
       // The expected values come from Node's Buffer and WebCrypto, so no call
       // here reaches the test target.
@@ -701,9 +717,9 @@ describe("The whole-render composition is the render base already made", () => {
       ];
       const periods = /** @type {const} */ (["251023T1400", "251023T1500"]);
 
-      let offset = 48;
+      const offset = 48;
       for (const item of items) {
-        assert.equal(Object.hasOwn(two.contentData[item.name], "nonce"), false);
+        assert.equal(Object.hasOwn(contentRecordOf(two, item.name), "nonce"), false);
         const contentKey = await crypto.subtle.importKey(
           "raw",
           bytesOf(item.key),
@@ -720,42 +736,48 @@ describe("The whole-render composition is the render base already made", () => {
           contentKey,
           bytesOf(two.sealedContent[item.name]),
         );
-        const entries = two.contentData[item.name].keys.premium;
+        const entries = wrapsOf(two, item.name, "premium");
         assert.deepEqual(
-          entries.map((/** @type {any} */ e) => e.t),
+          entries.map((/** @type {any} */ e) => e.period),
           periods,
         );
         for (const entry of entries) {
-          assert.equal(entry.nonce, drawn(offset, offset + 12));
-          offset += 12;
+          assert.deepEqual(Object.keys(entry).sort(), ["accessGroup", "key", "period"]);
+          const nonce = contentKeyWrapNonceOctets({
+            renderId,
+            contentName: item.name,
+            accessGroup: "premium",
+            t: entry.period,
+          });
           const periodKey = await crypto.subtle.importKey(
             "raw",
-            periodKeys[/** @type {"251023T1400" | "251023T1500"} */ (entry.t)],
+            periodKeys[/** @type {"251023T1400" | "251023T1500"} */ (entry.period)],
             { name: "AES-GCM" },
             false,
             ["decrypt"],
           );
           const wrapped = await crypto.subtle.decrypt(
-            { name: "AES-GCM", iv: bytesOf(entry.nonce) },
+            { name: "AES-GCM", iv: nonce },
             periodKey,
             bytesOf(entry.key),
           );
           assert.equal(
             text(new Uint8Array(wrapped)),
             item.key,
-            `the ${item.name} ${entry.t} wrap opens to that item's content key`,
+            `the ${item.name} ${entry.period} wrap opens to that item's content key`,
           );
         }
       }
 
-      // The ECDH issuer's envelopes carry the next nonces, after the 65-byte
-      // ephemeral point, and open to the drawn content keys and fixed period keys.
-      const ecdh = two.issuerData[ISSUER_NAME].sealed;
-      /** @param {string} envelope */
-      const envelopeNonce = (envelope) => text(bytesOf(envelope).subarray(65, 77));
+      // The ECDH issuer's envelopes carry no nonce and independently open
+      // to the drawn content keys and fixed period keys.
+      const ecdhBlock = issuerBlockOf(two, ISSUER_NAME).sealed;
+      const ecdh = {
+        contentKeys: contentKeyMap(ecdhBlock.contentKeys),
+        periodKeys: periodKeyMap(ecdhBlock.periodKeys),
+      };
       for (const item of items) {
-        assert.equal(envelopeNonce(ecdh.contentKeys[item.name]), drawn(offset, offset + 12));
-        offset += 12;
+        assert.equal(bytesOf(ecdh.contentKeys[item.name]).length, 97);
         const opened = await openEcdhEnvelope(
           ecdh.contentKeys[item.name],
           `dca-bind-key-envelope|c|${renderId}|${item.name}`,
@@ -764,8 +786,7 @@ describe("The whole-render composition is the render base already made", () => {
         assert.equal(text(opened), item.key);
       }
       for (const t of periods) {
-        assert.equal(envelopeNonce(ecdh.periodKeys.premium[t]), drawn(offset, offset + 12));
-        offset += 12;
+        assert.equal(bytesOf(ecdh.periodKeys.premium[t]).length, 97);
         const opened = await openEcdhEnvelope(
           ecdh.periodKeys.premium[t],
           `dca-bind-key-envelope|p|${renderId}|premium|${t}`,
@@ -777,7 +798,11 @@ describe("The whole-render composition is the render base already made", () => {
 
       // The RSA-OAEP issuer's envelopes are one 2048-bit block each, and open
       // under its private key to the same keys at the same coordinates.
-      const rsa = two.issuerData[FALLBACK_ISSUER_NAME].sealed;
+      const rsaBlock = issuerBlockOf(two, FALLBACK_ISSUER_NAME).sealed;
+      const rsa = {
+        contentKeys: contentKeyMap(rsaBlock.contentKeys),
+        periodKeys: periodKeyMap(rsaBlock.periodKeys),
+      };
       assert.deepEqual(Object.keys(rsa.contentKeys), ["bodytext", "sidebar"]);
       assert.deepEqual(Object.keys(rsa.periodKeys.premium), periods);
       for (const item of items) {
@@ -845,12 +870,20 @@ describe("One wrap strategy owns the shared content-key entries", () => {
 
   test("the strategy names the aad and writes the entry", async () => {
     const { sealerConfig } = await world();
+    /** @type {any[]} */
+    const wraps = [];
+    let aadCalls = 0;
     const strategy = {
-      aad: (/** @type {any} */ coordinate) =>
-        utf8Encode(
+      aad: (/** @type {any} */ coordinate) => {
+        aadCalls += 1;
+        return utf8Encode(
           `probe|${coordinate.renderId}|${coordinate.contentName}|${coordinate.accessGroup}|${coordinate.t}`,
-        ),
-      entry: (/** @type {any} */ wrap) => ({ ...wrap, probe: "probe-v1" }),
+        );
+      },
+      entry: (/** @type {any} */ wrap) => {
+        wraps.push({ ...wrap });
+        return { ...wrap, probe: "probe-v1" };
+      },
     };
     const page = await render(
       new Sealer(
@@ -863,33 +896,108 @@ describe("One wrap strategy owns the shared content-key entries", () => {
       ),
     );
 
-    const entries = page.contentData.bodytext.keys.premium;
+    const entries = wrapsOf(page, "bodytext", "premium");
     assert.deepEqual(
       entries.map((/** @type {any} */ entry) => entry.probe),
       ["probe-v1", "probe-v1"],
     );
     assert.deepEqual(
-      entries.map((/** @type {any} */ entry) => entry.t),
+      entries.map((/** @type {any} */ entry) => entry.period),
       PERIODS,
     );
+    assert.deepEqual(
+      wraps.map((wrap) => Object.keys(wrap).sort()),
+      [
+        ["key", "t"],
+        ["key", "t"],
+      ],
+      "the strategy receives no nonce to write",
+    );
+    assert.equal(aadCalls, 2, "the selected aad is asked once per wrap");
 
     const entry = entries[0];
-    const periodKey = await fixedPeriodKeySupply().derive("premium", entry.t);
-    const nonce = base64urlDecode(entry.nonce);
+    const coordinate = {
+      renderId: page.resource.renderId,
+      contentName: "bodytext",
+      accessGroup: "premium",
+      t: entry.period,
+    };
+    const aad = strategy.aad(coordinate);
+    const periodKey = await fixedPeriodKeySupply().derive("premium", entry.period);
     const wrapped = base64urlDecode(entry.key);
-    await assert.rejects(decrypt(periodKey, nonce, wrapped), "the entry does not open unbound");
+    await assert.rejects(
+      decrypt(periodKey, contentKeyWrapNonceOctets(coordinate), wrapped),
+      "the entry does not open under the ordinary transcript",
+    );
+    await assert.rejects(
+      decrypt(periodKey, contentKeyWrapNonceOctets(coordinate), wrapped, aad),
+      "the selected aad is part of the nonce transcript, not only of GCM",
+    );
     const contentKey = await decrypt(
       periodKey,
-      nonce,
+      contentKeyWrapNonceOctets({ ...coordinate, aad }),
       wrapped,
-      strategy.aad({
+      aad,
+    );
+    assert.equal(contentKey.length, 16);
+  });
+
+  test("a strategy aad that is not bytes is refused before a wrap is written", async () => {
+    const { sealerConfig } = await world();
+    for (const aad of [() => "probe", () => [1, 2], () => Promise.resolve(new Uint8Array(1))]) {
+      await assert.rejects(
+        render(
+          new Sealer(
+            /** @type {any} */ (
+              sealerConfig({
+                contentKeyWrapStrategy: { aad, entry: (/** @type {any} */ wrap) => wrap },
+              })
+            ),
+          ),
+        ),
+        (/** @type {any} */ error) => error.code === "bad_config",
+      );
+    }
+  });
+
+  test("the aad bytes the strategy returned seal the wrap, even if it changes them later", async () => {
+    const { sealerConfig } = await world();
+    const original = Uint8Array.of(1, 2, 3);
+    const strategy = {
+      aad: () => {
+        const aad = Uint8Array.from(original);
+        // The strategy still owns the buffer: it changes it while the nonce digest is pending.
+        queueMicrotask(() => aad.fill(9));
+        return aad;
+      },
+      entry: (/** @type {any} */ wrap) => wrap,
+    };
+    const page = await render(
+      new Sealer(
+        /** @type {any} */ (
+          sealerConfig({
+            contentKeyWrapStrategy: strategy,
+            issuerSupplyPlanFor: wholeRenderIssuerSupplyPlan,
+          })
+        ),
+      ),
+    );
+    for (const entry of wrapsOf(page, "bodytext", "premium")) {
+      const coordinate = {
         renderId: page.resource.renderId,
         contentName: "bodytext",
         accessGroup: "premium",
-        t: entry.t,
-      }),
-    );
-    assert.equal(contentKey.length, 16);
+        t: entry.period,
+        aad: original,
+      };
+      const contentKey = await decrypt(
+        await fixedPeriodKeySupply().derive("premium", entry.period),
+        contentKeyWrapNonceOctets(coordinate),
+        base64urlDecode(entry.key),
+        original,
+      );
+      assert.equal(contentKey.length, 16, entry.period);
+    }
   });
 
   test("a plan requiring another wrap than the render selected is refused", async () => {
@@ -939,16 +1047,21 @@ describe("One wrap strategy owns the shared content-key entries", () => {
       ),
     );
 
-    const entries = page.contentData.bodytext.keys.premium;
+    const entries = wrapsOf(page, "bodytext", "premium");
     assert.deepEqual(
       entries.map((/** @type {any} */ entry) => entry.probe),
       ["selected", "selected"],
     );
     const entry = entries[0];
-    const periodKey = await fixedPeriodKeySupply().derive("premium", entry.t);
+    const periodKey = await fixedPeriodKeySupply().derive("premium", entry.period);
     const contentKey = await decrypt(
       periodKey,
-      base64urlDecode(entry.nonce),
+      contentKeyWrapNonceOctets({
+        renderId: page.resource.renderId,
+        contentName: "bodytext",
+        accessGroup: "premium",
+        t: entry.period,
+      }),
       base64urlDecode(entry.key),
     );
     assert.equal(
@@ -965,7 +1078,7 @@ describe("One wrap strategy owns the shared content-key entries", () => {
       () => null,
       () => undefined,
       () => "an entry",
-      (/** @type {any} */ wrap) => ({ nonce: wrap.nonce, key: wrap.key }),
+      (/** @type {any} */ wrap) => ({ key: wrap.key }),
     ]) {
       await assert.rejects(
         render(
@@ -982,11 +1095,11 @@ describe("One wrap strategy owns the shared content-key entries", () => {
     }
   });
 
-  test("an entry missing nonce or key is refused rather than replaced", async () => {
+  test("an entry missing t or key is refused rather than replaced", async () => {
     const { sealerConfig } = await world();
     const cases = [
-      ["nonce", (/** @type {any} */ wrap) => ({ t: wrap.t, key: wrap.key })],
-      ["key", (/** @type {any} */ wrap) => ({ t: wrap.t, nonce: wrap.nonce })],
+      ["t", (/** @type {any} */ wrap) => ({ key: wrap.key })],
+      ["key", (/** @type {any} */ wrap) => ({ t: wrap.t })],
     ];
 
     for (const [member, entry] of cases) {
@@ -1003,6 +1116,37 @@ describe("One wrap strategy owns the shared content-key entries", () => {
         (/** @type {any} */ error) => {
           assert.equal(error.code, "bad_config");
           assert.match(error.message, new RegExp(`entry carries ${member}, and this one does not`));
+          return true;
+        },
+        member,
+      );
+    }
+  });
+
+  test("an entry that names its own accessGroup or period is refused: the Sealer writes the coordinate", async () => {
+    // The wire record is `{accessGroup, period, ...entry}`. An entry member
+    // with either name would collide with the coordinate the Sealer writes,
+    // so the strategy may not supply one, not even the same value.
+    const { sealerConfig } = await world();
+    const cases = [
+      ["accessGroup", (/** @type {any} */ wrap) => ({ ...wrap, accessGroup: "premium" })],
+      ["period", (/** @type {any} */ wrap) => ({ ...wrap, period: wrap.t })],
+    ];
+
+    for (const [member, entry] of cases) {
+      await assert.rejects(
+        render(
+          new Sealer(
+            /** @type {any} */ (
+              sealerConfig({
+                contentKeyWrapStrategy: { aad: () => undefined, entry },
+              })
+            ),
+          ),
+        ),
+        (/** @type {any} */ error) => {
+          assert.equal(error.code, "bad_config");
+          assert.match(error.message, new RegExp(`leaves ${member} to the Sealer`));
           return true;
         },
         member,
@@ -1149,10 +1293,10 @@ describe("An issuer receives exactly what its plan supplies", () => {
         ],
       },
     );
-    assert.deepEqual(Object.keys(page.issuerData[ISSUER_NAME].sealed.periodKeys), [
-      "premium",
-      "free",
-    ]);
+    assert.deepEqual(
+      Object.keys(periodKeyMap(issuerBlockOf(page, ISSUER_NAME).sealed.periodKeys)),
+      ["premium", "free"],
+    );
 
     const plan = normalizedIssuerSupplyPlan(
       ISSUER_NAME,
@@ -1175,7 +1319,7 @@ describe("An issuer receives exactly what its plan supplies", () => {
     assert.equal(plan.periodKeyDeliveryDeclared, false);
   });
 
-  test("the planned groups, content-key map and extra members reach the block", async () => {
+  test("the planned groups, content-key records and extra members reach the block", async () => {
     const { issuerConfig, sealerConfig } = await world();
     const page = await render(
       new Sealer(
@@ -1203,21 +1347,21 @@ describe("An issuer receives exactly what its plan supplies", () => {
       },
     );
 
-    const planned = page.issuerData[ISSUER_NAME];
+    const planned = issuerBlockOf(page, ISSUER_NAME);
     assert.deepEqual(planned.probe, ["probe-v1"]);
-    assert.deepEqual(Object.keys(planned), ["probe", "sealed", "keyId"]);
+    assert.deepEqual(Object.keys(planned), ["issuerName", "probe", "sealed", "keyId"]);
     assert.equal(Object.hasOwn(planned.sealed, "contentKeys"), false);
-    assert.deepEqual(Object.keys(planned.sealed.periodKeys), ["premium"]);
+    assert.deepEqual(Object.keys(periodKeyMap(planned.sealed.periodKeys)), ["premium"]);
 
-    const whole = page.issuerData[FALLBACK_ISSUER_NAME];
+    const whole = issuerBlockOf(page, FALLBACK_ISSUER_NAME);
     assert.equal(Object.hasOwn(whole, "probe"), false);
-    assert.deepEqual(Object.keys(whole.sealed.contentKeys), ["bodytext", "sidebar"]);
-    assert.deepEqual(Object.keys(whole.sealed.periodKeys), ["premium", "free"]);
+    assert.deepEqual(Object.keys(contentKeyMap(whole.sealed.contentKeys)), ["bodytext", "sidebar"]);
+    assert.deepEqual(Object.keys(periodKeyMap(whole.sealed.periodKeys)), ["premium", "free"]);
   });
 
   test("an extra member cannot overwrite a member base owns", async () => {
     const { sealerConfig } = await world();
-    for (const name of ["sealed", "unlockUrl", "keyId"]) {
+    for (const name of ["issuerName", "sealed", "unlockUrl", "keyId"]) {
       await assert.rejects(
         render(
           new Sealer(
@@ -1304,8 +1448,8 @@ describe("An issuer receives exactly what its plan supplies", () => {
     const rendered = await render(
       new Sealer(sealerConfig({ issuers: [issuerConfig(ISSUER_NAME)] })),
     );
-    assert.equal(Object.hasOwn(rendered.issuerData[ISSUER_NAME], "unlockUrl"), false);
-    assert.ok(rendered.issuerData[ISSUER_NAME].sealed.contentKeys.bodytext);
+    assert.equal(Object.hasOwn(issuerBlockOf(rendered, ISSUER_NAME), "unlockUrl"), false);
+    assert.ok(contentKeyMap(issuerBlockOf(rendered, ISSUER_NAME).sealed.contentKeys).bodytext);
   });
 
   test("an issuer with an empty unlockUrl beside a usable route still publishes", async () => {
@@ -1330,13 +1474,14 @@ describe("An issuer receives exactly what its plan supplies", () => {
       ),
     );
 
-    assert.equal(Object.hasOwn(rendered.issuerData[ISSUER_NAME], "unlockUrl"), false);
-    assert.deepEqual(Object.keys(rendered.issuerData[ISSUER_NAME].sealed), ["periodKeys"]);
-    assert.deepEqual(Object.keys(rendered.issuerData[FALLBACK_ISSUER_NAME].sealed.contentKeys), [
-      "bodytext",
-    ]);
+    assert.equal(Object.hasOwn(issuerBlockOf(rendered, ISSUER_NAME), "unlockUrl"), false);
+    assert.deepEqual(Object.keys(issuerBlockOf(rendered, ISSUER_NAME).sealed), ["periodKeys"]);
     assert.deepEqual(
-      rendered.contentData.bodytext.keys.premium.map((/** @type {any} */ entry) => entry.t),
+      Object.keys(contentKeyMap(issuerBlockOf(rendered, FALLBACK_ISSUER_NAME).sealed.contentKeys)),
+      ["bodytext"],
+    );
+    assert.deepEqual(
+      wrapsOf(rendered, "bodytext", "premium").map((/** @type {any} */ entry) => entry.period),
       PERIODS,
     );
   });
@@ -1404,12 +1549,19 @@ describe("Every protected item keeps a planned issuer route", () => {
       },
     );
 
-    assert.deepEqual(Object.keys(page.issuerData[ISSUER_NAME].sealed.periodKeys), ["premium"]);
-    assert.equal(Object.hasOwn(page.issuerData[ISSUER_NAME].sealed, "contentKeys"), false);
-    assert.deepEqual(Object.keys(page.issuerData[FALLBACK_ISSUER_NAME].sealed.periodKeys), [
-      "free",
-    ]);
-    assert.equal(Object.hasOwn(page.issuerData[FALLBACK_ISSUER_NAME].sealed, "contentKeys"), false);
+    assert.deepEqual(
+      Object.keys(periodKeyMap(issuerBlockOf(page, ISSUER_NAME).sealed.periodKeys)),
+      ["premium"],
+    );
+    assert.equal(Object.hasOwn(issuerBlockOf(page, ISSUER_NAME).sealed, "contentKeys"), false);
+    assert.deepEqual(
+      Object.keys(periodKeyMap(issuerBlockOf(page, FALLBACK_ISSUER_NAME).sealed.periodKeys)),
+      ["free"],
+    );
+    assert.equal(
+      Object.hasOwn(issuerBlockOf(page, FALLBACK_ISSUER_NAME).sealed, "contentKeys"),
+      false,
+    );
   });
 
   test("a content-key-only render whose one plan selects no content-key name refuses", async () => {
@@ -1496,18 +1648,22 @@ describe("Issuer order decides no plan", () => {
     // the wire. The bytes differ: the render draws its entropy in the
     // order it walks the issuers.
     for (const page of [forward, reversed]) {
-      assert.equal(Object.hasOwn(page.issuerData[ISSUER_NAME].sealed, "contentKeys"), false);
-      assert.deepEqual(Object.keys(page.issuerData[ISSUER_NAME].sealed.periodKeys), ["premium"]);
-      assert.deepEqual(Object.keys(page.issuerData[FALLBACK_ISSUER_NAME].sealed.contentKeys), [
-        "bodytext",
-        "sidebar",
-      ]);
-      assert.deepEqual(Object.keys(page.issuerData[FALLBACK_ISSUER_NAME].sealed.periodKeys), [
-        "free",
-      ]);
+      assert.equal(Object.hasOwn(issuerBlockOf(page, ISSUER_NAME).sealed, "contentKeys"), false);
+      assert.deepEqual(
+        Object.keys(periodKeyMap(issuerBlockOf(page, ISSUER_NAME).sealed.periodKeys)),
+        ["premium"],
+      );
+      assert.deepEqual(
+        Object.keys(contentKeyMap(issuerBlockOf(page, FALLBACK_ISSUER_NAME).sealed.contentKeys)),
+        ["bodytext", "sidebar"],
+      );
+      assert.deepEqual(
+        Object.keys(periodKeyMap(issuerBlockOf(page, FALLBACK_ISSUER_NAME).sealed.periodKeys)),
+        ["free"],
+      );
     }
-    assert.deepEqual(Object.keys(forward.issuerData), [ISSUER_NAME, FALLBACK_ISSUER_NAME]);
-    assert.deepEqual(Object.keys(reversed.issuerData), [FALLBACK_ISSUER_NAME, ISSUER_NAME]);
+    assert.deepEqual(issuerNamesOn(forward), [ISSUER_NAME, FALLBACK_ISSUER_NAME]);
+    assert.deepEqual(issuerNamesOn(reversed), [FALLBACK_ISSUER_NAME, ISSUER_NAME]);
   });
 });
 
@@ -1793,12 +1949,17 @@ describe("The family-plan seam is base's own contract", () => {
     );
 
     assert.deepEqual(
-      page.contentData.bodytext.keys.premium.map((/** @type {any} */ entry) => entry.t),
+      wrapsOf(page, "bodytext", "premium").map((/** @type {any} */ entry) => entry.period),
       ["251023T1415", "251023T1430"],
     );
-    const sealed = page.issuerData[ISSUER_NAME].sealed;
-    assert.deepEqual(Object.keys(sealed.periodKeys.premium), ["251023T1415", "251023T1430"]);
-    assert.deepEqual(Object.keys(sealed.chainKeys.premium), ["251023T1415"]);
+    const sealed = issuerBlockOf(page, ISSUER_NAME).sealed;
+    assert.deepEqual(Object.keys(periodKeyMap(sealed.periodKeys).premium), [
+      "251023T1415",
+      "251023T1430",
+    ]);
+    assert.deepEqual(Object.keys(periodKeyMap(sealed.chainKeys, "cutoff").premium), [
+      "251023T1415",
+    ]);
   });
 
   test("a chain delivery no supply can serve refuses before any material is drawn", async () => {
@@ -1917,9 +2078,12 @@ describe("The family-plan seam is base's own contract", () => {
       { items: [{ name: "bodytext", accessGroups: eight }] },
     );
 
-    const sealed = page.issuerData[ISSUER_NAME].sealed;
-    assert.deepEqual(Object.keys(sealed.chainKeys), eight);
-    assert.deepEqual(Object.keys(sealed.chainKeys.fam_a), ["251023T1145", "251023T2345"]);
+    const sealed = issuerBlockOf(page, ISSUER_NAME).sealed;
+    assert.deepEqual(Object.keys(periodKeyMap(sealed.chainKeys, "cutoff")), eight);
+    assert.deepEqual(Object.keys(periodKeyMap(sealed.chainKeys, "cutoff").fam_a), [
+      "251023T1145",
+      "251023T2345",
+    ]);
   });
 
   test("a supplied key of the wrong width is refused at the coordinate that produced it", async () => {
@@ -2051,13 +2215,14 @@ async function renderScoped(sealer, items = SCOPE_ITEMS) {
 
 /**
  * What one issuer block carries, by section: the content names of its
- * content-key map and the period labels of each period-key section.
+ * content-key records and, per group, the labels of its period-key and
+ * chain-key records.
  *
  * @param {any} page
  * @param {string} issuerName
  */
 function sectionsOf(page, issuerName) {
-  const sealed = page.issuerData[issuerName].sealed;
+  const sealed = issuerBlockOf(page, issuerName).sealed;
   /** @param {Record<string, Record<string, string>>|undefined} section */
   const labels = (section) =>
     section === undefined
@@ -2066,9 +2231,10 @@ function sectionsOf(page, issuerName) {
           Object.entries(section).map(([group, byT]) => [group, Object.keys(byT)]),
         );
   return {
-    contentKeys: sealed.contentKeys === undefined ? undefined : Object.keys(sealed.contentKeys),
-    periodKeys: labels(sealed.periodKeys),
-    chainKeys: labels(sealed.chainKeys),
+    contentKeys:
+      sealed.contentKeys === undefined ? undefined : Object.keys(contentKeyMap(sealed.contentKeys)),
+    periodKeys: labels(periodKeyMap(sealed.periodKeys)),
+    chainKeys: labels(periodKeyMap(sealed.chainKeys, "cutoff")),
   };
 }
 
@@ -2141,13 +2307,13 @@ async function plaintext(page, contentName, contentKey) {
  */
 async function reachOf(page, issuerName) {
   const renderId = page.resource.renderId;
-  const sealed = page.issuerData[issuerName]?.sealed ?? {};
+  const sealed = issuerBlockOf(page, issuerName)?.sealed ?? {};
   /** @type {Set<string>} */
   const reached = new Set();
 
-  for (const [contentName, envelope] of Object.entries(sealed.contentKeys ?? {})) {
+  for (const { contentName, key: envelope } of sealed.contentKeys ?? []) {
     const contentKey = await openEcdhEnvelope(
-      /** @type {string} */ (envelope),
+      envelope,
       `dca-bind-key-envelope|c|${renderId}|${contentName}`,
       TEST_ISSUER_PRIVATE_KEY_PKCS8,
     );
@@ -2155,22 +2321,21 @@ async function reachOf(page, issuerName) {
     reached.add(contentName);
   }
 
-  for (const [accessGroup, byT] of Object.entries(sealed.periodKeys ?? {})) {
-    for (const [t, envelope] of Object.entries(/** @type {Record<string, string>} */ (byT))) {
-      const key = await openEcdhEnvelope(
-        envelope,
-        `dca-bind-key-envelope|p|${renderId}|${accessGroup}|${t}`,
-        TEST_ISSUER_PRIVATE_KEY_PKCS8,
+  for (const { accessGroup, period: t, key: envelope } of sealed.periodKeys ?? []) {
+    const key = await openEcdhEnvelope(
+      envelope,
+      `dca-bind-key-envelope|p|${renderId}|${accessGroup}|${t}`,
+      TEST_ISSUER_PRIVATE_KEY_PKCS8,
+    );
+    for (const contentName of contentNamesOn(page)) {
+      const wrap = wrapsOf(page, contentName, accessGroup).find(
+        (/** @type {any} */ entry) => entry.period === t,
       );
-      for (const [contentName, record] of Object.entries(page.contentData)) {
-        const wrap = /** @type {any} */ (record).keys?.[accessGroup]?.find(
-          (/** @type {any} */ entry) => entry.t === t,
-        );
-        if (wrap === undefined) continue;
-        const contentKey = await gcmOpen(key, wrap.nonce, wrap.key);
-        assert.equal(await plaintext(page, contentName, contentKey), `<p>${contentName}</p>`);
-        reached.add(contentName);
-      }
+      if (wrap === undefined) continue;
+      const nonce = contentKeyWrapNonceOctets({ renderId, contentName, accessGroup, t });
+      const contentKey = await gcmOpen(key, Buffer.from(nonce).toString("base64url"), wrap.key);
+      assert.equal(await plaintext(page, contentName, contentKey), `<p>${contentName}</p>`);
+      reached.add(contentName);
     }
   }
   return [...reached].sort();
@@ -2265,9 +2430,9 @@ describe("Each issuer block carries only its selected scope", () => {
       [{ name: "bodytext", accessGroups: ["premium"] }],
     );
 
-    assert.deepEqual(Object.keys(page.contentData.bodytext.keys), ["premium"]);
+    assert.deepEqual(wrapGroupsOn(page, "bodytext"), ["premium"]);
     assertScope(page, ISSUER_NAME, { contentKeys: ["bodytext"] });
-    assert.equal(Object.hasOwn(page.issuerData, FALLBACK_ISSUER_NAME), false);
+    assert.equal(issuerNamesOn(page).includes(FALLBACK_ISSUER_NAME), false);
     assert.deepEqual(await reachOf(page, ISSUER_NAME), ["bodytext"]);
   });
 
@@ -2292,14 +2457,14 @@ describe("Each issuer block carries only its selected scope", () => {
         ],
       );
 
-      assert.deepEqual(Object.keys(page.contentData.bodytext.keys), ["premium"], label);
-      assert.deepEqual(Object.keys(page.contentData.teaser.keys), ["premium"], label);
-      assert.equal(Object.hasOwn(page.contentData.sidebar, "keys"), false, label);
+      assert.deepEqual(wrapGroupsOn(page, "bodytext"), ["premium"], label);
+      assert.deepEqual(wrapGroupsOn(page, "teaser"), ["premium"], label);
+      assert.equal(Object.hasOwn(contentRecordOf(page, "sidebar"), "keys"), false, label);
       assertScope(page, ISSUER_NAME, {
         contentKeys: ["sidebar"],
         periodKeys: { premium: PERIODS },
       });
-      assert.equal(Object.hasOwn(page.issuerData, FALLBACK_ISSUER_NAME), false, label);
+      assert.equal(issuerNamesOn(page).includes(FALLBACK_ISSUER_NAME), false, label);
       // The grouped items open through the premium wraps, the ungrouped one
       // through its own sealed item key, all from the one issuer block.
       assert.deepEqual(await reachOf(page, ISSUER_NAME), ["bodytext", "sidebar", "teaser"], label);
@@ -2403,7 +2568,7 @@ describe("Each issuer block carries only its selected scope", () => {
       ),
     );
 
-    assert.equal(Object.hasOwn(page.issuerData, ISSUER_NAME), false);
+    assert.equal(issuerNamesOn(page).includes(ISSUER_NAME), false);
     assert.deepEqual(await reachOf(page, ISSUER_NAME), []);
     assertScope(page, FALLBACK_ISSUER_NAME, {
       contentKeys: ["bodytext", "sidebar"],
@@ -2588,18 +2753,19 @@ test("supplier callback additions belong to the next render's captured item set"
   sealer.resource(RESOURCE_ID, {});
   sealer.content("bodytext", "<p>Body</p>", "text/html", { accessGroups: ["premium"] });
   const first = await sealer.seal();
-  assert.deepEqual(Object.keys(first.dcaData.contentData), ["bodytext"]);
+  assert.deepEqual(contentNamesOn(first.dcaData), ["bodytext"]);
   assert.deepEqual(Object.keys(first.sealedContent), ["bodytext"]);
-  assert.deepEqual(Object.keys(first.dcaData.issuerData[ISSUER_NAME].sealed.contentKeys), [
-    "bodytext",
-  ]);
+  assert.deepEqual(
+    Object.keys(contentKeyMap(issuerBlockOf(first.dcaData, ISSUER_NAME).sealed.contentKeys)),
+    ["bodytext"],
+  );
   const second = await sealer.seal();
-  assert.deepEqual(Object.keys(second.dcaData.contentData), ["bodytext", "late"]);
+  assert.deepEqual(contentNamesOn(second.dcaData), ["bodytext", "late"]);
   assert.deepEqual(Object.keys(second.sealedContent), ["bodytext", "late"]);
-  assert.deepEqual(Object.keys(second.dcaData.issuerData[ISSUER_NAME].sealed.contentKeys), [
-    "bodytext",
-    "late",
-  ]);
+  assert.deepEqual(
+    Object.keys(contentKeyMap(issuerBlockOf(second.dcaData, ISSUER_NAME).sealed.contentKeys)),
+    ["bodytext", "late"],
+  );
 });
 
 test("an ordinary random supply seals only selected period sources and refuses malformed selectors before work", async () => {
@@ -2628,9 +2794,10 @@ test("an ordinary random supply seals only selected period sources and refuses m
       const page = await render(sealer, {
         items: [{ name: "bodytext", accessGroups: ["premium"] }],
       });
-      assert.deepEqual(Object.keys(page.issuerData[ISSUER_NAME].sealed.periodKeys.premium), [
-        PERIODS[1],
-      ]);
+      assert.deepEqual(
+        Object.keys(periodKeyMap(issuerBlockOf(page, ISSUER_NAME).sealed.periodKeys).premium),
+        [PERIODS[1]],
+      );
       assert.deepEqual(
         calls,
         PERIODS.map((t) => ["premium", t]),
@@ -2644,5 +2811,195 @@ test("an ordinary random supply seals only selected period sources and refuses m
       assert.deepEqual(calls, []);
       assert.deepEqual(counts, { random: 0, plan: 0, derive: 0, seal: 0, sign: 0 });
     }
+  }
+});
+
+test("resource replacement in the clock belongs to the next seal operation", async () => {
+  const { sealerConfig } = await world();
+  let replaced = false;
+  const sealer = new Sealer(
+    sealerConfig({
+      itemPreparations: [
+        {
+          name: "capture-witness",
+          routes: () => [],
+          prepare: async (input) => ({ claims: { preparedFor: input.resourceId } }),
+        },
+      ],
+      clock: {
+        now() {
+          if (!replaced) {
+            replaced = true;
+            sealer.resource("next-resource", { edition: "next" });
+          }
+          return new Date(AT);
+        },
+      },
+    }),
+  );
+  sealer.resource(RESOURCE_ID, { edition: "initial" });
+  sealer.content("bodytext", "<p>Body</p>", CONTENT_TYPE, { accessGroups: ["premium"] });
+  const initial = await sealer.seal();
+  const next = await sealer.seal();
+  for (const [rendered, resourceId, edition] of [
+    [initial, RESOURCE_ID, "initial"],
+    [next, "next-resource", "next"],
+  ]) {
+    assert.equal(rendered.dcaData.resource.resourceId, resourceId);
+    assert.equal(rendered.dcaData.resource.preparedFor, resourceId);
+    assert.deepEqual(rendered.dcaData.resource.data, { edition });
+    const signed = JSON.parse(
+      Buffer.from(rendered.dcaData.resourceJWT.split(".")[1], "base64url").toString("utf8"),
+    );
+    assert.deepEqual(signed, rendered.dcaData.resource);
+  }
+});
+
+test("overlapping seals keep preparation and signed output on the same captured resource", async () => {
+  const { sealerConfig } = await world();
+  const entered = Promise.withResolvers();
+  const resume = Promise.withResolvers();
+  const preparedIds = [];
+  const sealer = new Sealer(
+    sealerConfig({
+      itemPreparations: [
+        {
+          name: "capture-witness",
+          routes: () => [],
+          async prepare(input) {
+            preparedIds.push(input.resourceId);
+            if (preparedIds.length === 1) {
+              entered.resolve();
+              await resume.promise;
+            }
+            return { claims: { preparedFor: input.resourceId } };
+          },
+        },
+      ],
+    }),
+  );
+  sealer.resource(RESOURCE_ID, { edition: "initial" });
+  sealer.content("bodytext", "<p>Body</p>", CONTENT_TYPE, { accessGroups: ["premium"] });
+  const initialPending = sealer.seal();
+  await entered.promise;
+  sealer.resource("next-resource", { edition: "next" });
+  sealer.content("late", "<p>Late</p>", CONTENT_TYPE, { accessGroups: ["premium"] });
+  let next;
+  try {
+    next = await sealer.seal();
+  } finally {
+    resume.resolve();
+  }
+  const initial = await initialPending;
+  assert.deepEqual(preparedIds, [RESOURCE_ID, "next-resource"]);
+  for (const [rendered, resourceId, edition, names] of [
+    [initial, RESOURCE_ID, "initial", ["bodytext"]],
+    [next, "next-resource", "next", ["bodytext", "late"]],
+  ]) {
+    assert.equal(rendered.dcaData.resource.resourceId, resourceId);
+    assert.equal(rendered.dcaData.resource.preparedFor, resourceId);
+    assert.deepEqual(rendered.dcaData.resource.data, { edition });
+    assert.deepEqual(Object.keys(rendered.sealedContent), names);
+    const wrap = wrapsOf(rendered.dcaData, "bodytext", "premium")[0];
+    const periodKey = await fixedPeriodKeySupply().derive("premium", wrap.period);
+    const contentKey = await decrypt(
+      periodKey,
+      contentKeyWrapNonceOctets({
+        renderId: rendered.dcaData.resource.renderId,
+        contentName: "bodytext",
+        accessGroup: "premium",
+        t: wrap.period,
+      }),
+      base64urlDecode(wrap.key),
+    );
+    const opened = await decrypt(
+      contentKey,
+      new Uint8Array(12),
+      base64urlDecode(rendered.sealedContent.bodytext),
+      contentAadOctets(rendered.dcaData, "bodytext"),
+    );
+    assert.equal(new TextDecoder().decode(opened), "<p>Body</p>");
+    const signed = JSON.parse(
+      Buffer.from(rendered.dcaData.resourceJWT.split(".")[1], "base64url").toString("utf8"),
+    );
+    assert.deepEqual(signed, rendered.dcaData.resource);
+  }
+});
+
+test("a failed seal releases its operation and the builder can seal the next resource", async () => {
+  const { sealerConfig } = await world();
+  const failure = new Error("preparation failed");
+  let fail = true;
+  const sealer = new Sealer(
+    sealerConfig({
+      itemPreparations: [
+        {
+          name: "retry-witness",
+          routes: () => [],
+          async prepare(input) {
+            if (fail) {
+              fail = false;
+              throw failure;
+            }
+            return { claims: { preparedFor: input.resourceId } };
+          },
+        },
+      ],
+    }),
+  );
+  sealer.resource(RESOURCE_ID, { edition: "failed" });
+  sealer.content("bodytext", "<p>Body</p>", CONTENT_TYPE, { accessGroups: ["premium"] });
+  await assert.rejects(sealer.seal(), (error) => error === failure);
+  sealer.resource("retry-resource", { edition: "retry" });
+  const retried = await sealer.seal();
+  assert.equal(retried.dcaData.resource.resourceId, "retry-resource");
+  assert.equal(retried.dcaData.resource.preparedFor, "retry-resource");
+  assert.deepEqual(retried.dcaData.resource.data, { edition: "retry" });
+});
+
+test("preparations isolate inherited item and issuer names across renders", async () => {
+  const opening = await issuerKeypair();
+  const signing = await signingKeypair();
+  const member = "preparationIsolationWitness";
+  const original = Object.getOwnPropertyDescriptor(Object, member);
+  try {
+    for (const name of ["constructor", "toString"]) {
+      for (const marker of ["first-render", "second-render"]) {
+        const issuerName = name;
+        const sealer = new Sealer({
+          origin: ORIGIN,
+          clock: new Clock(AT),
+          random: seededRandom(42),
+          signingKeys: { signing: signing.privateKey },
+          issuers: [
+            { issuerName, keyId: KEY_ID, algorithm: "ecdh-p256", publicKey: opening.publicKey },
+          ],
+          issuerSupplyPlanFor: wholeRenderIssuerSupplyPlan,
+          itemPreparations: [
+            {
+              name: "isolated-contribution",
+              routes: () => [],
+              prepare: () => ({
+                contentRecords: { [name]: { [member]: marker, ["__proto__"]: { marker } } },
+                issuerSealed: { [issuerName]: { [member]: [marker], ["__proto__"]: { marker } } },
+              }),
+            },
+          ],
+        });
+        sealer.resource(RESOURCE_ID, {});
+        sealer.content(name, "body", "text/plain");
+        const { dcaData } = await sealer.seal();
+        assert.equal(dcaData.contentData[0][member], marker);
+        assert.equal(Object.hasOwn(dcaData.contentData[0], "__proto__"), true);
+        assert.deepEqual(dcaData.contentData[0]["__proto__"], { marker });
+        assert.equal(Object.hasOwn(dcaData.issuerData[0].sealed, "__proto__"), true);
+        assert.deepEqual(dcaData.issuerData[0].sealed["__proto__"], { marker });
+        assert.deepEqual(dcaData.issuerData[0].sealed[member], [marker]);
+        assert.deepEqual(Object.getOwnPropertyDescriptor(Object, member), original);
+      }
+    }
+  } finally {
+    if (original) Object.defineProperty(Object, member, original);
+    else Reflect.deleteProperty(Object, member);
   }
 });

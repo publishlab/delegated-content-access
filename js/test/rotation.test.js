@@ -59,7 +59,13 @@ import {
 } from "../demo/scenarios/fixtures.js";
 import { actorWorld, readArticle } from "../demo/scenarios/world.js";
 import { AllowAllPolicy } from "../demo/support/AllowAllPolicy.js";
-import { held, issuerPeriodsOn } from "../test-lib/helpers/inspect.js";
+import { held, issuerBlockOf, issuerPeriodsOn } from "../test-lib/helpers/inspect.js";
+import {
+  contentKeyMap,
+  errorMap,
+  keyAt,
+  periodKeyMap,
+} from "../test-reference/support/namedRecords.js";
 import { requestFor } from "../test-lib/harnesses/issuer-endpoint.js";
 import { issuerKeypair } from "../test-reference/support/keys.js";
 import { refuses } from "../test-lib/helpers/refuses.js";
@@ -140,8 +146,8 @@ describe("the issuer's own keypair", () => {
     publisher.rotateIssuerKey(ISSUER_NAME, KEY_NEW, rotated.publicKey);
     const fresh = (await publisher.render(article("B"))).asJson();
 
-    assert.equal(cached.issuerData[ISSUER_NAME].keyId, KEY_ID);
-    assert.equal(fresh.issuerData[ISSUER_NAME].keyId, KEY_NEW);
+    assert.equal(issuerBlockOf(cached, ISSUER_NAME).keyId, KEY_ID);
+    assert.equal(issuerBlockOf(fresh, ISSUER_NAME).keyId, KEY_NEW);
 
     // The fresh page first, so nothing about the pass below can be the old
     // key simply being the only one anybody reached for.
@@ -171,7 +177,9 @@ describe("the issuer's own keypair", () => {
     // both: the old private key makes nothing of a blob sealed to the new
     // public one.
     const oldPrivateKey = keyStores.primary.privateKeyOf(ISSUER_NAME, KEY_ID);
-    const freshBlob = fresh.issuerData[ISSUER_NAME].sealed.contentKeys[CONTENT_NAME];
+    const freshBlob = keyAt(issuerBlockOf(fresh, ISSUER_NAME).sealed.contentKeys, {
+      contentName: CONTENT_NAME,
+    });
     await refuses(
       () =>
         open(freshBlob, oldPrivateKey, ALGORITHM, {
@@ -224,7 +232,7 @@ describe("the issuer's own keypair", () => {
     const retired = await read(new Client({ publisherOrigin: PUBLISHER_ORIGIN }), cached);
     assert.equal(retired.answer.status, 200);
     assert.equal(retired.answer.body.error, undefined, "not a whole-request refusal");
-    assert.deepEqual(retired.answer.body.keys.contentKeys, {});
+    assert.deepEqual(retired.answer.body.keys.contentKeys, []);
     assert.equal(retired.answer.body.keys.periodKeys, undefined);
     assert.equal(retired.text, null);
 
@@ -232,18 +240,15 @@ describe("the issuer's own keypair", () => {
     // and periodKeys under the `accessGroup|t` pair the engine already
     // reports an unseal failure at.
     assert.deepEqual(
-      Object.keys(retired.answer.body.errors).sort(),
+      Object.keys(errorMap(retired.answer.body.errors)).sort(),
       [CONTENT_NAME, ...issuerPeriodsOn(cached).map((t) => `${ACCESS_GROUP}|${t}`)].sort(),
     );
-    for (const entry of Object.values(retired.answer.body.errors)) {
+    for (const entry of retired.answer.body.errors) {
       assert.equal(/** @type {any} */ (entry).error, "key_retired");
     }
 
     assert.equal(servers.primary.stats().grants, 0, "nothing was handed over");
-    assert.equal(
-      servers.primary.stats().unsealFailures,
-      Object.keys(retired.answer.body.errors).length,
-    );
+    assert.equal(servers.primary.stats().unsealFailures, retired.answer.body.errors.length);
   });
 
   test("an unknown keyId is a whole-request refusal, not a per-item error", async () => {
@@ -374,8 +379,8 @@ describe("the issuer's own keypair", () => {
     });
 
     assert.equal(status, 200);
-    assert.deepEqual(body.keys.contentKeys, {});
-    assert.equal(body.errors[CONTENT_NAME].error, "unseal_failed");
+    assert.deepEqual(body.keys.contentKeys, []);
+    assert.equal(errorMap(body.errors)[CONTENT_NAME].error, "unseal_failed");
     assert.equal(opensNothing.reachCount, 1, "the store answered rather than went unreached");
   });
 });
@@ -406,8 +411,8 @@ describe("the publisher's period-key supply", () => {
       "the same periods, relabelled by nothing",
     );
     assert.notDeepEqual(
-      after.issuerData[ISSUER_NAME].sealed.periodKeys[ACCESS_GROUP],
-      before.issuerData[ISSUER_NAME].sealed.periodKeys[ACCESS_GROUP],
+      periodKeyMap(issuerBlockOf(after, ISSUER_NAME).sealed.periodKeys)[ACCESS_GROUP],
+      periodKeyMap(issuerBlockOf(before, ISSUER_NAME).sealed.periodKeys)[ACCESS_GROUP],
     );
 
     const attempts = network.stats()[UNLOCK_URL].attempts;
@@ -497,8 +502,8 @@ describe("all three at once", () => {
     // below - the period-key supply in the only place it shows at all,
     // a client holding one render's period keys and finding they do not open the
     // other's.
-    assert.equal(cached.issuerData[ISSUER_NAME].keyId, KEY_ID);
-    assert.equal(fresh.issuerData[ISSUER_NAME].keyId, KEY_NEW);
+    assert.equal(issuerBlockOf(cached, ISSUER_NAME).keyId, KEY_ID);
+    assert.equal(issuerBlockOf(fresh, ISSUER_NAME).keyId, KEY_NEW);
     assert.equal(decodeHeader(cached.resourceJWT).kid, SIGNING_KID);
     assert.equal(decodeHeader(fresh.resourceJWT).kid, KID_NEW);
 
@@ -624,13 +629,13 @@ describe("a rotation that lands while a request is in flight", () => {
     // that landed after admission rather than before the request was built.
     assert.equal(status, 200, "a rollover is operational, not a whole-request refusal");
     assert.equal(body.error, undefined, "not a whole-request refusal");
-    assert.deepEqual(body.keys.contentKeys, {});
+    assert.deepEqual(body.keys.contentKeys, []);
     assert.equal(body.keys.periodKeys, undefined);
     assert.deepEqual(
-      Object.keys(body.errors).sort(),
+      Object.keys(errorMap(body.errors)).sort(),
       [CONTENT_NAME, ...issuerPeriodsOn(cached).map((t) => `${ACCESS_GROUP}|${t}`)].sort(),
     );
-    for (const entry of Object.values(body.errors)) {
+    for (const entry of body.errors) {
       assert.equal(/** @type {any} */ (entry).error, "key_retired");
     }
     assert.equal(keyStores.primary.reachCount, 1, "the store answered once, after the rotation");
@@ -671,7 +676,10 @@ describe("a rotation that lands while a request is in flight", () => {
     // crossing a request in flight is invisible to it.
     assert.equal(status, 200);
     assert.equal(body.errors, undefined, "the coexisting new key is not an error for this request");
-    assert.ok(body.keys.contentKeys[CONTENT_NAME], "the admitted key opened its own content");
+    assert.ok(
+      contentKeyMap(body.keys.contentKeys)[CONTENT_NAME],
+      "the admitted key opened its own content",
+    );
     assert.equal(keyStores.primary.reachCount, 1, "one read, of the still-held old key");
   });
 });

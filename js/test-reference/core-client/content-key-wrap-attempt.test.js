@@ -13,7 +13,7 @@ async function fixture() {
   const article = new Uint8Array([1, 2, 3]);
   const ciphertext = await encrypt(contentKey, articleNonce, article);
   const wrapped = await encrypt(periodKey, nonce, contentKey);
-  const entry = { nonce: base64urlEncode(nonce), key: base64urlEncode(wrapped) };
+  const entry = { t: "251023T1400", key: base64urlEncode(wrapped) };
   const periodHandle = await globalThis.crypto.subtle.importKey(
     "raw",
     periodKey,
@@ -55,21 +55,24 @@ test("a wrap attempt propagates a handle usage fault instead of reporting a cand
     );
     assert.equal(handle.extractable, false);
     await assert.rejects(
-      () => attemptContentKeyWrap(data.entry, handle),
+      () => attemptContentKeyWrap(data.entry, handle, data.nonce),
       (/** @type {any} */ error) =>
         error instanceof DOMException &&
         ["InvalidAccessError", "InvalidAccessException"].includes(error.name),
     );
   }
-  await opensArticle(data, await attemptContentKeyWrap(data.entry, data.periodHandle));
+  await opensArticle(data, await attemptContentKeyWrap(data.entry, data.periodHandle, data.nonce));
 });
 
 test("a wrap attempt refuses incompatible key capabilities as faults", async () => {
   const data = await fixture();
   for (const key of [null, undefined, {}, "period-key"]) {
-    await assert.rejects(() => attemptContentKeyWrap(data.entry, /** @type {any} */ (key)), {
-      code: "bad_config",
-    });
+    await assert.rejects(
+      () => attemptContentKeyWrap(data.entry, /** @type {any} */ (key), data.nonce),
+      {
+        code: "bad_config",
+      },
+    );
   }
   const wrongAlgorithm = await globalThis.crypto.subtle.importKey(
     "raw",
@@ -86,9 +89,11 @@ test("a wrap attempt refuses incompatible key capabilities as faults", async () 
     ["unwrapKey"],
   );
   for (const key of [new Uint8Array(15), new Uint8Array(32), wrongAlgorithm, wrongWidth]) {
-    await assert.rejects(() => attemptContentKeyWrap(data.entry, key), { code: "bad_key" });
+    await assert.rejects(() => attemptContentKeyWrap(data.entry, key, data.nonce), {
+      code: "bad_key",
+    });
   }
-  await opensArticle(data, await attemptContentKeyWrap(data.entry, data.periodKey));
+  await opensArticle(data, await attemptContentKeyWrap(data.entry, data.periodKey, data.nonce));
 });
 
 test("invalid AAD cannot become an empty-AAD wrap opening", async () => {
@@ -99,21 +104,24 @@ test("invalid AAD cannot become an empty-AAD wrap opening", async () => {
     key: base64urlEncode(await encrypt(data.periodKey, data.nonce, data.contentKey, aad)),
   };
   for (const key of [data.periodKey, data.periodHandle]) {
-    await opensArticle(data, await attemptContentKeyWrap(data.entry, key));
+    await opensArticle(data, await attemptContentKeyWrap(data.entry, key, data.nonce));
     for (const malformed of ["abc", "", new ArrayBuffer(0)]) {
       await assert.rejects(
-        () => attemptContentKeyWrap(data.entry, key, /** @type {any} */ (malformed)),
+        () => attemptContentKeyWrap(data.entry, key, data.nonce, /** @type {any} */ (malformed)),
         { code: "bad_config" },
       );
     }
-    await opensArticle(data, await attemptContentKeyWrap(boundEntry, key, aad));
+    await opensArticle(data, await attemptContentKeyWrap(boundEntry, key, data.nonce, aad));
     assert.equal(
-      await attemptContentKeyWrap(boundEntry, key),
+      await attemptContentKeyWrap(boundEntry, key, data.nonce),
       null,
       "no unbound retry opens a bound wrap",
     );
-    assert.equal(await attemptContentKeyWrap(boundEntry, key, new Uint8Array([8])), null);
-    await opensArticle(data, await attemptContentKeyWrap(data.entry, key));
+    assert.equal(
+      await attemptContentKeyWrap(boundEntry, key, data.nonce, new Uint8Array([8])),
+      null,
+    );
+    await opensArticle(data, await attemptContentKeyWrap(data.entry, key, data.nonce));
   }
 });
 
@@ -123,13 +131,65 @@ test("entry misses leave the same raw and opaque capability usable", async () =>
   tampered[tampered.length - 1] ^= 1;
   const unreadable = [
     { ...data.entry, key: "!!!!" },
-    { ...data.entry, nonce: base64urlEncode(new Uint8Array(11)) },
+    { ...data.entry, key: base64urlEncode(data.wrapped.subarray(1)) },
     { ...data.entry, key: base64urlEncode(tampered) },
   ];
   for (const key of [data.periodKey, data.periodHandle]) {
     for (const entry of unreadable) {
-      assert.equal(await attemptContentKeyWrap(entry, key), null);
-      await opensArticle(data, await attemptContentKeyWrap(data.entry, key));
+      assert.equal(await attemptContentKeyWrap(entry, key, data.nonce), null);
+      await opensArticle(data, await attemptContentKeyWrap(data.entry, key, data.nonce));
     }
+  }
+});
+
+test("the wrap opens only under the nonce the caller derived", async () => {
+  const data = await fixture();
+  const other = Uint8Array.from(data.nonce);
+  other[0] ^= 1;
+  for (const key of [data.periodKey, data.periodHandle]) {
+    assert.equal(await attemptContentKeyWrap(data.entry, key, other), null, "a wrong nonce misses");
+    await opensArticle(data, await attemptContentKeyWrap(data.entry, key, data.nonce));
+  }
+});
+
+test("a carried nonce member supplies no IV and causes no miss", async () => {
+  const data = await fixture();
+  const other = Uint8Array.from(data.nonce);
+  other[0] ^= 1;
+  for (const key of [data.periodKey, data.periodHandle]) {
+    for (const carried of [
+      base64urlEncode(data.nonce),
+      base64urlEncode(other),
+      "AAAA=",
+      "!!",
+      12,
+      null,
+      { bytes: [4] },
+    ]) {
+      const entry = { ...data.entry, nonce: carried };
+      await opensArticle(data, await attemptContentKeyWrap(entry, key, data.nonce));
+      assert.equal(
+        await attemptContentKeyWrap({ ...entry, nonce: base64urlEncode(data.nonce) }, key, other),
+        null,
+        "the carried value never replaces the derived nonce",
+      );
+    }
+  }
+});
+
+test("a nonce that is not 12 bytes is a caller fault, not a candidate miss", async () => {
+  const data = await fixture();
+  for (const nonce of [
+    undefined,
+    null,
+    "AAAAAAAAAAAAAAAA",
+    new Uint8Array(11),
+    new Uint8Array(13),
+    [4],
+  ]) {
+    await assert.rejects(
+      () => attemptContentKeyWrap(data.entry, data.periodKey, /** @type {any} */ (nonce)),
+      { code: "bad_config" },
+    );
   }
 });

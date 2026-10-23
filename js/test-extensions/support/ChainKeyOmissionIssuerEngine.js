@@ -38,7 +38,7 @@ export class ChainKeyOmissionIssuerEngine {
    * @param {string[]} config.operatingIssuerNames
    * @param {{ decide: Function }} config.accessPolicy
    * @param {{ now: () => Date }} config.clock
-   * @param {{ get: (registration: object) => (((accessGroup: string, t: string) => Promise<Uint8Array|null>)|undefined) }} [config.periodKeyLookup] -
+   * @param {{ get: (registration: object) => (((accessGroup: string, t: string) => Promise<Uint8Array|readonly Uint8Array[]|null>)|undefined) }} [config.periodKeyLookup] -
    *   application state answering `get(registration)` with the period-key
    *   lookup held for that authenticated publisher registration
    */

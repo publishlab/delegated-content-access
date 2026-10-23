@@ -24,7 +24,7 @@ const json = (value) => base64urlEncode(utf8Encode(JSON.stringify(value)));
 test("recoverySources and responseSections reach the resolver factory beside the base members", () => {
   /** @type {any} */
   let seen;
-  const responseSections = [{ name: "contentGroups" }];
+  const responseSections = [{ name: "contentGroupKeys" }];
   const recoverySources = [{ candidates() {} }];
   const { builder } = composeClient({
     responseSections,
@@ -73,10 +73,14 @@ function root() {
     dcaData: {
       version: "1",
       resourceJWT: jwt,
-      contentData: {
-        bodytext: { contentType: "text/plain", nonce: base64urlEncode(new Uint8Array(12)) },
-      },
-      issuerData: { issuer: { keyId: "kid", sealed: { contentKeys: {} } } },
+      contentData: [
+        {
+          contentName: "bodytext",
+          contentType: "text/plain",
+          nonce: base64urlEncode(new Uint8Array(12)),
+        },
+      ],
+      issuerData: [{ issuerName: "issuer", keyId: "kid", sealed: { contentKeys: [] } }],
     },
     sealedContent: { bodytext: base64urlEncode(new Uint8Array(32)) },
   });
@@ -87,6 +91,7 @@ function root() {
 const wrapper = () => ({
   applyResponse: async () => ({}),
   resolveDetailed: async () => ({}),
+  resolveAuthenticated: async () => ({}),
   resolve: async () => [],
   contentKeyFor: async () => null,
   contentKeyWithOriginFor: async () => null,
@@ -104,14 +109,14 @@ test("a browser client refuses a registered extension owner it could not reset",
     () =>
       createBrowserClient({
         ...base,
-        responseSections: [{ name: "contentGroups" }],
+        responseSections: [{ name: "contentGroupKeys" }],
       }),
     { code: "bad_config", message: /clearReaderContext/ },
   );
   assert.ok(
     createBrowserClient({
       ...base,
-      responseSections: [{ name: "contentGroups", clearReaderContext: async () => {} }],
+      responseSections: [{ name: "contentGroupKeys", clearReaderContext: async () => {} }],
     }),
   );
 });

@@ -126,7 +126,7 @@ test("one key entry permitting both procedures serves ordinary and compact grant
     assert.equal(answer.body.errors, undefined, `compact=${compact}`);
     assert.deepEqual(Object.keys(answer.body.keys), ["contentKeys"], `compact=${compact}`);
     assert.deepEqual(
-      Object.keys(answer.body.keys.contentKeys),
+      answer.body.keys.contentKeys.map((/** @type {any} */ record) => record.contentName),
       [BODY],
       `compact=${compact}: the grant names bodytext only`,
     );

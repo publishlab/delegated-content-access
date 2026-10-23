@@ -5,10 +5,10 @@
 // source. The engine-only tests beside this file skip admission, so these pin
 // what admission lets reach the source and what the source spends on it.
 //
-// Two gaps stay open and untested here. The processor reads no `boundCandidates`
-// member, so a request presenting only candidates has no coordinate at
-// admission, and its candidates count toward no entry budget. Registering an
-// extension's request members with the processor is a held design decision.
+// The selected extension contributes identity validation, a raw candidate-entry
+// bound, and candidate-only coordinate presence through existing processor seams.
+
+import { omissionProcessorOptions } from "../core-issuer/omissionAdmission.js";
 
 import test from "node:test";
 import assert from "node:assert/strict";
@@ -64,7 +64,11 @@ async function processed(document, registration, options = {}) {
       operatingIssuerNames: [ISSUER_A],
       accessPolicy: contentOnlyPolicy(["bodytext"]),
     });
-  const processor = new IssuerProcessor(engine, { periodKeyInput: true, ...options.processor });
+  const processor = new IssuerProcessor(engine, {
+    periodKeyInput: true,
+    ...omissionProcessorOptions(),
+    ...options.processor,
+  });
   const admitted = processor.admit(JSON.stringify(document));
   if (admitted.kind !== "admitted") return admitted;
   return processor.processMiss({ request: admitted.request, registration });
@@ -109,6 +113,65 @@ function corrupted(candidate, flip = 1) {
   return { ...candidate, key: base64urlEncode(key) };
 }
 
+/**
+ * The forwarded candidate records for one content name, in wire order.
+ *
+ * @param {any} document
+ * @param {string} contentName
+ */
+function candidatesOf(document, contentName) {
+  return document.boundCandidates.filter(
+    (/** @type {any} */ record) => record.contentName === contentName,
+  );
+}
+
+/**
+ * Replaces the candidate records for one content name and keeps every other
+ * name's records.
+ *
+ * @param {any} document
+ * @param {string} contentName
+ * @param {any[]} records
+ */
+function setCandidates(document, contentName, records) {
+  document.boundCandidates = [
+    ...document.boundCandidates.filter(
+      (/** @type {any} */ record) => record.contentName !== contentName,
+    ),
+    ...records.map((record) => ({ ...record, contentName })),
+  ];
+}
+
+/**
+ * The content names a response delivers keys for, one per record, so a second
+ * record at one name shows up as a repeat.
+ *
+ * @param {any[]} contentKeys
+ */
+function deliveredNames(contentKeys) {
+  return contentKeys.map(({ contentName }) => contentName);
+}
+
+/**
+ * Every key a response delivers at one content name.
+ *
+ * @param {any[]} contentKeys
+ * @param {string} contentName
+ */
+function keysAt(contentKeys, contentName) {
+  return contentKeys.filter((record) => record.contentName === contentName).map(({ key }) => key);
+}
+
+/**
+ * The error record a response reports at one coordinate.
+ *
+ * @param {any[]} errors
+ * @param {string} coordinate
+ */
+function errorAt(errors, coordinate) {
+  return errors.find((record) => record.coordinate === coordinate);
+}
+
 const BASE64URL = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_";
 
 /**
@@ -130,7 +193,8 @@ function withSpareBit(spelled) {
  */
 async function honestKey(document, registration) {
   const result = /** @type {any} */ (await processed(structuredClone(document), registration));
-  return result.document.keys.contentKeys.bodytext;
+  const [key] = keysAt(result.document.keys.contentKeys, "bodytext");
+  return key;
 }
 
 test("relayed period keys reach the omission source through admission", async () => {
@@ -139,105 +203,155 @@ test("relayed period keys reach the omission source through admission", async ()
   const result = /** @type {any} */ (await processed(document, registration));
 
   assert.equal(result.kind, "success");
-  assert.deepEqual(Object.keys(result.document.keys.contentKeys), ["bodytext"]);
+  assert.deepEqual(deliveredNames(result.document.keys.contentKeys), ["bodytext"]);
   assert.equal(Object.hasOwn(result.document.keys, "periodKeys"), false);
 });
 
-test("a candidate under a content name the format refuses is inert", async () => {
+test("a malformed candidate identity refuses the whole request", async () => {
   const { document, registration } = await activeRequest();
-  document.boundCandidates["not|a-name"] = document.boundCandidates.bodytext;
+  document.boundCandidates.push(
+    ...candidatesOf(document, "bodytext").map((/** @type {any} */ record) => ({
+      ...record,
+      contentName: "not|a-name",
+    })),
+  );
 
   const result = /** @type {any} */ (await processed(document, registration));
 
-  assert.equal(result.kind, "success");
-  assert.deepEqual(Object.keys(result.document.keys.contentKeys), ["bodytext"]);
-  assert.equal(Object.hasOwn(result.document, "errors"), false);
+  assert.deepEqual(result, { kind: "failure", code: "binding_failed" });
 });
 
 test("a candidate that fails authentication leaves a later distinct one at its coordinate to open", async () => {
   const { document, registration } = await activeRequest();
   const expected = await honestKey(document, registration);
-  const [atT0] = document.boundCandidates.bodytext;
-  document.boundCandidates.bodytext = [corrupted(atT0), atT0];
+  const [atT0] = candidatesOf(document, "bodytext");
+  setCandidates(document, "bodytext", [corrupted(atT0), atT0]);
 
   const { result, trials } = await trialsDuring(() => processed(document, registration));
 
   assert.equal(result.kind, "success");
-  assert.equal(result.document.keys.contentKeys.bodytext, expected);
+  assert.deepEqual(keysAt(result.document.keys.contentKeys, "bodytext"), [expected]);
   assert.equal(Object.hasOwn(result.document, "errors"), false);
   assert.equal(trials, 2, "the corrupted wrap, then the valid one at the same coordinate");
 });
 
 test("an item whose candidates all fail authentication reports its own unseal failure", async () => {
   const { document, registration } = await activeRequest();
-  const [atT0, atT1] = document.boundCandidates.bodytext;
-  document.boundCandidates.bodytext = [corrupted(atT0, 1), corrupted(atT0, 2), corrupted(atT1)];
+  const [atT0, atT1] = candidatesOf(document, "bodytext");
+  setCandidates(document, "bodytext", [corrupted(atT0, 1), corrupted(atT0, 2), corrupted(atT1)]);
 
   const { result, trials } = await trialsDuring(() => processed(document, registration));
 
   assert.equal(result.kind, "success");
-  assert.equal(Object.hasOwn(result.document.keys.contentKeys ?? {}, "bodytext"), false);
-  assert.equal(result.document.errors.bodytext.error, "unseal_failed");
+  assert.deepEqual(keysAt(result.document.keys.contentKeys ?? [], "bodytext"), []);
+  assert.equal(errorAt(result.document.errors, "bodytext")?.error, "unseal_failed");
   assert.equal(trials, 3, "each distinct wrap once");
 });
 
 test("exact repeats of one wrap at one coordinate cost one trial", async () => {
   const { document, registration } = await activeRequest();
   const expected = await honestKey(document, registration);
-  const [atT0, atT1] = document.boundCandidates.bodytext;
+  const [atT0, atT1] = candidatesOf(document, "bodytext");
   assert.deepEqual(
-    [atT0.t, atT1.t],
+    [atT0.period, atT1.period],
     PERIODS,
     "the honest client forwards one candidate per period",
   );
   const junkT0 = corrupted(atT0);
   const junkT1 = corrupted(atT1);
-  document.boundCandidates.bodytext = [
-    ...Array(100).fill(junkT0),
-    ...Array(100).fill({ ...junkT0 }),
-    ...Array(100).fill(junkT1),
+  setCandidates(document, "bodytext", [
+    ...Array(3).fill(junkT0),
+    ...Array(3).fill({ ...junkT0 }),
+    ...Array(3).fill(junkT1),
     atT1,
     atT1,
-  ];
+  ]);
 
   const { result, trials } = await trialsDuring(() => processed(document, registration));
 
   assert.equal(result.kind, "success");
-  assert.equal(result.document.keys.contentKeys.bodytext, expected);
+  assert.deepEqual(keysAt(result.document.keys.contentKeys, "bodytext"), [expected]);
   assert.equal(trials, 3, "one trial per distinct wrap at each coordinate");
 });
 
 test("the same wrap material at another coordinate is a distinct alternative", async () => {
   const { document, registration } = await activeRequest();
   const expected = await honestKey(document, registration);
-  const [atT0, atT1] = document.boundCandidates.bodytext;
-  // atT1's own nonce and wrap, first labelled at T0, where it fails authentication.
-  document.boundCandidates.bodytext = [{ ...atT1, t: atT0.t }, corrupted(atT0), atT1];
+  const [atT0, atT1] = candidatesOf(document, "bodytext");
+  // atT1's own wrap, first labelled at T0. Its nonce and AAD derive from T0 there, so it fails.
+  setCandidates(document, "bodytext", [{ ...atT1, period: atT0.period }, corrupted(atT0), atT1]);
 
   const { result, trials } = await trialsDuring(() => processed(document, registration));
 
   assert.equal(result.kind, "success");
-  assert.equal(result.document.keys.contentKeys.bodytext, expected);
+  assert.deepEqual(keysAt(result.document.keys.contentKeys, "bodytext"), [expected]);
   assert.equal(trials, 3);
 });
 
-test("a candidate whose wrap is not a canonical v1 nonce and wrapped key is never trial-decrypted", async () => {
+test("forwarded candidates carry no nonce, and the issuer derives it", async () => {
   const { document, registration } = await activeRequest();
-  const [atT0, atT1] = document.boundCandidates.bodytext;
-  document.boundCandidates.bodytext = [
-    { ...atT0, nonce: base64urlEncode(new Uint8Array(8)) },
+  for (const candidate of candidatesOf(document, "bodytext")) {
+    assert.deepEqual(Object.keys(candidate).sort(), [
+      "accessGroup",
+      "bind",
+      "contentName",
+      "key",
+      "period",
+    ]);
+  }
+
+  const { result, trials } = await trialsDuring(() => processed(document, registration));
+
+  assert.equal(result.kind, "success");
+  assert.deepEqual(deliveredNames(result.document.keys.contentKeys), ["bodytext"]);
+  assert.equal(trials, 1, "the first forwarded candidate opens under the derived nonce");
+});
+
+test("a carried nonce on a candidate is ignored whatever its value or type", async () => {
+  const { document, registration } = await activeRequest();
+  const expected = await honestKey(document, registration);
+  const [atT0, atT1] = candidatesOf(document, "bodytext");
+  for (const nonce of [base64urlEncode(new Uint8Array(12)), "AAAA==", "", 12, null, ["n"]]) {
+    const changed = structuredClone(document);
+    setCandidates(changed, "bodytext", [
+      { ...atT0, nonce },
+      { ...atT1, nonce },
+    ]);
+
+    const { result, trials } = await trialsDuring(() => processed(changed, registration));
+
+    assert.equal(result.kind, "success", JSON.stringify(nonce));
+    assert.deepEqual(
+      keysAt(result.document.keys.contentKeys, "bodytext"),
+      [expected],
+      JSON.stringify(nonce),
+    );
+    assert.equal(trials, 1, `${JSON.stringify(nonce)}: no extra trial and no fallback`);
+  }
+  // Two candidates that differ only by a carried nonce are one trial.
+  const junk = corrupted(atT0);
+  setCandidates(document, "bodytext", [{ ...junk, nonce: "a" }, { ...junk, nonce: "b" }, atT1]);
+  const { result, trials } = await trialsDuring(() => processed(document, registration));
+  assert.equal(result.kind, "success");
+  assert.equal(trials, 2, "the corrupted wrap once, then the valid one");
+});
+
+test("a candidate whose wrapped key is not a canonical v1 wrap is never trial-decrypted", async () => {
+  const { document, registration } = await activeRequest();
+  const [atT0, atT1] = candidatesOf(document, "bodytext");
+  setCandidates(document, "bodytext", [
     { ...atT0, key: base64urlEncode(new Uint8Array(48)) },
     { ...atT0, key: base64urlEncode(new Uint8Array(16)) },
     // The valid wrap's bytes under a spelling section 2.2 does not admit.
     { ...atT0, key: withSpareBit(atT0.key) },
-    { ...atT0, nonce: `${atT0.nonce}==` },
+    { ...atT0, key: `${atT0.key}==` },
     atT1,
-  ];
+  ]);
 
   const { result, trials } = await trialsDuring(() => processed(document, registration));
 
   assert.equal(result.kind, "success");
-  assert.deepEqual(Object.keys(result.document.keys.contentKeys), ["bodytext"]);
+  assert.deepEqual(deliveredNames(result.document.keys.contentKeys), ["bodytext"]);
   assert.equal(trials, 1, "only the well-formed candidate at the second period");
 });
 
@@ -260,4 +374,38 @@ test("a period-key view that throws a caller-facing code is an internal fault", 
   const result = await processed(document, registration, { engine });
 
   assert.deepEqual(result, { kind: "failure", code: "internal_error" });
+});
+
+for (const field of ["contentName", "accessGroup", "period"]) {
+  test(`a missing own ${field} refuses before policy or opening-key access`, async () => {
+    const { document, registration } = await activeRequest();
+    delete document.boundCandidates[0][field];
+    let calls = 0;
+    const engine = {
+      checkOperatingIssuerName() {},
+      unlock() {
+        calls++;
+        throw new Error("must not unlock");
+      },
+    };
+    assert.deepEqual(await processed(document, registration, { engine }), {
+      kind: "failure",
+      code: "binding_failed",
+    });
+    assert.equal(calls, 0);
+  });
+}
+test("nonarray candidates refuse structurally and raw excess counts before deduplication", async () => {
+  const { document, registration } = await activeRequest();
+  const record = document.boundCandidates[0];
+  document.boundCandidates = {};
+  assert.deepEqual(await processed(document, registration), {
+    kind: "failure",
+    code: "binding_failed",
+  });
+  document.boundCandidates = Array(17).fill(record);
+  assert.deepEqual(await processed(document, registration), {
+    kind: "failure",
+    code: "too_many_entries",
+  });
 });

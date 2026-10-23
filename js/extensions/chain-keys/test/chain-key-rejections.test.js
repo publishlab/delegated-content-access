@@ -57,6 +57,8 @@ import { ChainKeyRequestBuilder } from "../core-client/ChainKeyRequestBuilder.js
 import { periodFamilyGeneration } from "../core-shared--publisher-issuer/periodFamilyGeneration.js";
 import { periodFamilySupply } from "../core-publisher/periodFamilySupply.js";
 import { wholeRenderIssuerSupplyPlan } from "../../../core-publisher/issuerSupplyPlan.js";
+import { issuerBlockOf } from "../../../test-lib/helpers/inspect.js";
+import { contentKeyMap } from "../../../test-reference/support/namedRecords.js";
 
 const { subtle } = globalThis.crypto;
 
@@ -329,23 +331,29 @@ async function world() {
    */
   async function requestCarrying(t) {
     const carried = structuredClone(page);
-    carried.issuerData[ISSUER].sealed.chainKeys[GROUP] = {
-      [t]: await sealKey(
-        base64urlDecode(C1.cutoffChainKeys[t]),
-        issuerKeys.publicKey,
-        "ecdh-p256",
-        {
-          random: new Random({ seed: 71 }),
-          binding: {
-            renderId: page.resource.renderId,
-            accessGroup: GROUP,
-            suppliedT: t,
-            chainKey: true,
-            ...GEOMETRY,
+    const sealed = issuerBlockOf(carried, ISSUER).sealed;
+    sealed.chainKeys = [
+      ...sealed.chainKeys.filter((/** @type {any} */ record) => record.accessGroup !== GROUP),
+      {
+        accessGroup: GROUP,
+        cutoff: t,
+        key: await sealKey(
+          base64urlDecode(C1.cutoffChainKeys[t]),
+          issuerKeys.publicKey,
+          "ecdh-p256",
+          {
+            random: new Random({ seed: 71 }),
+            binding: {
+              renderId: page.resource.renderId,
+              accessGroup: GROUP,
+              suppliedT: t,
+              chainKey: true,
+              ...GEOMETRY,
+            },
           },
-        },
-      ),
-    };
+        ),
+      },
+    ];
     return relay(carried);
   }
 
@@ -409,12 +417,12 @@ describe("issuer selection over one supplied member", () => {
       const refused = await engine.unlock(request, registration, {}, instantOf(refusedT));
       assert.deepEqual(
         refused.capabilities.map((entry) => entry.entries),
-        row.id === "r11" ? [{ [carriedT]: C1.cutoffChainKeys[carriedT] }] : [],
+        row.id === "r11" ? [[{ t: carriedT, key: C1.cutoffChainKeys[carriedT] }]] : [],
         `${row.id}: the explicit article target is served only when its supplied source reaches it`,
       );
-      assert.deepEqual(refused.periodKeys, {}, `${row.id}: and no period key leaks the same reach`);
+      assert.deepEqual(refused.periodKeys, [], `${row.id}: and no period key leaks the same reach`);
       assert.deepEqual(
-        Object.keys(refused.contentKeys),
+        Object.keys(contentKeyMap(refused.contentKeys)),
         [NAME],
         "the request itself is answered; only the unreachable period is declined",
       );
@@ -423,7 +431,7 @@ describe("issuer selection over one supplied member", () => {
       assert.equal(answered.capabilities.length, 1);
       assert.deepEqual(
         answered.capabilities[0].entries,
-        { [carriedT]: C1.cutoffChainKeys[carriedT] },
+        [{ t: carriedT, key: C1.cutoffChainKeys[carriedT] }],
         "the same member answers its own coordinate with the recorded chain key",
       );
     });
@@ -526,10 +534,14 @@ describe("wire carriers on the shared geometry pair", () => {
         issuerName: ISSUER,
         periodGeometry: GEOMETRY,
         sealed: {
-          chainKeys: {
-            [input.accessGroup]: { [input.label ?? C1.label]: "sealed-value" },
-            archive: { [C1.label]: "sealed-value" },
-          },
+          chainKeys: [
+            {
+              accessGroup: input.accessGroup,
+              cutoff: input.label ?? C1.label,
+              key: "sealed-value",
+            },
+            { accessGroup: "archive", cutoff: C1.label, key: "sealed-value" },
+          ],
         },
       });
       const resolved = chainKeyRequestInput(request);
@@ -543,10 +555,14 @@ describe("wire carriers on the shared geometry pair", () => {
       const response = {
         periodGeometry: GEOMETRY,
         keys: {
-          chainKeys: {
-            [input.accessGroup]: { [input.label ?? C1.label]: C1.rootChainKey },
-            archive: { [C1.label]: C1.rootChainKey },
-          },
+          chainKeys: [
+            {
+              accessGroup: input.accessGroup,
+              cutoff: input.label ?? C1.label,
+              key: C1.rootChainKey,
+            },
+            { accessGroup: "archive", cutoff: C1.label, key: C1.rootChainKey },
+          ],
         },
       };
       const resolved = chainKeyResponseInput(response, { periodGeometry: GEOMETRY });
@@ -595,7 +611,7 @@ describe("a present malformed document-wide accessGroups map", () => {
   });
 
   test("the client response family stays invalid with malformed captured request geometry", () => {
-    const keys = { chainKeys: { [GROUP]: { [C1.label]: C1.rootChainKey } } };
+    const keys = { chainKeys: [{ accessGroup: GROUP, cutoff: C1.label, key: C1.rootChainKey }] };
 
     const control = chainKeyResponseInput({ keys }, { periodGeometry: { ...GEOMETRY } }).family(
       GROUP,
@@ -627,16 +643,14 @@ test("the response encoder admits two positioned members and refuses a third", (
   const recordFor = (/** @type {string[]} */ selected) => ({
     kind: "chain-keys",
     accessGroup: "premium",
-    entries: Object.fromEntries(
-      selected.map((t) => [t, base64urlEncode(new Uint8Array(16).fill(3))]),
-    ),
+    entries: selected.map((t) => ({ t, key: base64urlEncode(new Uint8Array(16).fill(3)) })),
     interpretation: {
       geometry: GEOMETRY,
       selections: selected.map((t) => ({ suppliedT: t, cutoffT: t })),
     },
   });
 
-  assert.equal(Object.keys(encoder(recordFor(labels.slice(0, 2))).entries).length, 2);
+  assert.equal(encoder(recordFor(labels.slice(0, 2))).entries.length, 2);
   assert.throws(
     () => encoder(recordFor(labels)),
     (/** @type {any} */ error) =>

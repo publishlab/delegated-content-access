@@ -59,7 +59,7 @@ const OAEP_OVERHEAD = 2 * 32 + 2;
 /**
  * @typedef {object} UnboundSealOptions
  * @property {Kdf} [kdf] - ECDH only, refused for RSA-OAEP
- * @property {{ bytes: (n: number) => Uint8Array }} [random] - the ECDH blob nonce
+ * @property {{ bytes: (n: number) => Uint8Array }} [random] - accepted but unused; the nonce is twelve zero octets
  * @property {CryptoKeyPair} [ephemeralKeyPair] - injectable for a replayed run
  */
 
@@ -208,24 +208,19 @@ export async function seal(keyBytes, issuerPublicKey, algorithm, options = {}) {
     return sealRsa(keyBytes, issuerPublicKey);
   }
 
-  if (!options.random) {
-    throw dcaError("missing_random", "an unbound seal needs a Random for the blob nonce");
-  }
-
   const ephemeral =
     options.ephemeralKeyPair ??
     (await subtle.generateKey({ name: "ECDH", namedCurve: "P-256" }, false, ["deriveBits"]));
 
   const ephemeralPublic = new Uint8Array(await subtle.exportKey("raw", ephemeral.publicKey));
-  const nonce = options.random.bytes(NONCE_BYTES);
+  const nonce = new Uint8Array(NONCE_BYTES);
 
   const wrappingKey = await agree(issuerPublicKey, ephemeral.privateKey, kdf);
   const ciphertext = await encrypt(wrappingKey, nonce, keyBytes, undefined, 32);
 
-  const blob = new Uint8Array(ephemeralPublic.length + nonce.length + ciphertext.length);
+  const blob = new Uint8Array(ephemeralPublic.length + ciphertext.length);
   blob.set(ephemeralPublic, 0);
-  blob.set(nonce, ephemeralPublic.length);
-  blob.set(ciphertext, ephemeralPublic.length + nonce.length);
+  blob.set(ciphertext, ephemeralPublic.length);
 
   return base64urlEncode(blob);
 }
@@ -245,13 +240,13 @@ export async function unseal(blob, issuerPrivateKey, algorithm, options = {}) {
   }
 
   const bytes = base64urlDecode(blob);
-  if (bytes.length < EPHEMERAL_BYTES + NONCE_BYTES + TAG_BYTES) {
+  if (bytes.length < EPHEMERAL_BYTES + TAG_BYTES) {
     throw dcaError("unseal_failed", `sealed blob too short: ${bytes.length} bytes`);
   }
 
   const ephemeralPublic = bytes.subarray(0, EPHEMERAL_BYTES);
-  const nonce = bytes.subarray(EPHEMERAL_BYTES, EPHEMERAL_BYTES + NONCE_BYTES);
-  const ciphertext = bytes.subarray(EPHEMERAL_BYTES + NONCE_BYTES);
+  const nonce = new Uint8Array(NONCE_BYTES);
+  const ciphertext = bytes.subarray(EPHEMERAL_BYTES);
 
   try {
     const publicKey = await subtle.importKey(

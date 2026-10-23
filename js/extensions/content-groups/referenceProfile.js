@@ -9,10 +9,10 @@
 //   item and the per-issuer seed
 //   envelopes.
 // - The issuer half is a `createIssuerCore` contribution: request bounds before
-//   signature verification and the `contentGroups` response section.
+//   signature verification and the `contentGroupKeys` response section.
 // - The client half is `createContentGroupClient`: two dedicated caches the
 //   host builds through the factories it passes, the recovery source, the
-//   `contentGroups` response consumer and the request builder, with the two
+//   `contentGroupKeys` response consumer and the request builder, with the two
 //   `composeClient` members ready in `composeOptions`.
 // - Client-bound transport takes the extension's two derivation kinds. The
 //   host settles `kindDescriptors` with its selected transport's

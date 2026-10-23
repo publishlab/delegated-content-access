@@ -33,11 +33,12 @@ import { dcaError } from "../core-shared/errors.js";
 import { isContentName } from "../core-shared/names.js";
 import { normalizePublisherOrigin } from "../core-shared/publisherOrigin.js";
 import { own } from "../core-shared/wire.js";
+import { recordsByName } from "../core-shared--client-publisher/deliveryRecords.js";
 
 /** The members of the reader's context; any other member is refused. */
 const CONTEXT_MEMBERS = ["publisherOrigin"];
 
-/** The document member that carries the sealed-content map. */
+/** The document member that carries the sealed-content records. */
 const SEALED_MEMBER = "sealedContent";
 
 /**
@@ -62,9 +63,10 @@ export class JsonDeliveryReader {
   #dcaData;
 
   /**
-   * The parsed sealed-content map, or null when the document carries none.
+   * The parsed sealed-content records by contentName, the last whole record
+   * for each name, or null when the document carries none.
    *
-   * @type {any}
+   * @type {Map<string, any>|null}
    */
   #sealedContent;
 
@@ -79,8 +81,8 @@ export class JsonDeliveryReader {
    * - `unsupported_option` for a context member other than `publisherOrigin`
    * - `bad_page` for malformed UTF-8, empty input or anything else `JSON.parse`
    *   refuses, a repeated or misplaced byte order mark, a non-array-object failure, a
-   *   present `sealedContent` that is not a non-array object, and a
-   *   `sealedContent` member name outside the contentName grammar
+   *   present `sealedContent` that is not an array, and a `sealedContent`
+   *   record whose contentName is missing or outside the grammar
    *
    * @param {Uint8Array} bytes - the serialized document as it arrived
    * @param {{ publisherOrigin: string }} context - supplied by the host that
@@ -118,16 +120,19 @@ export class JsonDeliveryReader {
     // An own-member read, like every name off the wire. `JSON.parse` makes
     // every member own, so this matters for the copy below, not for the parse.
     const sealedContent = own(parsed, SEALED_MEMBER);
-    if (sealedContent !== undefined && !isRecord(sealedContent)) {
-      throw dcaError("bad_page", "the sealedContent member is not an object");
+    if (sealedContent !== undefined && !Array.isArray(sealedContent)) {
+      throw dcaError("bad_page", "the sealedContent member is not an array");
     }
-    // The map is keyed by contentName. The format rejects such a map on one
-    // member name outside the grammar instead of passing over that member, so
-    // the reader refuses the whole document.
-    for (const name of Object.keys(sealedContent ?? {})) {
-      if (!isContentName(name)) {
-        throw dcaError("bad_page", "the sealedContent member carries a name outside the grammar");
-      }
+    // Each record names its item. The format rejects the collection on one
+    // contentName outside the grammar instead of passing over that record, so
+    // the reader refuses the whole document. An element that is not a record
+    // names nothing and supplies nothing.
+    const records =
+      sealedContent === undefined
+        ? null
+        : recordsByName(sealedContent, "contentName", isContentName);
+    if (sealedContent !== undefined && records === null) {
+      throw dcaError("bad_page", "the sealedContent member carries a name outside the grammar");
     }
 
     // The spread defines each member as an own data property, so a member
@@ -135,7 +140,7 @@ export class JsonDeliveryReader {
     const dcaData = { ...parsed };
     delete dcaData[SEALED_MEMBER];
     this.#dcaData = dcaData;
-    this.#sealedContent = sealedContent ?? null;
+    this.#sealedContent = records;
     this.#publisherOrigin = publisherOrigin;
   }
 
@@ -161,10 +166,11 @@ export class JsonDeliveryReader {
 
   /**
    * The sealed ciphertext for one item, or null when this document does not
-   * carry it. The read is an own-member lookup, so a name every object inherits
-   * finds nothing. An absent item, a deferred item, a member that is not a
-   * string and a name outside the grammar all return null; the decrypt decides
-   * whether a string is usable ciphertext.
+   * carry it. The lookup is by the record's own `contentName`, so a name every
+   * object inherits finds nothing. When several records name the item, the
+   * last whole record answers. An absent item, a deferred item, a `content`
+   * that is not a string and a name outside the grammar all return null; the
+   * decrypt decides whether a string is usable ciphertext.
    *
    * @param {string} contentName
    * @returns {string|null} base64url ciphertext
@@ -172,7 +178,7 @@ export class JsonDeliveryReader {
   extract(contentName) {
     if (!isContentName(contentName)) return null;
 
-    const value = own(this.#sealedContent, contentName);
+    const value = own(this.#sealedContent?.get(contentName), "content");
     return typeof value === "string" ? value : null;
   }
 }

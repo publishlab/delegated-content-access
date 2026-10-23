@@ -84,10 +84,18 @@ export class ContentRepresentationOpener {
    * before `resolveKey` is awaited; the caller hands off the view's
    * `contentType` with the returned bytes.
    *
+   * `resolveKey` receives a predicate that answers whether a candidate key
+   * opens this item. Its second argument names the candidate's origin, as
+   * `ContentKeyResolver` reports it (`held-content-key`, `cached-period-key`,
+   * `recovered-content-key`, ...). A resolver holding rival candidates tries them with it,
+   * so a wrong newest candidate cannot hide a working older one. The opener
+   * keeps the bytes the returned key opened in that trial and decodes those.
+   * A caller that ignores the predicate gets the single-key open as before.
+   *
    * @param {object} call
    * @param {import('./DcaData.js').ContentItemView} call.item - from `DcaData#contentItemFor`
    * @param {string} call.ciphertext - base64url ciphertext, captured with the item
-   * @param {() => Promise<Uint8Array|CryptoKey|null|undefined>} call.resolveKey
+   * @param {(authenticate: (candidate: Uint8Array|CryptoKey, origin?: { kind?: string }) => Promise<boolean>) => Uint8Array|CryptoKey|null|undefined|Promise<Uint8Array|CryptoKey|null|undefined>} call.resolveKey
    * @returns {Promise<Uint8Array>}
    */
   async open({ item, ciphertext, resolveKey }) {
@@ -99,10 +107,48 @@ export class ContentRepresentationOpener {
     const contentAad = Uint8Array.from(item.contentAad);
     const decoders = this.#decodersFor(item.contentEncodings, contentName);
 
-    const contentKey = await resolveKey();
-    if (!contentKey) throw dcaError("no_key", `no key opens "${contentName}"`);
+    /** @type {{ key: Uint8Array|CryptoKey, bytes: Uint8Array } | null} */
+    let trial = null;
+    /** @type {DcaError | null} */
+    let rejected = null;
+    /**
+     * @param {Uint8Array|CryptoKey} candidate
+     * @param {{ kind?: string }} [origin] - where the resolver found the candidate
+     */
+    const authenticate = async (candidate, origin) => {
+      try {
+        trial = {
+          key: candidate,
+          bytes: await openContent(candidate, contentName, ciphertext, contentAad),
+        };
+        return true;
+      } catch (cause) {
+        // Only a tag failure means "not this key". A malformed page or a key
+        // configuration fault stays the refusal it is.
+        if (cause instanceof DcaError && cause.code === "decrypt_failed") {
+          // A delivered, unwrapped or already held candidate is treated as
+          // a known key; held material can include an earlier recovered key.
+          // A recovery source's current guess, or a candidate
+          // passed without an origin argument, that does not open is only a
+          // miss. Any supplied origin other than recovered-content-key,
+          // including {}, marks a failed known candidate.
+          if (origin !== undefined && origin.kind !== "recovered-content-key") rejected = cause;
+          return false;
+        }
+        throw cause;
+      }
+    };
+    const contentKey = await resolveKey(authenticate);
+    // A resolver that tried candidates and found none that opens answers
+    // null. A failed delivered or unwrapped key fails the item the way a
+    // single wrong key does; failed recovered guesses leave it a miss.
+    if (!contentKey) throw rejected ?? dcaError("no_key", `no key opens "${contentName}"`);
 
-    let bytes = await openContent(contentKey, contentName, ciphertext, contentAad);
+    const opened = /** @type {{ key: Uint8Array|CryptoKey, bytes: Uint8Array } | null} */ (trial);
+    let bytes =
+      opened !== null && opened.key === contentKey
+        ? opened.bytes
+        : await openContent(contentKey, contentName, ciphertext, contentAad);
     let totalInputBytes = 0;
     let totalOutputBytes = 0;
     for (let index = decoders.length - 1; index >= 0; index -= 1) {

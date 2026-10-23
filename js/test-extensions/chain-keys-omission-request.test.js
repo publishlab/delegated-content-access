@@ -18,31 +18,32 @@ test("chain-key relay preserves omission members and the client transport offer"
     version: "1",
     resourceJWT: "header.payload.signature",
     periodGeometry: { chainsPerDay: 2, periodMinutes: 15 },
-    contentData: {
-      bodytext: {
+    contentData: [
+      {
+        contentName: "bodytext",
         contentType: "text/html",
         nonce: "n",
-        keys: {
-          premium: [
-            {
-              t: "251023T1400",
-              nonce: "wn",
-              key: "wk",
-              bind: "dca-bind-seal-omission",
-            },
-          ],
-        },
+        keys: [
+          {
+            accessGroup: "premium",
+            period: "251023T1400",
+            nonce: "wn",
+            key: "wk",
+            bind: "dca-bind-seal-omission",
+          },
+        ],
       },
-    },
-    issuerData: {
-      "issuer-a": {
+    ],
+    issuerData: [
+      {
+        issuerName: "issuer-a",
         keyId: "key-a",
         unlockUrl: "https://issuer.example/unlock",
         sealed: {
-          chainKeys: { premium: { "251023T2345": "sealed-chain" } },
+          chainKeys: [{ accessGroup: "premium", cutoff: "251023T2345", key: "sealed-chain" }],
         },
       },
-    },
+    ],
   });
   const request = new ChainKeyRequestBuilder({
     innerBuilder: new OmissionRequestBuilder({ clientPublicKey }),
@@ -51,8 +52,10 @@ test("chain-key relay preserves omission members and the client transport offer"
     .toObject();
 
   assert.deepEqual(request.extensions, [EXTENSION_NAME]);
-  assert.ok(request.boundCandidates.bodytext);
+  assert.ok(request.boundCandidates.some((record) => record.contentName === "bodytext"));
   assert.deepEqual(request.clientPublicKey, clientPublicKey);
   assert.deepEqual(request.periodGeometry, { chainsPerDay: 2, periodMinutes: 15 });
-  assert.deepEqual(request.sealed.chainKeys, { premium: { "251023T2345": "sealed-chain" } });
+  assert.deepEqual(request.sealed.chainKeys, [
+    { accessGroup: "premium", cutoff: "251023T2345", key: "sealed-chain" },
+  ]);
 });

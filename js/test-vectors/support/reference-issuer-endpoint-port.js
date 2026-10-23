@@ -8,6 +8,37 @@ import test, { describe } from "node:test";
 import assert from "node:assert/strict";
 
 /**
+ * The one issuer block a delivery's `issuerData` records name `issuerName`.
+ *
+ * @param {any} dcaData
+ * @param {string} issuerName
+ * @returns {any}
+ */
+function issuerBlock(dcaData, issuerName) {
+  const blocks = dcaData.issuerData.filter(
+    (/** @type {any} */ record) => record.issuerName === issuerName,
+  );
+  assert.equal(blocks.length, 1, `one issuerData record names ${issuerName}`);
+  return blocks[0];
+}
+
+/**
+ * Sealed period-key records as the period labels the request presents per
+ * accessGroup, in record order.
+ *
+ * @param {{ accessGroup: string, period: string }[]} records
+ * @returns {Record<string, string[]>}
+ */
+function periodsByGroup(records) {
+  /** @type {Record<string, string[]>} */
+  const periods = {};
+  for (const { accessGroup, period } of records) {
+    (periods[accessGroup] ??= []).push(period);
+  }
+  return periods;
+}
+
+/**
  * @param {{ importIssuerPrivateKey: (jwk: JsonWebKey) => Promise<CryptoKey>, importPublisherPublicKey: (jwk: JsonWebKey) => Promise<CryptoKey>, createIssuerEndpoint: (config: any) => { unlock: (rawRequest: string, input?: any) => Promise<{ status: number, body: any }> } }} driver
  * @param {any} vector
  */
@@ -15,7 +46,8 @@ async function fixtures(driver, vector) {
   const dcaData = vector.expected.dcaData;
   const [issuerFixture] = vector.input.issuers;
   const [publisherFixture] = vector.input.signingKeys;
-  const presentedPeriodKeys = dcaData.issuerData[issuerFixture.issuerName].sealed.periodKeys ?? {};
+  const presentedPeriodKeys =
+    issuerBlock(dcaData, issuerFixture.issuerName).sealed.periodKeys ?? [];
   const privateKey = await driver.importIssuerPrivateKey(issuerFixture.privateKeyJwk);
   const publicKey = await driver.importPublisherPublicKey(publisherFixture.publicKeyJwk);
   const origin = vector.input.origin;
@@ -48,12 +80,7 @@ async function fixtures(driver, vector) {
           assert.deepEqual(requested, {
             contentNames: ["bodytext", "locked-data"],
             accessGroups: ["premium", "locked-data"],
-            periodCoordinates: Object.fromEntries(
-              Object.entries(presentedPeriodKeys).map(([accessGroup, family]) => [
-                accessGroup,
-                Object.keys(family),
-              ]),
-            ),
+            periodCoordinates: periodsByGroup(presentedPeriodKeys),
           });
           assert.equal(claims.resource.renderId, dcaData.resource.renderId);
           assert.strictEqual(input.principal, principal);
@@ -81,7 +108,7 @@ async function fixtures(driver, vector) {
 export function referenceIssuerEndpointPortChecks(driver, vector) {
   const dcaData = vector.expected.dcaData;
   const [issuerFixture] = vector.input.issuers;
-  const sealed = dcaData.issuerData[issuerFixture.issuerName].sealed;
+  const sealed = issuerBlock(dcaData, issuerFixture.issuerName).sealed;
   const rawRequest = JSON.stringify({
     version: dcaData.version,
     issuerName: issuerFixture.issuerName,

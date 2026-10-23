@@ -208,10 +208,10 @@ export function keyByIssuer({ issuerName, accessGroup }) {
  * shape was cut for.
  *
  * @typedef {object} CacheStorage
- * @property {(key: string) => Promise<string|undefined>} get
- * @property {(key: string, value: string) => Promise<void>} set
- * @property {() => Promise<string[]>} keys
- * @property {(key: string) => Promise<void>} remove
+ * @property {(key: string) => string|undefined|Promise<string|undefined>} get
+ * @property {(key: string, value: string) => void|Promise<void>} set
+ * @property {() => string[]|Promise<string[]>} keys
+ * @property {(key: string) => void|Promise<void>} remove
  */
 
 /**

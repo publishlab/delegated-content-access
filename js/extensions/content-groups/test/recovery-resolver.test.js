@@ -29,10 +29,14 @@ function page() {
     {
       version: "1",
       resourceJWT: compactJwt({ origin: "https://news.example", renderId: "r-1" }),
-      issuerData: { issuer: { keyId: "k1", sealed: {} } },
-      contentData: {
-        bodytext: { contentType: "text/html", nonce: base64urlEncode(new Uint8Array(12)) },
-      },
+      issuerData: [{ issuerName: "issuer", keyId: "k1", sealed: {} }],
+      contentData: [
+        {
+          contentName: "bodytext",
+          contentType: "text/html",
+          nonce: base64urlEncode(new Uint8Array(12)),
+        },
+      ],
     },
     { publisherOrigin: "https://news.example" },
   );

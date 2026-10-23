@@ -205,9 +205,15 @@ and [recipient-grant unlock Sections 2 to 6](../docs/spec-profile--recipient-gra
 - [ ] **Publisher:** emit the reserved `dca-data` element, and the reserved
   `dca-sealed-content` element when the delivery carries ciphertext, as inert
   JSON `script` elements whose values cannot end or alter the element.
-- [ ] **Client:** inspect every element carrying a reserved class token,
+- [ ] **Client:** inspect every element in the parsed document's `body` subtree
+  with scripting enabled for parsing, carrying a reserved class token,
   enforce element type and cardinality, and fail the whole delivery on a
   duplicate or malformed reserved carrier. Every later step is the baseline's.
+
+The passive [script-text writer case](fixtures/v1/profiles/dca-profile-html-carrier/script-text/README.md)
+contains `</script>`, `</SCRIPT` and `<!--<script>`. The selected
+[HTML-writer contract](../js/test-contract/html-writer/README.md) checks semantic
+carrier preservation and a following page sentinel through a supplied writer.
 
 An issuer has no HTML carrier duty. Browser-origin admission is a separate
 profile and is neither selected nor required by this one.

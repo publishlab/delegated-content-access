@@ -61,6 +61,14 @@ for (const path of paths) {
     record.recordedFrom +=
       "; re-recorded 2026-10-19 via js/test-lib/fixtures/record-publisher-composition.js for fixed content nonce and renderId/name AAD; seeded key/wrap/envelope draws shift after removing item nonce draws";
   }
+  if (!record.recordedFrom.includes("derived period-wrap nonce")) {
+    record.recordedFrom +=
+      "; re-recorded 2026-10-20 via js/test-lib/fixtures/record-publisher-composition.js for the derived period-wrap nonce and { t, key } entries; seeded envelope draws shift after removing wrap nonce draws";
+  }
+  if (!record.recordedFrom.includes("named-record")) {
+    record.recordedFrom +=
+      "; re-recorded 2026-10-22 via js/test-lib/fixtures/record-publisher-composition.js for named-record wire collections and 97-byte ordinary ECDH envelopes with an implicit zero IV; recorded ECDH pairs are unchanged, and the IV draws were the last draws of each render, so no other draw moved";
+  }
   const next = await format(JSON.stringify(record), {
     ...(await resolveConfig(fileURLToPath(file))),
     filepath: fileURLToPath(file),

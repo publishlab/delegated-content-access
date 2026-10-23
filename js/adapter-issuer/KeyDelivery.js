@@ -19,6 +19,7 @@ import {
   isRetirementLeaf,
   mapComposedSections,
   mapDeliveredKeys,
+  recordPath,
   settleComposedSections,
 } from "../core-shared--client-issuer/responseKeys.js";
 import { own } from "../core-shared/wire.js";
@@ -27,27 +28,31 @@ import { DcaRequest } from "../core-shared--client-issuer/DcaRequest.js";
 /**
  * The issuer core defines the response shape, but a client-bound adapter
  * cannot safely pass malformed key material through while it marks the body
- * as wrapped. Validate the two delivered-key sections at their actual depths
- * before a sealer sees any value.
+ * as wrapped. Validate each delivered-key section as an array of records with
+ * their coordinate fields before a sealer sees any value. The record is the
+ * array element and its `key` member the value to wrap.
  *
- * @param {any} node
- * @param {number} depth
+ * @param {any} collection
+ * @param {readonly string[]} fields
  * @param {number} expectedBytes
- * @param {'contentKey'|'periodKey'|'chainKey'} keyKind
+ * @param {string} keyKind
  */
-function requireBase64urlKeyEntries(node, depth, expectedBytes, keyKind) {
-  if (depth === 0) {
-    if (typeof node !== "string") {
+function requireBase64urlKeyRecords(collection, fields, expectedBytes, keyKind) {
+  if (!Array.isArray(collection)) {
+    throw dcaError("bad_config", "client-bound delivery needs key record arrays");
+  }
+  for (const record of collection) {
+    if (recordPath(record, fields) === null) {
+      throw dcaError(
+        "bad_config",
+        "client-bound delivery needs key records with their coordinate fields",
+      );
+    }
+    const key = own(record, "key");
+    if (typeof key !== "string") {
       throw dcaError("bad_config", "client-bound delivery needs string key entries");
     }
-    keyEntryBytes(node, expectedBytes, keyKind);
-    return;
-  }
-  if (node === null || typeof node !== "object") {
-    throw dcaError("bad_config", "client-bound delivery needs correctly nested key sections");
-  }
-  for (const name of Object.keys(node)) {
-    requireBase64urlKeyEntries(node[name], depth - 1, expectedBytes, keyKind);
+    keyEntryBytes(key, expectedBytes, keyKind);
   }
 }
 
@@ -84,16 +89,17 @@ function requireClientBoundKeyShape(keys) {
     throw dcaError("bad_config", "client-bound delivery needs a keys object");
   }
   const contentKeys = own(keys, "contentKeys");
-  if (contentKeys !== undefined) requireBase64urlKeyEntries(contentKeys, 1, 16, "contentKey");
+  if (contentKeys !== undefined)
+    requireBase64urlKeyRecords(contentKeys, ["contentName"], 16, "contentKey");
 
   const periodKeys = own(keys, "periodKeys");
   if (periodKeys !== undefined) {
-    requireBase64urlKeyEntries(periodKeys, 2, 16, "periodKey");
+    requireBase64urlKeyRecords(periodKeys, ["accessGroup", "period"], 16, "periodKey");
   }
 
   const chainKeys = own(keys, "chainKeys");
   if (chainKeys !== undefined) {
-    requireBase64urlKeyEntries(chainKeys, 2, 16, "chainKey");
+    requireBase64urlKeyRecords(chainKeys, ["accessGroup", "cutoff"], 16, "chainKey");
   }
 }
 
@@ -106,39 +112,36 @@ function requireClientBoundKeyShape(keys) {
 const BASE_BODY_MEMBERS = Object.freeze(["keys", "errors", "notDelivered", "periodGeometry"]);
 
 /**
- * A declared error map is records down to the section's depth, and every leaf
- * is exactly `{ error: "key_retired" }`. It is never wrapped, so nothing else
- * may sit in it: a free-form leaf would carry key bytes out raw.
+ * A declared error collection is an array of records, each exactly the
+ * section's coordinate fields and `error: "key_retired"`. It is never
+ * wrapped, so nothing else may sit in it: a free-form record would carry key
+ * bytes out raw.
  *
  * @param {any} value
- * @param {number} depth
+ * @param {readonly string[]} fields
  * @param {string[]} path
  */
-function requireRetirementLeaves(value, depth, path) {
-  if (depth === 0) {
-    if (!isRetirementLeaf(value))
-      throw dcaError("bad_config", `${path.join(".")} is not a key_retired error record`);
-    return;
-  }
-  if (value === null || typeof value !== "object" || Array.isArray(value))
-    throw dcaError("bad_config", `the error map ${path.join(".")} is not nested to its depth`);
-  for (const name of Object.keys(value))
-    requireRetirementLeaves(value[name], depth - 1, [...path, name]);
+function requireRetirementRecords(value, fields, path) {
+  if (!Array.isArray(value))
+    throw dcaError("bad_config", `the error collection ${path.join(".")} is not an array`);
+  for (const record of value)
+    if (!isRetirementLeaf(record, fields))
+      throw dcaError("bad_config", `${path.join(".")} holds a record that is not key_retired`);
 }
 
 /**
  * Structural nodes above declared sections and error maps are closed:
  * declaring one child does not permit an undeclared sibling to leave raw. At a
- * section terminal, its existing depth and leaf validation owns the payload
- * and metadata; at an error-map terminal, only fixed retirement leaves pass.
+ * section terminal, its record validation owns the payload and metadata; at
+ * an error-collection terminal, only fixed retirement records pass.
  *
  * @param {any} body
  * @param {readonly Readonly<import("../core-shared--client-issuer/responseKeys.js").ComposedSection>[]} sections
  */
 function requireDeclaredMembers(body, sections) {
-  /** @typedef {{ terminal: boolean, errorDepth: number|null, children: Map<string, SectionNode> }} SectionNode */
+  /** @typedef {{ terminal: boolean, errorFields: readonly string[]|null, children: Map<string, SectionNode> }} SectionNode */
   /** @returns {SectionNode} */
-  const node = () => ({ terminal: false, errorDepth: null, children: new Map() });
+  const node = () => ({ terminal: false, errorFields: null, children: new Map() });
   const root = node();
   /** @param {readonly string[]} path */
   const terminalAt = (path) => {
@@ -151,12 +154,12 @@ function requireDeclaredMembers(body, sections) {
   };
   for (const section of sections) {
     terminalAt(section.path).terminal = true;
-    if (section.errorPath !== undefined) terminalAt(section.errorPath).errorDepth = section.depth;
+    if (section.errorPath !== undefined) terminalAt(section.errorPath).errorFields = section.fields;
   }
   /** @param {any} value @param {SectionNode} at @param {string[]} path */
   const walk = (value, at, path) => {
-    if (value !== undefined && at.errorDepth !== null) {
-      requireRetirementLeaves(value, at.errorDepth, path);
+    if (value !== undefined && at.errorFields !== null) {
+      requireRetirementRecords(value, at.errorFields, path);
       return;
     }
     if (at.terminal || value === undefined) return;
@@ -181,8 +184,8 @@ function requireDeclaredMembers(body, sections) {
 const BASE_KIND_WIDTHS = Object.freeze({ contentKey: 16, periodKey: 16, chainKey: 16 });
 
 /**
- * Validate every key entry of the composed sections at its declared depth,
- * leaf member and kind width before a sealer sees any value, the way the base
+ * Validate every key record of the composed sections against its declared
+ * fields and kind width before a sealer sees any value, the way the base
  * sections are validated: a client-bound body never carries a composed key it
  * could not wrap.
  *
@@ -195,29 +198,7 @@ function requireComposedKeyShape(body, sections, widthOf) {
     let node = body;
     for (const name of section.path) node = own(node, name);
     if (node === undefined) continue;
-    const width = widthOf(section.keyKind);
-    /** @param {any} value @param {number} depth */
-    const walk = (value, depth) => {
-      if (depth === 0) {
-        const key = section.leafKey === undefined ? value : own(value, section.leafKey);
-        if (
-          section.leafKey !== undefined &&
-          (value === null || typeof value !== "object" || Array.isArray(value))
-        ) {
-          throw dcaError("bad_config", "client-bound delivery needs record leaves in this section");
-        }
-        if (typeof key !== "string") {
-          throw dcaError("bad_config", "client-bound delivery needs string key entries");
-        }
-        keyEntryBytes(key, width, /** @type {any} */ (section.keyKind));
-        return;
-      }
-      if (value === null || typeof value !== "object" || Array.isArray(value)) {
-        throw dcaError("bad_config", "client-bound delivery needs correctly nested key sections");
-      }
-      for (const name of Object.keys(value)) walk(value[name], depth - 1);
-    };
-    walk(node, section.depth);
+    requireBase64urlKeyRecords(node, section.fields, widthOf(section.keyKind), section.keyKind);
   }
 }
 

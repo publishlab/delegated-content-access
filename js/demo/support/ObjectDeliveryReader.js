@@ -23,22 +23,23 @@
 // `sealedContent` is stripped from `dcaData` because the markup form does not
 // carry it there: the blobs live in a template beside the data block, so a
 // client reading either form sees the same `dcaData` members. It is read as an
-// own member, so an inherited one is absent, and a present value that is not a
-// map of ciphertext means the delivery announced a carrier it did not supply.
-// An enclosing array is turned away as a delivery, and a carrier keyed by a
-// name outside the contentName grammar is rejected whole, like every
-// identifier-keyed map.
+// own member, so an inherited one is absent, and a present value that is not an
+// array of ciphertext records means the delivery announced a carrier it did not
+// supply. An enclosing array is turned away as a delivery, and a carrier with a
+// record named outside the contentName grammar is rejected whole, like every
+// identifier-carrying collection.
 
 import { dcaError } from "../../core-shared/errors.js";
 import { isContentName } from "../../core-shared/names.js";
 import { normalizePublisherOrigin } from "../../core-shared/publisherOrigin.js";
 import { own } from "../../core-shared/wire.js";
+import { recordsByName } from "../../core-shared--client-publisher/deliveryRecords.js";
 
 export class ObjectDeliveryReader {
   /** @type {any} */
   #dcaData;
 
-  /** @type {any} */
+  /** @type {Map<string, any>|null} */
   #sealedContent;
 
   /** @type {string} */
@@ -64,25 +65,24 @@ export class ObjectDeliveryReader {
     // from this delivery. The spread below copies own
     // enumerable members, so the two halves of the split read alike.
     const sealedContent = own(parsed, "sealedContent");
-    if (
-      sealedContent !== undefined &&
-      (sealedContent === null || typeof sealedContent !== "object" || Array.isArray(sealedContent))
-    ) {
-      throw dcaError("bad_page", "the sealedContent carrier is not an object");
+    if (sealedContent !== undefined && !Array.isArray(sealedContent)) {
+      throw dcaError("bad_page", "the sealedContent carrier is not an array");
     }
-    // The carrier is keyed by contentName, and the format rejects such a
-    // map on one member name outside the grammar instead of passing over
-    // that member, so a carrier the publisher composed wrong costs every
+    // The carrier's records are named by contentName, and the format rejects
+    // such a collection on one name outside the grammar instead of passing
+    // over that record, so a carrier the publisher composed wrong costs every
     // blob on the delivery rather than the one it named badly.
-    for (const name of Object.keys(sealedContent ?? {})) {
-      if (!isContentName(name)) {
-        throw dcaError("bad_page", "the sealedContent carrier carries a name outside the grammar");
-      }
+    const records =
+      sealedContent === undefined
+        ? null
+        : recordsByName(sealedContent, "contentName", isContentName);
+    if (sealedContent !== undefined && records === null) {
+      throw dcaError("bad_page", "the sealedContent carrier carries a name outside the grammar");
     }
     const dcaData = { .../** @type {any} */ (parsed) };
     delete dcaData.sealedContent;
     this.#dcaData = dcaData;
-    this.#sealedContent = sealedContent ?? null;
+    this.#sealedContent = records;
     this.#publisherOrigin = publisherOrigin;
   }
 
@@ -111,7 +111,7 @@ export class ObjectDeliveryReader {
   extract(contentName) {
     if (!isContentName(contentName)) return null;
 
-    const value = own(this.#sealedContent, contentName);
+    const value = own(this.#sealedContent?.get(contentName), "content");
     return typeof value === "string" ? value : null;
   }
 }

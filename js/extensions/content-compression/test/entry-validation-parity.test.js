@@ -15,6 +15,7 @@ import { Sealer } from "../../../core-publisher/Sealer.js";
 import { composePublisherConfig } from "../../../core-publisher/publisherComposition.js";
 import { CompressingSealer } from "../core-publisher/CompressingSealer.js";
 import { encode as gzipEncode } from "../core-shared--client-publisher/gzipCodec.js";
+import { contentRecordOf, issuerBlockOf, wrapGroupsOn } from "../../../test-lib/helpers/inspect.js";
 import { ARTICLE, GROUP, ISSUER, SIDEBAR, world } from "./world.js";
 
 /** @param {string} code */
@@ -147,10 +148,12 @@ test("base and the adapter admit an ungrouped item beside a grouped one under a 
       sealer.content("bodytext", ARTICLE, "text/html", { accessGroups: [GROUP] });
       assert.equal(sealer.content("sidebar", SIDEBAR, "text/html", options), sealer, kind);
       const { dcaData } = await sealer.seal();
-      assert.equal(Object.hasOwn(dcaData.contentData.sidebar, "keys"), false, kind);
-      assert.deepEqual(Object.keys(dcaData.contentData.bodytext.keys), [GROUP], kind);
+      assert.equal(Object.hasOwn(contentRecordOf(dcaData, "sidebar"), "keys"), false, kind);
+      assert.deepEqual(wrapGroupsOn(dcaData, "bodytext"), [GROUP], kind);
       assert.deepEqual(
-        Object.keys(dcaData.issuerData[ISSUER].sealed.contentKeys),
+        issuerBlockOf(dcaData, ISSUER).sealed.contentKeys.map(
+          (/** @type {any} */ record) => record.contentName,
+        ),
         ["bodytext", "sidebar"],
         kind,
       );
@@ -212,7 +215,7 @@ test("base and the adapter refuse a named group without a period-key supply alik
   adapter.content("bodytext", ARTICLE, "text/html", {});
   assert.equal(encodes, 0, "every refusal came before the codec");
   const { dcaData } = await adapter.seal();
-  assert.equal(Object.hasOwn(dcaData.contentData.bodytext, "keys"), false);
+  assert.equal(Object.hasOwn(contentRecordOf(dcaData, "bodytext"), "keys"), false);
   assert.equal(encodes, 1);
 });
 
@@ -281,8 +284,8 @@ test("base and the adapter carry a declared item option to the render on every a
     late.section = "changed";
     const { dcaData } = await sealer.seal();
     records[kind] = Object.fromEntries(
-      Object.entries(dcaData.contentData).map(([name, record]) => [
-        name,
+      dcaData.contentData.map((/** @type {any} */ record) => [
+        record.contentName,
         { itemTag: record.itemTag, encodings: record.contentEncodings },
       ]),
     );

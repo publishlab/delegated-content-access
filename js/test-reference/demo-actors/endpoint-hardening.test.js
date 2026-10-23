@@ -1,6 +1,7 @@
 import test, { describe } from "node:test";
 import assert from "node:assert/strict";
 import { requestFor } from "../../test-lib/harnesses/issuer-endpoint.js";
+import { contentKeyMap, keyAt } from "../support/namedRecords.js";
 import {
   ARTICLE_GROUP,
   BODYTEXT,
@@ -42,12 +43,13 @@ describe("The refusal observer, application-side", () => {
     // Admission processor: a known caller, but a request whose shape the caps
     // refuse ahead of the engine.
     const padded = structuredClone(requestFor(page, ISSUER_NAME, [BODYTEXT, PREMIUM]));
-    const [firstPeriod] = Object.keys(padded.sealed.periodKeys[ARTICLE_GROUP]);
-    const blob = padded.sealed.periodKeys[ARTICLE_GROUP][firstPeriod];
+    const blob = keyAt(padded.sealed.periodKeys, { accessGroup: ARTICLE_GROUP });
     for (let index = 0; index < 50; index++) {
-      padded.sealed.periodKeys[ARTICLE_GROUP][
-        `991023T${String(Math.floor(index / 60)).padStart(2, "0")}${String(index % 60).padStart(2, "0")}`
-      ] = blob;
+      padded.sealed.periodKeys.push({
+        accessGroup: ARTICLE_GROUP,
+        period: `991023T${String(Math.floor(index / 60)).padStart(2, "0")}${String(index % 60).padStart(2, "0")}`,
+        key: blob,
+      });
     }
     const structural = await network.post(UNLOCK_URL, padded, {
       from: {},
@@ -174,7 +176,7 @@ describe("The auth gate, ahead of any asymmetric operation", () => {
       // rejects it before JWT selection, authentication or asymmetric work.
       flood = await network.post(
         UNLOCK_URL,
-        { version: "1", sealed: { contentKeys: { a: "b" } } },
+        { version: "1", sealed: { contentKeys: [{ contentName: "a", key: "b" }] } },
         { from: caller, origin: PUBLISHER_ORIGIN },
       );
     } finally {
@@ -212,7 +214,10 @@ describe("The auth gate, ahead of any asymmetric operation", () => {
     }
 
     assert.equal(granted.status, 200);
-    assert.deepEqual(Object.keys(granted.body.keys.contentKeys), [BODYTEXT, PREMIUM]);
+    assert.deepEqual(Object.keys(contentKeyMap(granted.body.keys.contentKeys)), [
+      BODYTEXT,
+      PREMIUM,
+    ]);
     // Once: the browser boundary's verified claims are reused by the engine
     // for this same admitted request. What the gate above buys is unchanged:
     // an unidentified caller pays for neither verification nor unsealing.
@@ -238,7 +243,7 @@ describe("The auth gate, ahead of any asymmetric operation", () => {
       origin: PUBLISHER_ORIGIN,
     });
     assert.equal(answer.status, 200);
-    assert.deepEqual(Object.keys(answer.body.keys.contentKeys), [BODYTEXT]);
+    assert.deepEqual(Object.keys(contentKeyMap(answer.body.keys.contentKeys)), [BODYTEXT]);
   });
 
   test("a uniform server says nothing about who it turned away", async () => {
@@ -326,11 +331,13 @@ describe("The entry caps, ahead of the unseal", () => {
 
     const request = requestFor(page, ISSUER_NAME, [BODYTEXT, PREMIUM]);
     const padded = structuredClone(request);
-    const [firstPeriod] = Object.keys(padded.sealed.periodKeys[ARTICLE_GROUP]);
+    const blob = keyAt(padded.sealed.periodKeys, { accessGroup: ARTICLE_GROUP });
     for (let index = 0; index < 50; index++) {
-      padded.sealed.periodKeys[ARTICLE_GROUP][
-        `991023T${String(Math.floor(index / 60)).padStart(2, "0")}${String(index % 60).padStart(2, "0")}`
-      ] = padded.sealed.periodKeys[ARTICLE_GROUP][firstPeriod];
+      padded.sealed.periodKeys.push({
+        accessGroup: ARTICLE_GROUP,
+        period: `991023T${String(Math.floor(index / 60)).padStart(2, "0")}${String(index % 60).padStart(2, "0")}`,
+        key: blob,
+      });
     }
 
     const meter = cryptoMeter();
@@ -452,7 +459,7 @@ describe("The fallback health gate, behind the verified render", () => {
     });
 
     assert.equal(answer.status, 200);
-    assert.equal(typeof answer.body.keys.contentKeys[BODYTEXT], "string");
+    assert.equal(typeof keyAt(answer.body.keys.contentKeys, { contentName: BODYTEXT }), "string");
     assert.equal(server.stats().probes, 1);
     assert.equal(server.stats().grants, 1);
   });

@@ -47,10 +47,12 @@ function malformed(message) {
 }
 
 /**
- * Validate raw selector bounds before deduplicating, then return a deterministic
- * own-property map. `family` must return the already-admitted chain input view.
- * Geometry/grid checks apply only to valid source families; hints never repair
- * or change the scope of a malformed or absent source.
+ * Validate the `[{accessGroup, periods}]` selector and return its union per
+ * group as a deterministic own-property map. Raw labels count across every
+ * record of a group, and across the request, before any union or dedupe
+ * (chain keys Section 12.4). `family` must return the already-admitted chain
+ * input view. Geometry/grid checks apply only to valid source families; hints
+ * never repair or change the scope of a malformed or absent source.
  *
  * @param {unknown} value
  * @param {(accessGroup: string) => any} family
@@ -58,23 +60,30 @@ function malformed(message) {
  */
 export function normalizeRequestedPeriodKeys(value, family) {
   if (value === undefined) return {};
-  if (!record(value) || Object.keys(value).length === 0) {
-    malformed("requestedPeriodKeys is a non-empty access-group map");
+  if (!Array.isArray(value) || value.length === 0) {
+    malformed("requestedPeriodKeys is a non-empty record array");
   }
 
-  const groups = Object.keys(value);
+  /** @type {Map<string, unknown[]>} */
+  const byGroup = new Map();
   let rawTotal = 0;
-  for (const accessGroup of groups) {
+  for (const entry of value) {
+    if (!record(entry)) malformed("each requestedPeriodKeys element is a record");
+    const accessGroup = own(entry, "accessGroup");
     try {
-      validateChainKeyAccessGroup(accessGroup);
+      validateChainKeyAccessGroup(/** @type {any} */ (accessGroup));
     } catch {
       malformed("requestedPeriodKeys names an admitted access group");
     }
-    const labels = own(value, accessGroup);
+    const labels = own(entry, "periods");
     if (!Array.isArray(labels) || labels.length === 0) {
-      malformed("each requestedPeriodKeys family is a non-empty label array");
+      malformed("each requestedPeriodKeys record holds a non-empty label array");
     }
-    if (labels.length > MAX_REQUESTED_PERIODS_PER_FAMILY) {
+    const group = /** @type {string} */ (accessGroup);
+    const held = byGroup.get(group) ?? [];
+    held.push(...labels);
+    byGroup.set(group, held);
+    if (held.length > MAX_REQUESTED_PERIODS_PER_FAMILY) {
       malformed("a requestedPeriodKeys family exceeds its input bound");
     }
     rawTotal += labels.length;
@@ -85,8 +94,7 @@ export function normalizeRequestedPeriodKeys(value, family) {
 
   /** @type {Record<string, string[]>} */
   const normalized = {};
-  for (const accessGroup of groups) {
-    const labels = /** @type {unknown[]} */ (own(value, accessGroup));
+  for (const [accessGroup, labels] of byGroup) {
     const admittedFamily = family(accessGroup);
     for (const label of labels) {
       if (!canonicalLabel(label)) {
@@ -94,7 +102,7 @@ export function normalizeRequestedPeriodKeys(value, family) {
       }
       if (admittedFamily?.kind === "valid") {
         try {
-          chainKeyCoordinate(label, admittedFamily.geometry);
+          chainKeyCoordinate(/** @type {string} */ (label), admittedFamily.geometry);
         } catch {
           malformed("requestedPeriodKeys labels lie on their admitted family geometry");
         }
@@ -103,4 +111,18 @@ export function normalizeRequestedPeriodKeys(value, family) {
     setOwn(normalized, accessGroup, [...new Set(/** @type {string[]} */ (labels))].sort());
   }
   return normalized;
+}
+
+/**
+ * The wire spelling of a normalized selector: one record per group, in the
+ * map's order.
+ *
+ * @param {Record<string, string[]>} normalized
+ * @returns {{ accessGroup: string, periods: string[] }[]}
+ */
+export function requestedPeriodKeyRecords(normalized) {
+  return Object.entries(normalized).map(([accessGroup, periods]) => ({
+    accessGroup,
+    periods: [...periods],
+  }));
 }

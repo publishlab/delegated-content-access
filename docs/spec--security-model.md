@@ -143,8 +143,8 @@ supplied period key reaches items outside that issuer's item selection, is
 defined in [core Section 2.1](spec--core-protocol.md#21-publisher).
 
 **Issuer-decision invariant.** The client controls the unsigned unlock
-request, including the `sealed` maps. The client names coordinates with those
-maps; only the issuer decides grants. The
+request, including the `sealed` collections. The client names coordinates with those
+collections; only the issuer decides grants. The
 issuer makes every entitlement, meter and policy decision from verified
 `resourceJWT` claims plus issuer-held identity, configuration and state; it
 then opens only sealed values whose use that decision permits
@@ -414,6 +414,46 @@ chain key reaches its window prefix
 ([chain keys Section 24.1](spec-profile--chain-keys.md#capability-monotonicity)), a
 period key one coordinate.
 
+### 10.1. Reconstructible cryptographic values (informative)
+
+DCA aims to avoid transmitting cryptographic values that both peers can
+reconstruct from their existing inputs, while preserving the selected
+construction's security requirements. A specified fixed or derived nonce can
+reduce wire size without adding a separate field. Values that the construction
+requires the sender to carry remain explicit.
+
+A nonce need not be secret. For GCM, its essential requirement is uniqueness
+under the same key, subject to the construction's collision and usage bounds.
+[RFC 5116 Sections 2.1 and 3.1](https://www.rfc-editor.org/rfc/rfc5116.html#section-2.1)
+permit nonce formation methods that meet the uniqueness requirement and discuss
+reconstruction when the complete nonce is not transmitted. This supports the
+design goal; it does not establish the security of a particular derivation.
+
+Nonce, AAD and BIND have distinct responsibilities:
+
+- **Nonce:** distinguish encryption operations under the same key, within
+  the selected construction's collision and usage bounds.
+- **AAD:** authenticate the context selected by the mechanism, using the same
+  unambiguous octets at encryption and opening. It authenticates only the
+  fields that the mechanism actually includes.
+- **BIND:** tie a publisher-sealed key to its specified render, key kind and
+  coordinate. The issuer reconstructs it from verified render claims and the
+  coordinate whose use its access decision permits; BIND itself grants no access.
+
+Additional AAD cannot compensate for GCM nonce reuse. A construction is
+assessed by these properties and its input assumptions, including required
+entropy, freshness and domain separation. A separate random draw is not
+inherently necessary for every value, but deterministic derivation must
+preserve the selected construction's requirements.
+
+Each mechanism specification fixes its nonce procedure, exact inputs and
+encoding, key lifetime, freshness requirements and applicable usage limits.
+Implementations follow that procedure; this goal does not permit omitting a
+field that the selected mechanism requires. Freshness and key-use requirements
+are part of the construction's security assumptions. Libraries should perform
+the specified derivation automatically and make those requirements explicit
+at their configuration and lifecycle boundaries.
+
 ## 11. Normative References
 
 - [DCA core protocol](spec--core-protocol.md)
@@ -428,6 +468,7 @@ period key one coordinate.
 ## 12. Informative References
 
 - [RFC 3552: Guidelines for Writing RFC Text on Security Considerations](https://www.rfc-editor.org/info/rfc3552)
+- [RFC 5116: An Interface and Algorithms for Authenticated Encryption](https://www.rfc-editor.org/rfc/rfc5116.html)
 - [NIST post-quantum security categories](https://csrc.nist.gov/projects/post-quantum-cryptography/post-quantum-cryptography-standardization/evaluation-criteria/security-%28evaluation-criteria%29)
 - [NIST post-quantum cryptography FAQ](https://csrc.nist.gov/Projects/Post-Quantum-Cryptography/faqs)
 - [DCA deployment patterns](guide--deployment-patterns.md)

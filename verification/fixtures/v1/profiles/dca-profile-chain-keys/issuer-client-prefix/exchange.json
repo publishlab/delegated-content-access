@@ -9,35 +9,42 @@
       "request": {
         "version": "1",
         "issuerName": "paywall_subscription_service",
-        "resourceJWT": "eyJhbGciOiJFUzI1NiIsInR5cCI6IkpXVCIsImtpZCI6InNpZ24tMjAyNS0xMCJ9.eyJyZW5kZXJJZCI6ImdRNlU1OGQ0ejBja1l5WFQzbFkzVWciLCJvcmlnaW4iOiJodHRwczovL3d3dy5uZXdzLXNpdGUuZXhhbXBsZSIsImlzc3VlZEF0IjoiMjAyNS0xMC0yM1QxNDoxNTowMC4wMDBaIiwicmVzb3VyY2VJZCI6ImJ1bGxldGluLTI1MTAyM1QxNDE1IiwiZGF0YSI6eyJzZWN0aW9uIjoiaGFyYm91ciJ9fQ.XnpRjS6XRkAihvlVmFcKzBZ6_Wm-ox67WtEFIJoXK4pZPwE9M6i4EOGDF9AoHbmTk_-jTeES0BT9Lj_r0Lc0Gg",
+        "resourceJWT": "eyJhbGciOiJFUzI1NiIsInR5cCI6IkpXVCIsImtpZCI6InNpZ24tMjAyNS0xMCJ9.eyJyZW5kZXJJZCI6IjNublRraGlFUDZTc0ZXemxfQUVYc2ciLCJvcmlnaW4iOiJodHRwczovL3d3dy5uZXdzLXNpdGUuZXhhbXBsZSIsImlzc3VlZEF0IjoiMjAyNS0xMC0yM1QxNDoxNTowMC4wMDBaIiwicmVzb3VyY2VJZCI6ImJ1bGxldGluLTI1MTAyM1QxNDE1IiwiZGF0YSI6eyJzZWN0aW9uIjoiaGFyYm91ciJ9fQ.zW5xUVIg-Q99CKdop-0tofytqFdRHyDT8D2jWGl3n0YLgJa-LfX1QjnGcCuN2B3ls8dJXPQdAS3IlGm71HIBNQ",
         "keyId": "2025-10",
         "periodGeometry": {
           "chainsPerDay": 2,
           "periodMinutes": 15
         },
-        "requestedPeriodKeys": {
-          "premium": [
-            "251023T1415"
-          ]
-        },
-        "sealed": {
-          "contentKeys": {},
-          "chainKeys": {
-            "premium": {
-              "251023T2345": "BGrvmPv5Xm0xzYHhmn8WKoFqHnNrlXE-5hfLhNE-AITTQTsGLvKgbbrJhL2vw9TU03mcKUa5FegGFeAdUqnvVZapDbntOYtimX0Wt_gha1wZkw5OrrXV7qg28P2FsKduftaCH7SDQmBXuY3r1g"
-            }
+        "requestedPeriodKeys": [
+          {
+            "accessGroup": "premium",
+            "periods": [
+              "251023T1415"
+            ]
           }
+        ],
+        "sealed": {
+          "contentKeys": [],
+          "chainKeys": [
+            {
+              "accessGroup": "premium",
+              "cutoff": "251023T2345",
+              "key": "BGrvmPv5Xm0xzYHhmn8WKoFqHnNrlXE-5hfLhNE-AITTQTsGLvKgbbrJhL2vw9TU03mcKUa5FegGFeAdUqnvVZZ-SlJVW3WVsIkOCsgVTOWeLl6ZRlhYmS8fGesHMJsw1A"
+            }
+          ]
         }
       },
       "status": 200,
       "body": {
         "keys": {
-          "contentKeys": {},
-          "chainKeys": {
-            "premium": {
-              "251023T1415": "vXxg30CDnydA4eLhmNIkmQ"
+          "contentKeys": [],
+          "chainKeys": [
+            {
+              "accessGroup": "premium",
+              "cutoff": "251023T1415",
+              "key": "vXxg30CDnydA4eLhmNIkmQ"
             }
-          }
+          ]
         }
       }
     }

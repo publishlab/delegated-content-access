@@ -7,7 +7,8 @@ Items carry neither nonce nor AAD. Type, encodings and other token claims are
 outside the current content tag; admitted changes can alter processing without
 failing authentication. Capture and handling admission remain required.
 Issuers still verify claims and authorize requests; cached opening need not
-contact them. Render/name relabeling still fails after period-key recovery.
+contact them. Render/name relabeling is bound by content AAD and, for period-key recovery,
+by the derived wrap nonce.
 [Content protection Section 3](../../../docs/spec--content-protection.md#3-base-protected-item-transcript)
 defines the current procedure. Current tests compare that procedure with the
 historical controls; the historical run counts below do not establish current
@@ -69,23 +70,22 @@ item keys, the test's direct cross-slot ciphertext swap fails even with no AAD.
 Neither local comparison demonstrates a conforming exchange or provenance
 from successful decryption.
 
-The stock publisher/issuer/client comparison covers the case the direct
-ciphertext swap misses. The publisher uses fresh independent keys for two
-items in one access group. With a period-only issuer supply, the issuer grants
-that group's period key through its selected period-key input, and the client
-can unwrap either item's key. Moving the _whole_ second item record, including
-its wrapped key, plus its ciphertext into the first item's slot recovers the
-second item's key for the first name. The stock client now refuses it: the
-adopted transcript names the selected slot. In the old-format control, the same
-render resealed under the carried string with the same issuer-reached keys
-returns the second item's plaintext for the first name, because the carried AAD
-travels with the record. The same issuer grant already covered both items, so
-this is selected slot integrity, not an entitlement expansion. An item-key-only
-issuer supply is the control: its direct key for the first slot cannot open the
-moved second record. A second real exchange moves a complete same-name record
-between two fresh renders at one resource ID and period. The stock client
-refuses it because the signing inputs differ; in the old-format control the
-carried AAD stays equal and the old plaintext opens in the new render.
+The stock publisher/issuer/client comparison moves whole records, not just
+ciphertext. With independent item keys and a real authorized period grant,
+the current derived wrap nonce rejects a record moved to another item name or
+render during key recovery (`no_key`), before content AAD is checked. These
+controls therefore exercise the complete current protection, rather than
+claiming to isolate content AAD from the wrap transcript.
+
+The historical comparison explicitly reseals both content and its period-key
+wraps with carried random nonces. A small historical AEAD opener uses the real
+issuer-granted period bytes directly; the current client never learns a legacy
+wrap-opening path. In that control, moving a whole record also moves its
+carried wrap nonce and content AAD, and its authorized plaintext opens in the
+other slot or render. Both same-group source items were already covered by the
+grant: the difference is selected slot/render integrity, not entitlement
+expansion. The item-key-only control still shows that the first item's direct
+key cannot open the second item's record.
 
 `token-representation-candidate.test.js` compares the adopted transcript, run
 through the production module

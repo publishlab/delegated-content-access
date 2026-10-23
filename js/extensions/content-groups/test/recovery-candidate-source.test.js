@@ -29,6 +29,7 @@ import {
   xor16,
 } from "../core-shared/construction.js";
 import { CHAIN } from "./_lib/chainPort.js";
+import { find, groupRecords } from "./_lib/records.js";
 
 const PUBLISHER = "https://news.example";
 const GEOMETRY = Object.freeze({ chainsPerDay: 2, periodMinutes: 60 });
@@ -52,23 +53,24 @@ function compactJwt(payload) {
  * A page whose items carry connectors for the given content keys and period
  * keys: `routes[name] = [{group, periodKey, contentKey}]`.
  * @param {Record<string, { group: string, periodKey: Uint8Array, contentKey: Uint8Array }[]>} routes
- * @param {Record<string, unknown>} [extra] - raw content records
+ * @param {Record<string, unknown>[]} [extra] - raw content records
  */
-async function page(routes, extra = {}) {
-  /** @type {Record<string, any>} */
-  const contentData = { ...extra };
+async function page(routes, extra = []) {
+  /** @type {Record<string, any>[]} */
+  const contentData = [...extra];
   for (const [contentName, list] of Object.entries(routes)) {
-    /** @type {Record<string, string>} */
-    const connectors = {};
+    /** @type {{ group: string, connector: string }[]} */
+    const connectors = [];
     for (const { group, periodKey, contentKey } of list) {
       const pad = await itemPad(periodKey, { renderId: RENDER_ID, contentName });
-      connectors[group] = base64urlEncode(xor16(contentKey, pad));
+      connectors.push({ group, connector: base64urlEncode(xor16(contentKey, pad)) });
     }
-    contentData[contentName] = {
+    contentData.push({
+      contentName,
       contentType: "text/html",
       nonce: base64urlEncode(new Uint8Array(12)),
       connectors,
-    };
+    });
   }
   return new DcaData(
     {
@@ -76,7 +78,7 @@ async function page(routes, extra = {}) {
       renderPeriod: T,
       periodGeometry: GEOMETRY,
       resourceJWT: compactJwt({ origin: PUBLISHER, renderId: RENDER_ID }),
-      issuerData: { issuer: { keyId: "k1", sealed: {} } },
+      issuerData: [{ issuerName: "issuer", keyId: "k1", sealed: {} }],
       contentData,
     },
     { publisherOrigin: PUBLISHER },
@@ -252,22 +254,25 @@ test("reset while the source awaits a cache: no further cache read and no candid
 test("an item without an admitted connector map, geometry or publisher yields nothing", async () => {
   const { calls, cache } = chainStandIn();
   const periodKeyCache = new PeriodKeyCache({ entryKind: CONTRACT.keyKinds.periodKey });
-  const dcaData = await page(
-    {},
+  const dcaData = await page({}, [
     {
-      ordinary: { contentType: "text/html", nonce: base64urlEncode(new Uint8Array(12)) },
-      emptyMap: {
-        contentType: "text/html",
-        nonce: base64urlEncode(new Uint8Array(12)),
-        connectors: {},
-      },
-      listed: {
-        contentType: "text/html",
-        nonce: base64urlEncode(new Uint8Array(12)),
-        connectors: [base64urlEncode(bytes16(1))],
-      },
+      contentName: "ordinary",
+      contentType: "text/html",
+      nonce: base64urlEncode(new Uint8Array(12)),
     },
-  );
+    {
+      contentName: "emptyMap",
+      contentType: "text/html",
+      nonce: base64urlEncode(new Uint8Array(12)),
+      connectors: [],
+    },
+    {
+      contentName: "listed",
+      contentType: "text/html",
+      nonce: base64urlEncode(new Uint8Array(12)),
+      connectors: [base64urlEncode(bytes16(1))],
+    },
+  ]);
   const resolver = resolverWith(periodKeyCache, cache);
   const result = await resolver.resolveAuthenticated(
     dcaData,
@@ -325,13 +330,14 @@ test("a period key filed under a response lease opens through that response's at
     createPeriodKeyCache: (config) => new PeriodKeyCache(config),
     createChainKeyCache: () => chainStandIn().cache,
   });
+  const COORDINATE = { contentName: "bodytext", group: "politics", period: T };
   const consumer = {
-    name: "contentGroups",
+    name: "contentGroupKeys",
     /** @param {any} section */
-    keyValues: (section) => [section.periodKeys.bodytext.politics[T]],
+    keyValues: (section) => [find(section.periodKeys, COORDINATE)?.key],
     /** @param {any} section @param {any} context */
     async admit(section, context) {
-      const opened = await context.openKey(section.periodKeys.bodytext.politics[T], {
+      const opened = await context.openKey(find(section.periodKeys, COORDINATE)?.key, {
         keyKind: CONTRACT.keyKinds.periodKey,
         raw: true,
       });
@@ -351,8 +357,8 @@ test("a period key filed under a response lease opens through that response's at
     dcaData,
     "issuer",
     {
-      contentGroups: {
-        periodKeys: { bodytext: { politics: { [T]: base64urlEncode(periodKey) } } },
+      contentGroupKeys: {
+        periodKeys: [{ ...COORDINATE, key: base64urlEncode(periodKey) }],
       },
     },
     new ResponseAssociation(dcaData, "issuer", {
@@ -361,7 +367,7 @@ test("a period key filed under a response lease opens through that response's at
       resourceJWT: dcaData.resourceJWT,
       keyId: "k1",
       sealed: {},
-      requestedContentGroups: { bodytext: ["politics"] },
+      requestedContentGroups: groupRecords({ bodytext: ["politics"] }),
     }),
   );
   assert.equal(application.accepted, 1);
@@ -415,7 +421,7 @@ test("the client bundle builds the two dedicated caches, the source and the kind
       periodView: "none",
       maxRivalsPerWindow: 2,
       maxMembersPerMessage: 300,
-      maxMembersPerFamily: 3,
+      maxMembersPerFamily: 300,
       maxWindowsPerFamily: 3,
       maxWindows: 100,
       storage,

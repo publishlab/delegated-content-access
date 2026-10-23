@@ -108,11 +108,14 @@ contentKeys under them.
 A replayer can diff the seal direction because the vector supplies everything
 the sealer would otherwise draw at random: `input.ephemeralKeys` is an array
 with one keypair record per sealed coordinate, including its `issuerName` and
-either its `contentName` or its `accessGroup` and `t`. The IVs are on the wire
-side - `expected.dcaData.contentData[name].nonce`, each
-`expected.dcaData.contentData[name].keys[group][i].nonce`, and for a sealed blob the 12 bytes
-the format packs inline at offset 65. A sealer with no way to inject those two
-can only be checked for width and round trip.
+either its `contentName` or its `accessGroup` and `t` (the fixture input label).
+The ordinary envelope nonce is twelve implicit zero octets; ciphertext and tag
+start at offset 65. A sealer with no way to inject the ephemeral keys can only
+be checked for width and round trip. Content encryption uses twelve zero nonce
+bytes. Select the `expected.dcaData.contentData` record by `contentName`; each
+record in its `keys` array is `{accessGroup, period, key}`, with a nonce derived
+from the render ID and the wrap's coordinate
+([content protection Section 4.1](../../docs/spec--content-protection.md#41-wrap-nonce)).
 
 **Format 2 is an unlock request an issuer must not answer as asked.** It carries
 `rawBody`, the issuer key material to process it with, and the `expected`
@@ -165,10 +168,10 @@ deterministic ECDH seals and an RSA-OAEP open under one binding grammar.
 **`ecdh-p256-envelope-open/v1` is a baseline content-key carrier open.** Its
 recorded blob and issuer test key were extracted from the `seal-ecdh` fixture
 that mixes content keys and period keys. An independent replay imports the issuer
-private key, parses the 65-byte ephemeral point and 12-byte nonce, derives the
-raw 32-byte ECDH x-coordinate, and uses those bytes directly as an AES-256-GCM
-key. The recorded BIND is UTF-8 additional data; a changed coordinate fails
-the tag. The package isolates one baseline carrier observation without
+private key, parses the 65-byte ephemeral point followed by ciphertext and tag,
+derives the raw 32-byte ECDH x-coordinate, and uses those bytes directly as an AES-256-GCM
+key with twelve implicit zero nonce octets. The recorded BIND is UTF-8
+additional data; a changed coordinate fails the tag. The package isolates one baseline carrier observation without
 counting the mixed render as baseline-only or claiming a complete profile.
 
 A replay that meets a `vectorFormat` it does not know has to fail, not skip.
@@ -217,21 +220,63 @@ script also refuses another JSON vector beside its named member, so a new
 member cannot sit in the set without a replay. It imports no implementation,
 writes nothing, and exits 1 on any disagreement.
 
+## Producers and recorded provenance
+
+`node js/tools/make-vectors.js --check` checks its configured 47 generated
+files: three protocol fixture packages and four vector/profile sets. It does
+not produce or regenerate every package in `sets.txt`. In particular, it does
+not own `v1/baseline/ecdh-p256-envelope-open/` or the recorded chain-key rows.
+A checksum match proves only consistency with the saved sums, not who produced
+the bytes or whether their cryptographic expectation is right.
+
+The ECDH carrier-open package was extracted from the mixed `seal-ecdh` fixture.
+Its ordinary 109-to-97-octet conversion was a separate manual producer step:
+retain the point, derive the raw shared x with the recorded recipient test
+key, and re-encrypt the recorded 16-octet plaintext under twelve zero nonce
+octets and the literal recorded BIND. Hybrid/compressed point-form negatives
+retain the ordinary positive ciphertext/tag. Historical capture hashes and
+source revisions remain historical provenance; they are not replaced by a
+reachable squash tip. `make-vectors.js` is not the producer of that conversion.
+
+The earlier off-curve row changed the point while preserving the positive
+ciphertext/tag, so it did not distinguish point validation from authentication
+failure. Its corrected row retains that point/scalar but authenticates under
+a deliberately nonvalidating scalar-multiplication control. This is test-only
+independent arithmetic, never a cryptographic implementation for deployment.
+The independent maintainer control uses affine addition/doubling with `a = -3`
+and the P-256 field prime while deliberately skipping the curve equation. It
+multiplies the recorded off-curve point by the recorded recipient scalar,
+uses the resulting 32-octet x directly as AES-256-GCM key, and encrypts the
+recorded content key under zero nonce and the literal BIND. Its raw x is:
+
+```text
+37613136a1909d6b365361d4a974a05fd22837fd7cb22ce3317633f8e2cc4986
+```
+
+The corrected 97-octet carrier's SHA-256 is
+`7c253a6498b4073cc51c1e9fd1e41155858b654b8b5fa4a817647e6854a604d6`.
+The same arithmetic reproduces both valid-row agreements, including the
+leading zero, and agrees with WebCrypto there. Lax opening authenticates the
+off-curve row, changed BIND fails authentication, and strict WebCrypto refuses
+the point. A port can replay the recorded refusal without implementing this
+custom arithmetic. These controls diagnose the row's discrimination; they
+supply no new protocol construction or trust assumption.
+
 ## Inside a sealed blob
 
-A value under `sealed.contentKeys` or `sealed.periodKeys` is base64url of a
-self-contained blob, and the two key types lay those bytes out differently. The
-wire carries no algorithm field, because the issuer knows its own key type.
+The `key` member of each named record in `sealed.contentKeys` or
+`sealed.periodKeys` is base64url of a
+self-contained blob. The selected envelope algorithm determines its layout.
+The wire carries no algorithm field, because the issuer knows its own key type.
 `../../js/core-shared--publisher-issuer/keySealing.js` seals and opens both.
 
 **ECDH P-256** uses fixed-size fields with no length prefixes, and the envelope
 specification carries their field table:
 [ECDH P-256 envelope](../../docs/spec--sealed-key-envelopes.md#4-ecdh-p-256-envelope).
-The reference reads those same three offsets out of `EPHEMERAL_BYTES` in
-`keySealing.js` and `NONCE_BYTES` and `TAG_BYTES` in
-`../../js/core-shared/aead.js`, which are 65, 12 and 16, so the canonical
-16-byte key seals to 109 bytes and 146 base64url characters. The binding value
-travels outside those bytes, as the AES-256-GCM `additionalData` that the issuer
+The carrier contains a 65-byte point, a 16-byte encrypted key and a 16-byte
+tag, so the canonical 16-byte key seals to 97 bytes and 130 base64url characters.
+The twelve-zero-octet AES-GCM nonce is implicit and is not carried. The binding
+value travels outside those bytes, as the AES-256-GCM `additionalData` that the issuer
 rebuilds and the tag covers.
 
 **RSA-OAEP** carries the binding inside the ciphertext instead, so the blob
@@ -256,7 +301,7 @@ the boundary from the fixed key width: the value is everything ahead of the last
 length, or that differs anywhere. Comparing only the first bytes would be a
 prefix test, and a prefix test opens `premiumtext`'s blob under a `premium`
 grant. A blob that is not one modulus wide fails as `unseal_failed` ahead of the
-decrypt, so a 109-byte ECDH blob routed to an RSA issuer draws a stated refusal
+decrypt, so a 97-byte ECDH blob routed to an RSA issuer draws a stated refusal
 rather than a bare `OperationError` from inside WebCrypto.
 
 OAEP draws its padding seed inside WebCrypto with nothing to inject, so an RSA
@@ -368,8 +413,11 @@ the two apart. `reject-duplicate-member-name` records the rule every
 reading shares instead: whatever comes back under a name is that name's own
 contentKey or nothing.
 
-**Own-property lookups on everything off the wire.** Every map in a request is
-keyed by a name the client picked, `constructor` and `__proto__` included.
+**Own-property lookups in internal indexes.** Wire key collections are arrays
+of named records. Request identity admission rejects invalid names; admitted
+names such as `constructor` still require own-property-safe indexing. Fixture
+`expected.keys`, `expected.errors` and `expected.bindings` may use lookup maps
+as observation schemas. They do not prescribe map-shaped wire collections.
 
 These codes and exact statuses describe the reference issuer; the browser
 binding fixes status classes where noted, not every code or exact status.

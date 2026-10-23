@@ -97,7 +97,11 @@ test("alternate-binding sealing equals core when given the core binding", async 
   const ephemeral = await subtle.generateKey({ name: "ECDH", namedCurve: "P-256" }, false, [
     "deriveBits",
   ]);
-  const nonceSource = { bytes: (length) => new Uint8Array(length).fill(0xa5) };
+  const nonceSource = {
+    bytes: () => {
+      throw new Error("ordinary envelope draws no nonce");
+    },
+  };
 
   const options = { binding, random: nonceSource, ephemeralKeyPair: ephemeral };
   const coreBlob = await coreSeal(key, issuerEcdh.publicKey, "ecdh-p256", options);
@@ -235,7 +239,7 @@ const payloadFilesIn = (dir) =>
     .filter((file) => file.endsWith(".json") && file !== "manifest.json")
     .sort();
 
-test("every fixture package on disk is one the generator or a recorder owns", () => {
+test("every fixture package on disk has a generator, recorder or passive-case owner", () => {
   const fixtureRoot = fileURLToPath(new URL("../../verification/fixtures/", import.meta.url));
   assert.deepEqual(
     discoverFixturePackageRoots(fixtureRoot).sort(),
@@ -243,6 +247,7 @@ test("every fixture package on disk is one the generator or a recorder owns", ()
       "fixtures/v1/baseline/issuer-admission",
       "fixtures/v1/profiles/dca-profile-chain-keys/geometry-admission",
       "fixtures/v1/profiles/dca-profile-chain-keys/issuer-client-prefix",
+      "fixtures/v1/profiles/dca-profile-html-carrier/script-text",
       "fixtures/v1/profiles/dca-profile-period-keys/issuer-admission",
       "fixtures/v1/profiles/dca-profile-period-keys/issuer-client-composition",
       "fixtures/v1/reference/protocol-regressions",
@@ -253,6 +258,14 @@ test("every fixture package on disk is one the generator or a recorder owns", ()
     FIXTURE_PACKAGES,
     PROTOCOL_FIXTURE_PACKAGES.map(({ id }) => id),
     "the generator writes exactly the three protocol fixture packages",
+  );
+  const targets = JSON.parse(
+    readFileSync(new URL("../test-contract/contract-targets.json", import.meta.url), "utf8"),
+  );
+  assert.deepEqual(
+    targets["html-writer"].fixtureSets,
+    ["fixtures/v1/profiles/dca-profile-html-carrier/script-text"],
+    "the selected HTML-writer contract replays the independently authored passive case",
   );
 });
 
@@ -314,8 +327,12 @@ for (const expected of PROTOCOL_FIXTURE_PACKAGES) {
             content.value,
             `${entry.path}: content value projection matches the publisher input`,
           );
+          const item = fixture.expected.dcaData.contentData.filter(
+            (/** @type {any} */ record) => record.contentName === content.name,
+          );
+          assert.equal(item.length, 1, `${entry.path}: one item record for ${content.name}`);
           assert.equal(
-            Object.hasOwn(fixture.expected.dcaData.contentData[content.name], "aadBase64url"),
+            Object.hasOwn(item[0], "aadBase64url"),
             false,
             `${entry.path}: the byte projection is not a wire member`,
           );

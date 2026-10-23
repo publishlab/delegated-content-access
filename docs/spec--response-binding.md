@@ -67,8 +67,9 @@ the issuer response.
 
 The input is the issuer-core result defined by
 [spec--core-protocol.md](spec--core-protocol.md#7-baseline-issuer-core-result).
-The issuer MUST preserve the core result's `keys` coordinates, complete `errors`
-entries and non-key members, including `notDelivered` when present.
+The issuer MUST preserve the core result's `keys` records and their coordinate
+fields, complete `errors` records and non-key members, including
+`notDelivered` when present.
 Chain-result geometry comes from the exact associated request, not a response
 echo. It may replace only delivered key entries with the selected
 representation and may add a top-level `transport` member; `transport` is the
@@ -85,8 +86,9 @@ entries and client-bound object key entries among supported sections is
 malformed; the client MUST reject the response representation.
 
 After discarding unsupported sections and applying container admission, the
-client classifies entries in the remaining key maps by JSON type, before
-individual coordinate or key-entry admission. A string counts as a direct
+client classifies the key entry, the `key` member, of each record in the
+remaining key collections by JSON type, before individual coordinate or
+key-entry admission. A string counts as a direct
 entry and a non-array object counts as a client-bound object entry, even when
 its method-specific members are absent or malformed. If both kinds occur,
 the client MUST reject the response representation. Other JSON values do not
@@ -119,6 +121,18 @@ retain no key for it; for the chain-key extension,
 [chain-keys Section 9](spec-profile--chain-keys.md#9-chain-key-role-requirements)
 states the window, position and captured-request geometry checks. A syntactically
 valid unsolicited key grants nothing.
+
+For response `keys.contentKeys`, `keys.periodKeys` and selected
+`keys.chainKeys`, identifier admission is per record. If a record's
+`contentName` or `accessGroup` is missing, is not a string or violates
+[data format Section 2.1](spec--data-format.md#21-identifiers), the client MUST
+reject that record and MUST NOT reject independently admissible sibling keys
+solely because of that identifier failure. This is an exception to the
+collection-wide identifier refusal rule for delivery and request collections.
+It applies after common container and representation admission; it MUST NOT
+bypass response association, mixed-representation rejection or selected
+transport checks. Failures in those shared checks retain their specified
+failure scope.
 
 Before surfacing or using an error, the client MUST admit its error-object
 shape and coordinate grammar and associate the coordinate with the presented
@@ -183,8 +197,9 @@ fallback and the client is known, under that same agreement, to accept it.
 
 ## 5. Direct representation
 
-A key entry is the JSON value at one coordinate of `keys.contentKeys`,
-`keys.periodKeys` or `keys.chainKeys`. A direct response has no `transport`
+A key entry is the `key` member of one record of `keys.contentKeys`,
+`keys.periodKeys` or `keys.chainKeys`. The record's other fields name its
+coordinate. A direct response has no `transport`
 member. Each of its key entries is the canonical unpadded base64url encoding of
 exactly 16 key octets (22 characters).
 
@@ -205,7 +220,7 @@ A client-bound response has:
 
 ```json
 {
-  "keys": { "contentKeys": {}, "periodKeys": {}, "chainKeys": {} },
+  "keys": { "contentKeys": [] },
   "transport": {
     "method": "METHOD"
   }
@@ -213,7 +228,9 @@ A client-bound response has:
 ```
 
 Method-specific members may occur in `transport`, and every delivered key entry
-is replaced by one method-specific object. Absent `transport` means direct
+is replaced by one method-specific object under the record's `key` member, for
+example `{ "contentName": "bodytext", "key": { "key": "WRAPPED_KEY", "nonce": "NONCE" } }`.
+The record keeps its coordinate fields beside it. Absent `transport` means direct
 transport; present `transport` selects client-bound transport. Its `method`
 MUST name a known method offered by the client and selected by the issuer.
 An unknown, missing or mismatched method makes the
@@ -242,8 +259,8 @@ A selected profile that adds a response section names the key kind of each
 section it adds, and the same kind context binds it. A profile reuses a base
 kind only for the same key use. The
 [content groups proposal](spec-profile--content-groups.md) binds
-`contentGroups.chainKeys` to `contentGroupChainKey`, `contentGroups.periodKeys`
-to `contentGroupPeriodKey` and `contentGroups.contentKeys` to `contentKey`.
+`contentGroupKeys.chainKeys` to `contentGroupChainKey`, `contentGroupKeys.periodKeys`
+to `contentGroupPeriodKey` and `contentGroupKeys.contentKeys` to `contentKey`.
 
 The client opens a delivered content key as a non-extractable AES-128-GCM
 handle with `decrypt` usage and a delivered period key as one with `unwrapKey`
@@ -428,7 +445,7 @@ code executing in the admitted client context.
 
 The client-bound transcripts bind no request identifier, render, issuer, origin
 or coordinate, and they authenticate each wrapped key only under its transport
-or RSA key, not the surrounding coordinate names or metadata. The kind context
+or RSA key, not the surrounding coordinate fields or metadata. The kind context
 separates key roles but does not stop a copied wrapped key entry being replayed
 to the same client. Admission against the associated request (Section 3) and the
 response channel (Section 2) are therefore mandatory parts of the guarantee: a

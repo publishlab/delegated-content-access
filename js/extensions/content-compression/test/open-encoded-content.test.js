@@ -3,8 +3,8 @@
 // The client half on its own, over a delivery and a ciphertext this test
 // builds with base primitives. This file checks the order of the two steps: an
 // item this opener cannot read is refused before its resolveKey callback.
-// It also checks that the opener reads the item through the captured view, so
-// the content AAD binds the type and encodings that pick the decoders.
+// It also checks that the opener uses the captured item view for decoder
+// selection. Content AAD binds the render ID and item name, not type or encodings.
 
 import test from "node:test";
 import assert from "node:assert/strict";
@@ -24,16 +24,23 @@ const RESOURCE_JWT =
   "eyJhbGciOiJFUzI1NiIsInR5cCI6IkpXVCJ9.eyJyZW5kZXJJZCI6IkFBQUFBQUFBQUFBQUFBQUFBQUFBQUEifQ.c2lnbmF0dXJl";
 
 /**
- * One delivery carrying `record` as its bodytext item.
+ * One delivery carrying `record` as its bodytext item. The item record gains
+ * its `contentName` and keeps the prototype `record` has, so a test about an
+ * inherited member still hands the reader one.
  *
  * @param {Record<string, unknown>} record
  */
 function delivery(record) {
+  const named = Object.assign(
+    Object.create(Object.getPrototypeOf(record)),
+    { contentName: "bodytext" },
+    record,
+  );
   return {
     version: "1",
     resourceJWT: RESOURCE_JWT,
-    contentData: { bodytext: record },
-    issuerData: { issuer_a: { keyId: "k", sealed: {} } },
+    contentData: [named],
+    issuerData: [{ issuerName: "issuer_a", keyId: "k", sealed: {} }],
   };
 }
 
@@ -259,4 +266,24 @@ test("the injected gzip is what opens the item", async () => {
 
   assert.equal(asked, 1, "the default was not reached behind the injected one");
   assert.deepEqual(bytes, utf8Encode(ARTICLE));
+});
+
+test("candidate origin reaches authentication through the compression convenience API", async () => {
+  const item = await sealed(utf8Encode(ARTICLE));
+  for (const [origin, code] of /** @type {const} */ ([
+    [{ kind: "held-content-key" }, "decrypt_failed"],
+    [{ kind: "recovered-content-key" }, "no_key"],
+  ])) {
+    await assert.rejects(
+      openEncodedContent({
+        item: captured(item.record),
+        ciphertext: item.ciphertext,
+        resolveKey: async (authenticate) => {
+          assert.equal(await authenticate(new Uint8Array(16).fill(7), origin), false);
+          return null;
+        },
+      }),
+      { code },
+    );
+  }
 });

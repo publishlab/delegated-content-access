@@ -26,6 +26,7 @@ import { randomPeriodKeySupply } from "../../demo/support/randomPeriodKeySupply.
 import { issuerKeypair, seededRandom, signingKeypair } from "../support/keys.js";
 import { refuses } from "../../test-lib/helpers/refuses.js";
 import { wholeRenderIssuerSupplyPlan } from "../../core-publisher/issuerSupplyPlan.js";
+import { contentRecordOf, issuerBlockOf } from "../../test-lib/helpers/inspect.js";
 
 /** The publisher entry hazards, each already refused by the shared grammar. */
 const HAZARDS = [
@@ -117,8 +118,11 @@ describe("The sealer refuses at entry", () => {
     cached.resource(RESOURCE_ID, {});
     assert.equal(cached.content("bodytext", "x", "text/html"), cached);
     const { dcaData } = await cached.seal();
-    assert.equal(Object.hasOwn(dcaData.contentData.bodytext, "keys"), false);
-    assert.deepEqual(Object.keys(dcaData.issuerData[ISSUER_NAME].sealed.contentKeys), ["bodytext"]);
+    assert.equal(Object.hasOwn(contentRecordOf(dcaData, "bodytext"), "keys"), false);
+    assert.deepEqual(
+      issuerBlockOf(dcaData, ISSUER_NAME).sealed.contentKeys.map((record) => record.contentName),
+      ["bodytext"],
+    );
 
     const contentKeyOnly = await sealer();
     assert.equal(
@@ -401,8 +405,15 @@ describe("The sealer refuses at entry", () => {
     );
 
     const { dcaData, sealedContent } = JSON.parse(JSON.stringify(await s.seal()));
-    assert.deepEqual(Object.keys(dcaData.contentData.bodytext), ["contentType"]);
-    assert.deepEqual(Object.keys(dcaData.contentData.sidebar), ["contentType", "contentEncodings"]);
+    assert.deepEqual(Object.keys(contentRecordOf(dcaData, "bodytext")), [
+      "contentName",
+      "contentType",
+    ]);
+    assert.deepEqual(Object.keys(contentRecordOf(dcaData, "sidebar")), [
+      "contentName",
+      "contentType",
+      "contentEncodings",
+    ]);
     for (const [name, text] of [
       ["bodytext", "<p>x</p>"],
       ["sidebar", "layered"],

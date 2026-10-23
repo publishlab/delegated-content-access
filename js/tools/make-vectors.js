@@ -82,7 +82,6 @@ import {
   unbannedBindValue,
   unseal as unbannedUnseal,
 } from "./vector-fixtures/unbannedSealing.js";
-import { NONCE_BYTES } from "../core-shared/aead.js";
 import { BIND_DELIMITER, bindValue } from "../core-shared--publisher-issuer/bind.js";
 import { base64urlDecode, base64urlEncode, utf8Decode, utf8Encode } from "../core-shared/codec.js";
 import { sign, verify } from "../core-shared--publisher-issuer/jwt.js";
@@ -653,7 +652,7 @@ function contentOpenOf(input, dcaData) {
   const renderId = decodeCompactJwt(dcaData.resourceJWT)?.payload?.renderId;
   return Object.fromEntries(
     input.content.map((content) => {
-      const record = dcaData.contentData[content.name];
+      const record = dcaData.contentData.find((item) => item.contentName === content.name);
       const aad =
         record &&
         contentAad({
@@ -685,11 +684,11 @@ const BINDING = [
   "carries rather than the bytes behind it. renderId is exactly 16 bytes here, encoded as 22 unpadded",
   "base64url characters. expected.bindings records every one of those strings, so a runtime can check its builder against",
   "them with no crypto in the way.",
-  "ON ECDH THE VALUE IS THE AES-256-GCM additionalData. The blob layout is exactly 109 bytes,",
+  "ON ECDH THE VALUE IS THE AES-256-GCM additionalData. The blob layout is exactly 97 bytes,",
   "and a rebuilt value that differs anywhere is an auth tag failure with nothing on the wire to say why - the",
   "same failure a wrong private key gives. The renderId comes from the verified resourceJWT and the rest of",
-  "the coordinate from the map keys being walked; a value built from anything a request said about itself",
-  "would be built from what the attacker wrote.",
+  "the coordinate from each admitted named record in the sealed arrays. These unsigned coordinates",
+  "identify presented material; they grant no authority. Issuer policy decides their permitted use.",
 ].join(" ");
 
 const SEAL_DEFINITIONS = [
@@ -717,9 +716,10 @@ const SEAL_DEFINITIONS = [
       "Base assigns no derivation meaning to these opaque 16-byte values. expected.periodKeys records the same",
       "keys after recovery from the sealed wire, so input and recovery can be checked independently.",
       "The t values come from the clock and input.period ({length: 60 minutes, slots: 2}, current then next).",
-      "Content-key path: unseal each blob in expected.dcaData.issuerData[issuerName].sealed.contentKeys with the",
+      "Content-key path: select the issuerName record in expected.dcaData.issuerData, then unseal each key",
+      "in its sealed.contentKeys records using contentName with the",
       "issuer private JWK and the binding value for that contentName as additionalData, and compare against",
-      "expected.contentKeys; then AES-128-GCM-decrypt expected.sealedContent[name] with that key, twelve zero",
+      "expected.contentKeys; then AES-128-GCM-decrypt the matching expected.sealedContent record content with that key, twelve zero",
       "nonce octets and the content AAD as additionalData, and compare against",
       "input.content[].value. The wire carries no content AAD: build it as docs/spec--content-protection.md",
       "Section 3.2 states: LP(renderId) || LP(contentName), where renderId is the token payload's value and",
@@ -727,11 +727,14 @@ const SEAL_DEFINITIONS = [
       "expected.contentOpen[name].aadBase64url records the result, so a",
       "runtime can check its builder with no crypto in the way. It has nothing to do with the binding value",
       "above - the two ride on different ciphertexts.",
-      "Cached path: unseal issuerData[issuerName].sealed.periodKeys[accessGroup][t] the same way, with the",
+      "Cached path: unseal each issuer sealed.periodKeys record the same way using its accessGroup and period, with the",
       "period binding value for that pair, and compare against expected.periodKeys; then for each entry in",
-      "expected.dcaData.contentData[contentName].keys[accessGroup] (an array of {t, nonce, key}) AES-128-GCM-",
-      "decrypt entry.key with the periodKey for that same t, entry.nonce and NO additionalData - the contentKey",
-      "comes back, equal to expected.contentKeys[contentName] - and decrypt the content with it as above.",
+      "matching expected.dcaData.contentData record keys (an array of {accessGroup, period, key}) AES-128-GCM-",
+      "decrypt entry.key with the periodKey for that same t and NO additionalData - the contentKey comes back,",
+      "equal to expected.contentKeys[contentName] - and decrypt the content with it as above. The entry carries",
+      "no nonce: derive it as first12(SHA-256(UTF8('dca-derivation-content-key-wrap-nonce') || 0x00 ||",
+      "renderIdOctets(16) || LP(contentName) || LP(accessGroup) || LP(entry.period) || LP(empty wrap AAD))), with",
+      "LP as above applied to octets (docs/spec--content-protection.md Section 4.1).",
       "Every wire value is base64url with no padding.",
     ].join(" "),
   },
@@ -1002,7 +1005,7 @@ async function importEcdhFixture(fixture) {
 
 /**
  * Generate the binding-carrier alternative from fixed inputs. ECDH is entirely
- * reproducible when its ephemeral keypairs and nonces are fixtures. RSA-OAEP
+ * reproducible when its ephemeral keypairs are fixtures and its nonce is implicit zero. RSA-OAEP
  * cannot be reproduced, so this retains the recorded ciphertext only after
  * opening it with the fixture private key under the same binding and checking
  * the recovered key.
@@ -1016,8 +1019,6 @@ export async function makeBoundCarrierVector() {
   const t = "251023T1300";
   const contentKeyBase64url = OPEN_RSA_FIXTURE.contentKeyBase64url;
   const periodKeyBase64url = "HSo3RFFea3iFkp-sucbT4A";
-  const contentNonceBase64url = "AQYLEBUaHyQpLjM4";
-  const periodNonceBase64url = "AgsUHSYvOEFKU1xl";
   const contentBinding = { renderId, contentName };
   const periodBinding = { renderId, accessGroup, t };
   const issuer = ISSUER_KEY;
@@ -1025,23 +1026,20 @@ export async function makeBoundCarrierVector() {
   const periodEphemeral = EPHEMERAL_KEYS[2];
   const issuerPublicKey = (await importEcdhFixture(issuer)).publicKey;
 
-  async function deterministicEcdhBlob(keyBase64url, nonceBase64url, binding, ephemeral) {
+  async function deterministicEcdhBlob(keyBase64url, binding, ephemeral) {
     return seal(base64urlDecode(keyBase64url), issuerPublicKey, "ecdh-p256", {
       binding,
-      random: { bytes: () => base64urlDecode(nonceBase64url) },
       ephemeralKeyPair: await importEcdhFixture(ephemeral),
     });
   }
 
   const contentBlob = await deterministicEcdhBlob(
     contentKeyBase64url,
-    contentNonceBase64url,
     contentBinding,
     contentEphemeral,
   );
   const periodBlob = await deterministicEcdhBlob(
     periodKeyBase64url,
-    periodNonceBase64url,
     periodBinding,
     periodEphemeral,
   );
@@ -1071,7 +1069,8 @@ export async function makeBoundCarrierVector() {
         "recorded RSA-OAEP blob. The bindings are dca-bind-key-envelope|c|renderId|contentName and",
         "dca-bind-key-envelope|p|renderId|accessGroup|t, with an exact 16-byte renderId carried as 22 canonical",
         "unpadded base64url characters. The ECDH blobs are re-sealed from the fixed issuer and ephemeral",
-        "keypairs, 12-byte nonces, keys and coordinates below. RSA-OAEP cannot be reproduced byte for byte,",
+        "keypairs, keys and coordinates below, with twelve zero nonce octets. These pinned pairs are laboratory",
+        "replay controls, not conforming producer freshness. RSA-OAEP cannot be reproduced byte for byte,",
         "so its recorded ciphertext is retained only after the generator opens it under the fixture private",
         "key and confirms the same binding and content key. Replayers also refuse a relabelled contentName",
         "and an ECDH open with no additionalData.",
@@ -1094,8 +1093,6 @@ export async function makeBoundCarrierVector() {
             publicKeyJwk: periodEphemeral.publicKeyJwk,
             privateKeyJwk: periodEphemeral.privateKeyJwk,
           },
-          contentNonceBase64url,
-          periodNonceBase64url,
         },
         rsa: {
           publicKeyJwk: OPEN_RSA_FIXTURE.publicKeyJwk,
@@ -1363,25 +1360,21 @@ const REJECT_BASE = "seal-ecdh";
 
 /**
  * Stands in for sealed.contentKeys while the body is serialized, and `renderBody`
- * replaces it with text afterwards. A member name cannot repeat inside an object,
- * so the one section an attack needs to control is rendered from an ordered pair
- * list instead, which keeps both members in order for a parser to choose between.
+ * replaces it with record-array text afterwards. The duplicate-field witness
+ * writes two key fields in one record without parsing them away.
  */
 const CONTENT_KEYS_SLOT = "@@sealed.contentKeys@@";
 
 /**
  * One unlock request as it crosses the wire, with sealed.contentKeys rendered
- * from `pairs` rather than from an object.
- *
- * Two-space JSON puts `sealed` at depth 1, `contentKeys` at depth 2 and its
- * members at depth 3. The literal indentation below spells that out, because the
- * block is text by the time it gets here.
+ * from `pairs`, with explicit identity/key fields.
  *
  * @param {any} request - what the client built, minus the section under attack
  * @param {[string, string][]} pairs - contentName to blob, duplicates allowed
+ * @param {boolean} [duplicateKey] - preserve the lexical duplicate key-field witness
  * @returns {string}
  */
-function renderBody(request, pairs) {
+function renderBody(request, pairs, duplicateKey = false) {
   const body = {
     ...request,
     sealed: {
@@ -1396,11 +1389,26 @@ function renderBody(request, pairs) {
     throw new Error("the contentKeys slot is not in the body exactly once");
   }
 
-  const members = pairs
-    .map(([name, blob]) => `      ${JSON.stringify(name)}: ${JSON.stringify(blob)}`)
-    .join(",\n");
-
-  return text.replace(slot, pairs.length === 0 ? "{}" : `{\n${members}\n    }`);
+  if (duplicateKey) {
+    if (pairs.length !== 2 || pairs[0][0] !== pairs[1][0])
+      throw new Error("the lexical duplicate-key witness needs one identity and two key fields");
+    const [[contentName, first], [, last]] = pairs;
+    // Keep this raw JSON duplicate separate from repeated array records.
+    // Lexical-last JSON parsers retain the hostile value at this one identity;
+    // parsers that reject duplicate fields retain their recorded alternative.
+    return text.replace(
+      slot,
+      `[{"contentName":${JSON.stringify(contentName)},"key":${JSON.stringify(first)},"key":${JSON.stringify(last)}}]`,
+    );
+  }
+  return text.replace(
+    slot,
+    JSON.stringify(
+      pairs.map(([contentName, key]) => ({ contentName, key })),
+      null,
+      2,
+    ),
+  );
 }
 
 /**
@@ -1436,20 +1444,6 @@ function ephemeralAt({ contentName, accessGroup, t }) {
       `the render seals nothing at ${JSON.stringify({ contentName, accessGroup, t })}`,
     );
   return found;
-}
-
-/**
- * The nonce an ECDH blob carries, so two blobs sharing an ephemeral point can
- * be held apart. One AES key with one nonce covers one message, and reusing a
- * keypair fixture puts two blobs under one key.
- *
- * @param {string} blob - base64url, as the wire carries it
- * @returns {string}
- */
-function nonceOf(blob) {
-  return base64urlEncode(
-    base64urlDecode(blob).subarray(ECDH_POINT_BYTES, ECDH_POINT_BYTES + NONCE_BYTES),
-  );
 }
 
 /**
@@ -1505,23 +1499,15 @@ const RESPLIT_PERIOD = `sport${BIND_DELIMITER}${SEALED_PERIOD}`;
 const RESPLIT_LABEL = `${RESPLIT_ACCESS_GROUP}${BIND_DELIMITER}${RESPLIT_PERIOD}`;
 
 /**
- * The nonces for the two blobs no Sealer run produces, fixed the way
- * `makeBoundCarrierVector` fixes its two. Each shares an ephemeral keypair
- * fixture with a blob of the honest render, so the wrapping key is the same one
- * and the nonce keeps the two ciphertexts apart.
- */
-const UNBANNED_PERIOD_NONCE = "AxAdKjdEUV5reIWS";
-const UNBANNED_CONTENT_NONCE = "BBUmN0hZanuMna6_";
-
-/**
  * The contentKey the hostile render sealed at the delimited name. A contentKey
  * is drawn at random per render, so this one was drawn once with getRandomValues
- * and pasted in, like the keypairs above. It appears nowhere else in the corpus,
+ * and pasted in, like the keypairs above. Its first 16 octets form this v1 key.
+ * It appears nowhere else in the corpus,
  * so a response carrying it is unmistakable.
  */
-const UNBANNED_CONTENT_KEY = "vYZegsRp8YfEF07iU63Ct15wjcEaITGXvuDMDZuzk3E";
+const UNBANNED_CONTENT_KEY = "vYZegsRp8YfEF07iU63Ctw";
 
-/** Uncompressed P-256 point: the first field of an ECDH blob, ahead of the nonce. */
+/** Uncompressed P-256 point at the start of an ordinary ECDH envelope. */
 const ECDH_POINT_BYTES = 65;
 
 /** Both periods of both families, the answer an untouched periodKeys section gets. */
@@ -1634,7 +1620,8 @@ const REJECT_DEFINITIONS = [
         "who can open one blob under one render would otherwise be able to reuse it against every later one.",
         "WHY IT DOES NOT OPEN, and this vector is built so that the binding is the only thing standing there. The",
         "two renders were sealed with the same ephemeral keypair fixture, so the issuer derives the same",
-        "AES-256-GCM key from the blob's own ephemeral point, and the nonce is carried in the blob. The one",
+        "AES-256-GCM key from the blob's own ephemeral point, with an implicit zero nonce. Reusing the pair is",
+        "an intentional laboratory counterfactual that violates producer freshness, not a conforming pair of seals. The one",
         "difference between opening it and not is the additionalData: renderId sits inside",
         '"dca-bind-key-envelope|c|" + renderId + "|" + contentName, the issuer builds it from the renderId in the verified',
         "resourceJWT, and it does not match the one this blob was sealed under. Tag failure. In a real pair of",
@@ -1674,13 +1661,13 @@ const REJECT_DEFINITIONS = [
     /** @param {{ contentKeys: Record<string, string> }} facts */
     description: (facts) =>
       [
-        'An unlock request whose sealed.contentKeys carries the member name "bodytext" TWICE.',
+        "An unlock request whose bodytext record carries the key field TWICE.",
         "THE SHAPE, which is a paywall-bypass shape. The first occurrence is the blob the publisher sealed",
         "under bodytext. The second is the blob sealed under locked-data, which this request never mentions by",
         "name. The client asks for bodytext and nothing else, so a policy keyed by contentName - which is where",
         "DCA puts one - sees a request for bodytext.",
         "IT ONLY EXISTS IN THE STRING. JSON.parse and PHP json_decode both keep the last member and hand back",
-        'an object with one "bodytext", so a request object cannot express this and a replay that re-serializes',
+        "one bodytext record with one key field, so a parsed request cannot express this duplicate and re-serializing",
         "rawBody before posting it has already destroyed the vector. Post the string.",
         "WHAT THE BINDING DOES TO IT. If parsing accepts the body, the lexical-last member is unsealed with",
         '"dca-bind-key-envelope|c|" + renderId + "|bodytext" as additionalData, because "bodytext" is the name it was read',
@@ -1752,24 +1739,20 @@ const REJECT_DEFINITIONS = [
         'Object.prototype with a function rather than missing, "__proto__" read on a plain object reaches the',
         'prototype chain, and "__proto__" WRITTEN on one moves the prototype instead of adding a member.',
         'WHY THE REQUEST IS REFUSED WHOLE. The identifier grammar is letter-initial, so "__proto__" is not a name',
-        "any consumer admits, and the format says a map keyed by identifiers is rejected whole when one member",
-        "name violates that grammar rather than having the invalid name skipped beside its siblings. The issuer",
+        "any consumer admits. The format rejects the request whole when a named record has an invalid",
+        "identity rather than skipping that record beside its siblings. The issuer",
         "admits every request identifier before policy, BIND construction or private-key work, so this body is a",
         "whole-request binding_failed refusal: no key, no per-coordinate error, and the private key untouched.",
         '"constructor" is a different case and the grammar admits it - it is letter-initial and carries no',
         "reserved character - which is why it travels here beside the name that is refused.",
-        "WHAT THIS VECTOR PINS BESIDE THE REFUSAL. Every map that comes off the wire is keyed by a name",
-        "the client chose, so core/IssuerEngine.js and ports/UnlockEndpoint.js read them with",
-        "Object.hasOwn or off Object.keys (and the port's status table is a Map, for the same reason). The",
-        "response side is the same hazard pointed the other way: an issuer that builds its errors map or its keys",
-        'map by plain assignment writes a prototype instead of a member for "__proto__", and a coordinate can',
-        "then go back unreported. Identifier admission closes the request path to that name, and the map-building",
-        "discipline is what keeps a runtime difference from appearing anywhere else, since PHP has no prototype",
-        "chain and both names are unremarkable array keys there.",
-        "NOT CONFORMANT: a TypeError or a 500 anywhere in the pass; a key of any kind; a 200 carrying either name",
-        "in keys or in errors; a response map whose prototype was moved.",
-        "Note JSON.parse makes both names OWN properties of the parsed object, so the refusal is a rule about the",
-        "name and not a lookup accident.",
+        "WHAT THIS VECTOR PINS BESIDE THE REFUSAL. sealed.contentKeys is an array of named records,",
+        "not a map whose JavaScript prototype supplies its entries. Internal indexes built from those names",
+        "still require own-property-safe lookup and assignment, including the admitted constructor name.",
+        "Fixture expected.keys and expected.errors use lookup maps for observations; those fixture schemas",
+        "are not the wire response shape. Wire key results use named record arrays.",
+        "NOT CONFORMANT: a TypeError or a 500 anywhere in the pass; a key of any kind; a 200 carrying either name.",
+        "Both names occur as contentName string values in parsed records, so the refusal is an identifier",
+        "admission rule, not a lookup accident.",
         REPLAY,
       ].join(" "),
   },
@@ -1818,10 +1801,12 @@ const REJECT_DEFINITIONS = [
       ...request,
       sealed: {
         ...request.sealed,
-        periodKeys: {
+        periodKeys: [
           ...request.sealed.periodKeys,
-          [DELIMITED_ACCESS_GROUP]: { ...request.sealed.periodKeys.premium },
-        },
+          ...request.sealed.periodKeys
+            .filter((entry) => entry.accessGroup === "premium")
+            .map((entry) => ({ ...entry, accessGroup: DELIMITED_ACCESS_GROUP })),
+        ],
       },
     }),
     expected: {
@@ -1907,7 +1892,8 @@ const REJECT_DEFINITIONS = [
         "handed. That is a CMS that skipped the name check, a second implementation of the sealer, or markup",
         "written by hand, and once such a blob is on a page, anyone who can read the page can post it back.",
         "It carries the same ephemeral point as the honest bodytext blob beside it, so an issuer agrees the same",
-        "wrapping key from either, and the value it was sealed under is the only thing between opening it and",
+        "wrapping key from either. This deliberately reused pair with zero nonce is a laboratory counterfactual,",
+        "not a conforming producer: it isolates the BIND check. The value is the only thing between opening it and",
         "not.",
         'WHY A BANNING ISSUER REFUSES IT. A content binding is four fields - "dca-bind-key-envelope", "c", the renderId',
         "and the contentName - joined on the delimiter. Structural admission rejects a name carrying that",
@@ -1944,13 +1930,14 @@ const REJECT_DEFINITIONS = [
       ...request,
       sealed: {
         ...request.sealed,
-        periodKeys: {
+        periodKeys: [
           ...request.sealed.periodKeys,
-          [RESPLIT_ACCESS_GROUP]: {
-            ...request.sealed.periodKeys[RESPLIT_ACCESS_GROUP],
-            [RESPLIT_PERIOD]: facts.unbanned.periodBlob,
+          {
+            accessGroup: RESPLIT_ACCESS_GROUP,
+            period: RESPLIT_PERIOD,
+            key: facts.unbanned.periodBlob,
           },
-        },
+        ],
       },
     }),
     /** @param {any} facts */
@@ -1991,7 +1978,8 @@ const REJECT_DEFINITIONS = [
         "made on one reading of the pair and the blob was opened under the other, with nothing on the wire to",
         "say which pair was asked for.",
         "The blob carries the same ephemeral point as the honest premium 251023T1400 blob beside it, so an issuer",
-        "agrees the same wrapping key from either, and the value it was sealed under is the only thing between",
+        "agrees the same wrapping key from either. This reused pair with zero nonce is a laboratory counterfactual",
+        "that violates producer freshness and isolates BIND. The value is the only thing between",
         "opening it and not.",
         "The matching honest-blob vector proves the same admission happens regardless of blob contents. This",
         "sealed-at vector additionally records the key a blind delimiter join would release under the other",
@@ -2027,7 +2015,7 @@ const REJECT_DEFINITIONS = [
     description: () =>
       [
         "An unlock request that asks for no coordinate at all: a verified envelope, the issuerName and keyId",
-        "of this issuer, and sealed.contentKeys as the empty map with no periodKeys section beside it.",
+        "of this issuer, and sealed.contentKeys as the empty array with no periodKeys section beside it.",
         "WHERE IT COMES FROM. A client that resolved every contentName out of its own cache and posted anyway,",
         "a request whose sealed section a proxy stripped, and a caller probing the endpoint for what it will",
         "verify for free. The first is the one that happens: the shipped client sends no request when it needs",
@@ -2125,10 +2113,12 @@ const REJECT_DEFINITIONS = [
       ...request,
       sealed: {
         ...request.sealed,
-        periodKeys: {
+        periodKeys: [
           ...request.sealed.periodKeys,
-          [UNADMITTED_ACCESS_GROUP]: { ...request.sealed.periodKeys.premium },
-        },
+          ...request.sealed.periodKeys
+            .filter((entry) => entry.accessGroup === "premium")
+            .map((entry) => ({ ...entry, accessGroup: UNADMITTED_ACCESS_GROUP })),
+        ],
       },
     }),
     expected: {
@@ -2643,9 +2633,15 @@ async function makeRejectVector(
     .build(new DcaData(base.expected.dcaData), issuer.issuerName, needed)
     .toObject();
   const honest = request ? await request(built, facts) : built;
-  const pairs = /** @type {[string, string][]} */ (Object.entries(built.sealed.contentKeys));
+  const pairs = /** @type {[string, string][]} */ (
+    built.sealed.contentKeys.map(({ contentName, key }) => [contentName, key])
+  );
 
-  const rawBody = renderBody(honest, attack(pairs, facts));
+  const rawBody = renderBody(
+    honest,
+    attack(pairs, facts),
+    file === "reject-duplicate-member-name.json",
+  );
 
   // The body has to be JSON, or the vector pins a parse error rather than the
   // check it names. The generator parses it here so it never writes a body it
@@ -2859,7 +2855,9 @@ async function rejectFacts(base) {
   // a value nothing was sealed under, and both report an error. Against these two
   // blobs, the second implementation opens them.
   const issuerKeys = await importEcdhFixture(issuer);
-  const sealedByRender = base.expected.dcaData.issuerData[issuer.issuerName].sealed;
+  const sealedByRender = base.expected.dcaData.issuerData.find(
+    (entry) => entry.issuerName === issuer.issuerName,
+  ).sealed;
 
   if (`${DELIMITED_ACCESS_GROUP}${BIND_DELIMITER}${SEALED_PERIOD}` !== RESPLIT_LABEL) {
     throw new Error(
@@ -2874,7 +2872,6 @@ async function rejectFacts(base) {
     issuer.algorithm,
     {
       binding: { renderId, accessGroup: DELIMITED_ACCESS_GROUP, t: SEALED_PERIOD },
-      random: { bytes: () => base64urlDecode(UNBANNED_PERIOD_NONCE) },
       ephemeralKeyPair: await importEcdhFixture(
         ephemeralAt({ accessGroup: RESPLIT_ACCESS_GROUP, t: SEALED_PERIOD }),
       ),
@@ -2886,21 +2883,39 @@ async function rejectFacts(base) {
     issuer.algorithm,
     {
       binding: { renderId, contentName: DELIMITED_CONTENT_NAME },
-      random: { bytes: () => base64urlDecode(UNBANNED_CONTENT_NONCE) },
       ephemeralKeyPair: await importEcdhFixture(ephemeralAt({ contentName: "bodytext" })),
     },
   );
 
-  // Each shares its ephemeral point with a blob of the render, so the issuer
-  // agrees one wrapping key for the pair and the nonces have to differ.
+  if (
+    base64urlDecode(UNBANNED_CONTENT_KEY).length !== 16 ||
+    base64urlDecode(unbannedContentBlob).length !== 97
+  ) {
+    throw new Error(
+      "the delimiter content-name control must isolate admission with a v1 16-octet key and 97-octet carrier",
+    );
+  }
+
+  // Deliberate laboratory counterfactual: hold the agreement fixed so only
+  // BIND distinguishes the coordinates. Repeated pairs with the zero nonce
+  // violate producer freshness; these are not conforming producer examples.
   for (const [hostile, honest] of [
-    [unbannedPeriodBlob, sealedByRender.periodKeys[RESPLIT_ACCESS_GROUP][SEALED_PERIOD]],
-    [unbannedContentBlob, sealedByRender.contentKeys.bodytext],
+    [
+      unbannedPeriodBlob,
+      sealedByRender.periodKeys.find(
+        (entry) => entry.accessGroup === RESPLIT_ACCESS_GROUP && entry.period === SEALED_PERIOD,
+      ).key,
+    ],
+    [
+      unbannedContentBlob,
+      sealedByRender.contentKeys.find((entry) => entry.contentName === "bodytext").key,
+    ],
   ]) {
-    if (nonceOf(hostile) === nonceOf(honest)) {
-      throw new Error(
-        "a hostile blob shares an ephemeral point AND a nonce with the render blob beside it",
-      );
+    if (
+      base64urlEncode(base64urlDecode(hostile).subarray(0, ECDH_POINT_BYTES)) !==
+      base64urlEncode(base64urlDecode(honest).subarray(0, ECDH_POINT_BYTES))
+    ) {
+      throw new Error("the laboratory BIND control no longer holds its agreement fixed");
     }
   }
 
@@ -2953,10 +2968,16 @@ async function rejectFacts(base) {
     contentKeys: base.expected.contentKeys,
     // The blob for the item a request does not ask for, which a duplicate member
     // smuggles in.
-    foreign: base.expected.dcaData.issuerData[issuer.issuerName].sealed.contentKeys["locked-data"],
+    foreign: base.expected.dcaData.issuerData
+      .find((entry) => entry.issuerName === issuer.issuerName)
+      .sealed.contentKeys.find((entry) => entry.contentName === "locked-data").key,
     foreignRender: {
       renderId: foreign.resource.renderId,
-      contentKeys: foreign.issuerData[issuer.issuerName].sealed.contentKeys,
+      contentKeys: Object.fromEntries(
+        foreign.issuerData
+          .find((entry) => entry.issuerName === issuer.issuerName)
+          .sealed.contentKeys.map(({ contentName, key }) => [contentName, key]),
+      ),
     },
     unanchoredResource,
     wrongWidthResource,

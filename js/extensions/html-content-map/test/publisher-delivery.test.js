@@ -419,7 +419,9 @@ describe("the authoritative item-record contentType", () => {
       { name: "bodytext", value: BODYTEXT, contentType: "text/plain" },
       { name: "factbox", value: FACTBOX, contentType: "text/html" },
     ]);
-    values.dcaData.contentData.bodytext.contentDescription = {
+    values.dcaData.contentData.find(
+      (/** @type {any} */ record) => record.contentName === "bodytext",
+    ).contentDescription = {
       version: "1",
       description: "Article",
     };

@@ -287,8 +287,10 @@ DCA_BRIDGE=php DCA_TARGET_ROOT=/path/to/php pnpm test:bridge portable-sealer-ori
 `test-reference/adapter-client/periodkeys.test.js` through the same factory.
 Its setup adds a fixed key for each of the two periods the render wraps under.
 The case checks every value the render draws at its offset in the stream: the
-render id, both wrap nonces, the content key each wrap
-opens to, and the envelope nonces, up to the stream's last byte. The test then
+render id, the content key, and the envelope nonces, up to the stream's last
+byte. Wraps draw nothing: the case opens each `{t, key}` entry to the drawn
+content key under the nonce it derives from the render id and the wrap's
+coordinate, as `PORTING.md` "Derived wrap nonce" states. The test then
 opens each issuer envelope with the known issuer private key, using Node's
 WebCrypto rather than a reference module: the content-key one must hold the
 drawn content key, and each period one its fixed period key. The origin
@@ -413,7 +415,29 @@ DCA_BRIDGE=php DCA_TARGET_ROOT=/path/to/php pnpm test:bridge portable-key-sealin
 A selection may also route `new X` for a class it lists under
 [`constructors`](_shared/CONTRACT.md#construct-an-object-of-a-claimed-class):
 the test target builds the object from the constructor's arguments and the
-test holds a handle proxy. No committed selection uses it yet.
+test holds a handle proxy. `portable-client-cache-ownership` routes two
+`PeriodKeyCache` instances and a `ContentKeyResolver` built with one of them.
+Resetting the resolver must clear that original cache while leaving the other
+cache intact. The selection requires both constructors and all three exercised
+members; a target needs actual implementations of both classes.
+
+`portable-sealer-ownership` runs the factory's per-render isolation assertion.
+Two factory calls must return distinct objects; fluent methods must return the
+same object. Interleaved resource/content changes and deterministic random-stream
+reads must remain independent. Its setup is plain data, and the target factory
+constructs its own callbacks and real Sealer. The shared JavaScript test keeps
+the assertions. No callback is serialized across the bridge.
+
+```sh
+DCA_BRIDGE=js-loopback pnpm test:bridge portable-client-cache-ownership
+DCA_BRIDGE=js-loopback pnpm test:bridge portable-sealer-ownership
+DCA_BRIDGE=php DCA_TARGET_ROOT=/path/to/php pnpm test:bridge portable-sealer-ownership
+```
+
+The loopback runs verify bridge machinery. A native run establishes coverage
+only for the target that actually implements the selected operations. Adapters
+retain target objects by session handle until disposal; no native client cache
+or resolver is supplied by the reference tree.
 
 The runner preserves streamed Node output and finishes with its exit status.
 With `DCA_TIMING=1`, it also prints elapsed wall time.

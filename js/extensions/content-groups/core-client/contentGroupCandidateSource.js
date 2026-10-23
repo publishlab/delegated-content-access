@@ -51,7 +51,7 @@ import {
 
 /**
  * The item's routes and render coordinate, read in one synchronous pass. An
- * item without an admitted connector map, or a page without an admitted
+ * item without admitted connector records, or a page without an admitted
  * geometry and render period, has no connector route here; the request side
  * refuses such an item before any issuer sees it.
  *
@@ -88,7 +88,7 @@ function itemRoutes(dcaData, contentName, chain, limits) {
  * @param {{ chain: any, periodKeyCache: ContentGroupPeriodKeyCache, chainKeyCache: ContentGroupChainKeyCache, limits: import("../core-shared/construction.js").ContentGroupLimits }} config
  *   `chain` is the host's chain port (`settleGeometry`, `coordinate`);
  *   `limits` are settled content-group limits
- * @returns {Readonly<import("../../../core-client/ContentKeyResolver.js").RecoverySource>}
+ * @returns {Readonly<import("../../../core-client/ContentKeyResolver.js").RecoverySource & { clearReaderContext: () => Promise<void> }>}
  */
 export function contentGroupCandidateSource({ chain, periodKeyCache, chainKeyCache, limits }) {
   if (typeof chain?.coordinate !== "function" || typeof chain?.settleGeometry !== "function")
@@ -142,19 +142,27 @@ export function contentGroupCandidateSource({ chain, periodKeyCache, chainKeyCac
         return xor16(connector, pad);
       };
 
-      for (const { group, connector } of routes) {
+      // Several connector records for one group are candidate routes: the
+      // group's cached keys are read once and padded for each connector.
+      /** @type {Map<string, Uint8Array[]>} */
+      const connectorsByGroup = new Map();
+      for (const { group, connector } of routes)
+        connectorsByGroup.set(group, [...(connectorsByGroup.get(group) ?? []), connector]);
+
+      for (const [group, connectors] of connectorsByGroup) {
         if (chainCandidateBudget.remaining === 0) return;
         const partition = periodKeyPartition(publisher, geometry, contentName, group);
         const keys = await periodKeyCache.candidatesAt(group, t, { partition, lease });
         check();
-        for (const periodKey of keys) {
-          if (chainCandidateBudget.remaining === 0) return;
-          chainCandidateBudget.remaining--;
-          const contentKey = await padded(periodKey, connector);
-          if (contentKey) yield { contentKey, origin: { route: "period-key", group, t } };
-        }
+        for (const periodKey of keys)
+          for (const connector of connectors) {
+            if (chainCandidateBudget.remaining === 0) return;
+            chainCandidateBudget.remaining--;
+            const contentKey = await padded(periodKey, connector);
+            if (contentKey) yield { contentKey, origin: { route: "period-key", group, t } };
+          }
       }
-      for (const { group, connector } of routes) {
+      for (const [group, connectors] of connectorsByGroup) {
         if (chainCandidateBudget.remaining === 0) return;
         const partition = chainKeyPartition(publisher, geometry, contentName, group);
         const keys = await chainKeyCache.candidates(group, t, {
@@ -165,10 +173,11 @@ export function contentGroupCandidateSource({ chain, periodKeyCache, chainKeyCac
           chainCandidateBudget,
         });
         check();
-        for (const periodKey of keys) {
-          const contentKey = await padded(periodKey, connector);
-          if (contentKey) yield { contentKey, origin: { route: "chain-key", group, t } };
-        }
+        for (const periodKey of keys)
+          for (const connector of connectors) {
+            const contentKey = await padded(periodKey, connector);
+            if (contentKey) yield { contentKey, origin: { route: "chain-key", group, t } };
+          }
       }
     },
 

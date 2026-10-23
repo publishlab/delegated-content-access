@@ -26,6 +26,7 @@ import assert from "node:assert/strict";
 import { run } from "../../demo/browser/scenario.js";
 import { writeMarkupDelivery } from "../../adapter-publisher/writeMarkupDelivery.js";
 import { decodeCompactJwt } from "../../core-shared/compactJwt.js";
+import { contentKeyMap, periodKeyMap } from "../support/namedRecords.js";
 // `demo/browser/scenario.js` wires the shared actor world, so both sides read these
 // from one place and an assertion against the fixture is the two of them
 // agreeing. The `t` labels a period arithmetic produces are the fixtures' own;
@@ -170,12 +171,16 @@ test("article A arrives sealed, is refused, and one unlock opens it", async () =
     renderA.publisher.resourceJWT.payload,
     "the inspectable payload is decoded from the compact token, not copied from the resource",
   );
-  assert.equal(renderA.publisher.sealedContent[CONTENT_NAME], renderA.ciphertext);
+  assert.deepEqual(
+    renderA.publisher.sealedContent,
+    [{ contentName: CONTENT_NAME, content: renderA.ciphertext }],
+    "the trace shows the ciphertext as the wire carries it",
+  );
   assert.equal(
     renderA.publisher.markup,
     writeMarkupDelivery({
       dcaData: renderA.publisher.dcaData,
-      sealedContent: renderA.publisher.sealedContent,
+      sealedContent: { [CONTENT_NAME]: renderA.ciphertext },
     }),
     "the markup is emitted from this render, not assembled for the trace",
   );
@@ -244,12 +249,12 @@ test("article A arrives sealed, is refused, and one unlock opens it", async () =
     "resourceJWT reaches the page as a compact token",
   );
 
-  assert.deepEqual(Object.keys(unlock.request.sealed.contentKeys), [CONTENT_NAME]);
-  assert.deepEqual(Object.keys(unlock.request.sealed.periodKeys[ACCESS_GROUP]), [
+  assert.deepEqual(Object.keys(contentKeyMap(unlock.request.sealed.contentKeys)), [CONTENT_NAME]);
+  assert.deepEqual(Object.keys(periodKeyMap(unlock.request.sealed.periodKeys)[ACCESS_GROUP]), [
     "251023T1400",
     "251023T1500",
   ]);
-  assert.deepEqual(Object.keys(unlock.response.keys.periodKeys[ACCESS_GROUP]), [
+  assert.deepEqual(Object.keys(periodKeyMap(unlock.response.keys.periodKeys)[ACCESS_GROUP]), [
     "251023T1400",
     "251023T1500",
   ]);

@@ -14,22 +14,42 @@ import { ISSUER_NAME } from "../../demo/scenarios/fixtures.js";
 
 const ISSUER = "issuer_a";
 
-function delivery({ items = ["body"], periodKeys = {}, chainKeys = {}, keyId = "key" } = {}) {
+/**
+ * @param {{ items?: string[], periodKeys?: string[], chainKeys?: string[], keyId?: string }} [options]
+ */
+function delivery({ items = ["body"], periodKeys = [], chainKeys = [], keyId = "key" } = {}) {
   return {
     version: "1",
     resourceJWT: "signed.resource.token",
-    contentData: Object.fromEntries(items.map((name) => [name, { keys: { premium: {} } }])),
-    issuerData: {
-      [ISSUER]: {
+    contentData: items.map((contentName) => ({
+      contentName,
+      keys: [{ accessGroup: "premium", period: "t", key: "wrap" }],
+    })),
+    issuerData: [
+      {
+        issuerName: ISSUER,
         keyId,
         sealed: {
-          contentKeys: Object.fromEntries(items.map((name) => [name, "envelope"])),
-          ...(Object.keys(periodKeys).length ? { periodKeys: { premium: periodKeys } } : {}),
-          ...(Object.keys(chainKeys).length ? { chainKeys: { premium: chainKeys } } : {}),
+          contentKeys: items.map((contentName) => ({ contentName, key: "envelope" })),
+          ...(periodKeys.length
+            ? { periodKeys: periodKeys.map((period) => record("period", period)) }
+            : {}),
+          ...(chainKeys.length
+            ? { chainKeys: chainKeys.map((cutoff) => record("cutoff", cutoff)) }
+            : {}),
         },
       },
-    },
+    ],
   };
+}
+
+/**
+ * @param {'period'|'cutoff'} field
+ * @param {string} label
+ * @param {string} [accessGroup]
+ */
+function record(field, label, accessGroup = "premium") {
+  return { accessGroup, [field]: label, key: "envelope" };
 }
 
 function issuer(limits = {}, clientRequestExtraBytes) {
@@ -40,10 +60,9 @@ function issuer(limits = {}, clientRequestExtraBytes) {
   };
 }
 
+/** @param {number} count @param {string} prefix */
 function labels(count, prefix) {
-  return Object.fromEntries(
-    Array.from({ length: count }, (_, index) => [`${prefix}${index}`, "envelope"]),
-  );
+  return Array.from({ length: count }, (_, index) => `${prefix}${index}`);
 }
 
 test("four period entries fit the reference group cap; five do not", () => {
@@ -81,18 +100,49 @@ test("sixteen item envelopes fit; the seventeenth needs a higher onboarded endpo
 
 test("period and chain entries share one group cap; unused groups do not enter the conservative request", () => {
   const candidate = delivery({ periodKeys: labels(2, "p"), chainKeys: labels(2, "c") });
-  candidate.issuerData[ISSUER].sealed.periodKeys.unused = labels(100, "u");
+  const sealed = /** @type {any} */ (candidate.issuerData[0].sealed);
+  sealed.periodKeys.push(...labels(100, "u").map((label) => record("period", label, "unused")));
   assert.doesNotThrow(() => assertIssuerRequestBudget(candidate, issuer()));
-  candidate.issuerData[ISSUER].sealed.chainKeys.premium.c2 = "envelope";
+  sealed.chainKeys.push(record("cutoff", "c2"));
   assert.throws(() => assertIssuerRequestBudget(candidate, issuer()), {
     code: "bad_config",
     message: /maxEntriesPerGroup/,
   });
 });
 
+test("rival records at one coordinate each count toward the raw caps", () => {
+  // Repeated records are candidate alternatives, and every one of them is
+  // relayed and opened, so the caps count them before any copy is dropped.
+  assert.doesNotThrow(() =>
+    assertIssuerRequestBudget(delivery({ periodKeys: ["t0", "t0", "t0", "t0"] }), issuer()),
+  );
+  assert.throws(
+    () =>
+      assertIssuerRequestBudget(delivery({ periodKeys: ["t0", "t0", "t0", "t0", "t0"] }), issuer()),
+    { code: "bad_config", message: /maxEntriesPerGroup/ },
+  );
+  assert.deepEqual(
+    requestEntryCounts({
+      contentKeys: [
+        { contentName: "body", key: "a" },
+        { contentName: "body", key: "a" },
+      ],
+      periodKeys: [record("period", "t0"), record("period", "t0"), "not a record"],
+      chainKeys: [record("cutoff", "c0", "other")],
+    }),
+    {
+      entries: 6,
+      groups: new Map([
+        ["premium", 2],
+        ["other", 1],
+      ]),
+    },
+  );
+});
+
 test("UTF-8 request bytes and explicit client overhead are checked at the exact boundary", () => {
   const candidate = delivery({ keyId: "clé" });
-  const block = candidate.issuerData[ISSUER];
+  const block = candidate.issuerData[0];
   const document = {
     version: candidate.version,
     issuerName: ISSUER,
@@ -117,8 +167,8 @@ test("UTF-8 request bytes and explicit client overhead are checked at the exact 
 
 test("the relayed envelope selector counts toward the request bytes", () => {
   const candidate = delivery();
-  candidate.issuerData[ISSUER].envelope = "compact-ecdh";
-  const block = candidate.issuerData[ISSUER];
+  const block = /** @type {any} */ (candidate.issuerData[0]);
+  block.envelope = "compact-ecdh";
   const document = {
     version: candidate.version,
     issuerName: ISSUER,

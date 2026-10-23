@@ -257,6 +257,8 @@ function main() {
   stage("lint", "Lint");
   stage("format:check", "Formatting");
   stage("check:types", "Checked JavaScript slice");
+  stage("check:consumer-types", "Reference source consumers");
+  stage("check:consumer-declarations", "Reference declaration consumers");
   stage("check:boundaries", "JavaScript source boundaries", 0, 0);
   stage("test:reference:public", "JavaScript reference behavior", 1, 0);
   stage("test:experiments", "JavaScript experiment tier", 0, 8);
@@ -277,7 +279,7 @@ function main() {
     console.log(`RESULT: ${failed} required public-gate stage(s) failed.`);
   } else {
     console.log(
-      "RESULT: lint, checked JavaScript, boundaries, vector-free reference behavior, " +
+      "RESULT: lint, checked JavaScript, source and declaration consumers, boundaries, vector-free reference behavior, " +
         "and experiments held.",
     );
   }

@@ -28,6 +28,7 @@ import {
   ISSUER_NAME as PRIMARY,
   UNLOCK_URL as PRIMARY_UNLOCK,
 } from "../demo/scenarios/fixtures.js";
+import { issuerBlockOf, recordNamed } from "../test-lib/helpers/inspect.js";
 
 const PUBLISHER_ORIGIN = "https://www.news-site.example";
 const CHAIN_GEOMETRY = Object.freeze({ chainsPerDay: 2, periodMinutes: 15 });
@@ -74,14 +75,12 @@ test("a synthetic chain marker leaves a client-bound period-key handle in the or
   });
 
   const markChainEnabled = (page) => {
-    const sealed = page.issuerData[PRIMARY].sealed;
-    const accessGroup = Object.keys(sealed.periodKeys)[0];
-    sealed.chainKeys = {
-      [accessGroup]: {
-        "251023T2345": "AQ",
-        "251024T1145": "Ag",
-      },
-    };
+    const sealed = issuerBlockOf(page, PRIMARY).sealed;
+    const accessGroup = sealed.periodKeys[0].accessGroup;
+    sealed.chainKeys = [
+      { accessGroup, cutoff: "251023T2345", key: "AQ" },
+      { accessGroup, cutoff: "251024T1145", key: "Ag" },
+    ];
     page.periodGeometry = {
       accessGroups: {
         [accessGroup]: { chainsPerDay: 2, periodMinutes: 15 },
@@ -148,7 +147,9 @@ test("a chain section beside transport is classified before mixed key entries re
   const request = client.buildRequest(data, PRIMARY, [CONTENT_NAME]);
   const answer = await stage.network.post(PRIMARY_UNLOCK, request, { origin: PUBLISHER_ORIGIN });
   assert.equal(answer.body.transport.method, ecdhProfile.METHOD);
-  const wrapped = Object.keys(answer.body.keys.periodKeys[ACCESS_GROUP] ?? {});
+  const wrapped = (answer.body.keys.periodKeys ?? []).filter(
+    (record) => record.accessGroup === ACCESS_GROUP,
+  );
   assert.equal(
     wrapped.length > 0,
     true,
@@ -159,11 +160,17 @@ test("a chain section beside transport is classified before mixed key entries re
   // valid wrapped period key of a supported section and a content key of
   // another.
   const mixed = structuredClone(answer.body);
-  mixed.keys.chainKeys = {
-    [ACCESS_GROUP]: { "251023T2345": base64urlEncode(new Uint8Array(16).fill(3)) },
-  };
+  mixed.keys.chainKeys = [
+    {
+      accessGroup: ACCESS_GROUP,
+      cutoff: "251023T2345",
+      key: base64urlEncode(new Uint8Array(16).fill(3)),
+    },
+  ];
   mixed.periodGeometry = { chainsPerDay: 2, periodMinutes: 15 };
-  mixed.keys.contentKeys = { [CONTENT_NAME]: base64urlEncode(new Uint8Array(16).fill(5)) };
+  mixed.keys.contentKeys = [
+    { contentName: CONTENT_NAME, key: base64urlEncode(new Uint8Array(16).fill(5)) },
+  ];
 
   const applied = await client.applyResponse(page, PRIMARY, mixed, request);
 
@@ -249,12 +256,10 @@ async function chainResponseFixture(profile) {
     },
   });
   const rawPage = (await stage.render("A")).asJson();
-  rawPage.issuerData[PRIMARY].sealed.chainKeys = {
-    [ACCESS_GROUP]: {
-      "251023T1145": "AQ",
-      "251023T2345": "Ag",
-    },
-  };
+  issuerBlockOf(rawPage, PRIMARY).sealed.chainKeys = [
+    { accessGroup: ACCESS_GROUP, cutoff: "251023T1145", key: "AQ" },
+    { accessGroup: ACCESS_GROUP, cutoff: "251023T2345", key: "Ag" },
+  ];
   rawPage.periodGeometry = { chainsPerDay: 2, periodMinutes: 15 };
   const page = client.parse(rawPage);
   const request = client.buildRequest(page, PRIMARY, [CONTENT_NAME]);
@@ -266,12 +271,18 @@ async function chainResponseFixture(profile) {
   const response = await delivery.prepare(
     {
       keys: {
-        chainKeys: {
-          [ACCESS_GROUP]: {
-            "251023T1100": base64urlEncode(new Uint8Array(16).fill(6)),
-            "251023T1400": base64urlEncode(new Uint8Array(16).fill(7)),
+        chainKeys: [
+          {
+            accessGroup: ACCESS_GROUP,
+            cutoff: "251023T1100",
+            key: base64urlEncode(new Uint8Array(16).fill(6)),
           },
-        },
+          {
+            accessGroup: ACCESS_GROUP,
+            cutoff: "251023T1400",
+            key: base64urlEncode(new Uint8Array(16).fill(7)),
+          },
+        ],
       },
     },
     view,
@@ -290,20 +301,24 @@ for (const profile of [ecdhProfile, rsaProfile]) {
       const fixture = await chainResponseFixture(profile);
       const { response, client, page, request, calls } = fixture;
       // Use one wrapped chain key so a valid sibling cannot mask private-key work.
-      const wrapped = response.keys.chainKeys[ACCESS_GROUP]["251023T1400"];
-      response.keys.chainKeys[ACCESS_GROUP] = { "251023T1400": wrapped };
+      const wrapped = recordNamed(response.keys.chainKeys, "cutoff", "251023T1400").key;
+      response.keys.chainKeys = [
+        { accessGroup: ACCESS_GROUP, cutoff: "251023T1400", key: wrapped },
+      ];
       if (variant === "invalid geometry")
         request.periodGeometry = { ...CHAIN_GEOMETRY, periodMinutes: 7 };
       if (variant === "different geometry") request.periodGeometry = { periodMinutes: 15 };
       if (variant === "unsolicited window")
-        response.keys.chainKeys[ACCESS_GROUP] = { "251024T1400": wrapped };
+        response.keys.chainKeys = [
+          { accessGroup: ACCESS_GROUP, cutoff: "251024T1400", key: wrapped },
+        ];
       if (variant === "above supplied ceiling") {
         // The request ceiling is positioned below the returned cutoff, within
         // the same window. Rebuild the association from the actual relay.
         const rawPage = structuredClone(page);
-        rawPage.issuerData[PRIMARY].sealed.chainKeys[ACCESS_GROUP] = {
-          "251023T1300": "Aw",
-        };
+        issuerBlockOf(rawPage, PRIMARY).sealed.chainKeys = [
+          { accessGroup: ACCESS_GROUP, cutoff: "251023T1300", key: "Aw" },
+        ];
         const limited = client.parse(rawPage);
         const limitedRequest = client.buildRequest(limited, PRIMARY, [CONTENT_NAME]);
         const result = await client.applyResponse(limited, PRIMARY, response, limitedRequest);
@@ -334,7 +349,7 @@ for (const profile of [ecdhProfile, rsaProfile]) {
     for (const variant of ["malformed", "tampered", "wrong width"]) {
       const { client, page, request, response, calls, chainCache } =
         await chainResponseFixture(profile);
-      const wrapped = response.keys.chainKeys[ACCESS_GROUP]["251023T1400"];
+      const wrapped = recordNamed(response.keys.chainKeys, "cutoff", "251023T1400").key;
       if (variant === "wrong width") {
         // Bypass KeyDelivery's issuer width guard deliberately: the receiver
         // must also refuse authenticated material of the wrong chain width.
@@ -420,10 +435,18 @@ for (const profile of [ecdhProfile, rsaProfile]) {
             publicKey: { kty, crv, x, y },
           };
         }
-        response.keys.chainKeys[ACCESS_GROUP] = {
-          "251023T1100": await wrap(new Uint8Array(16).fill(6)),
-          "251023T1400": await wrap(new Uint8Array(17).fill(7)),
-        };
+        response.keys.chainKeys = [
+          {
+            accessGroup: ACCESS_GROUP,
+            cutoff: "251023T1100",
+            key: await wrap(new Uint8Array(16).fill(6)),
+          },
+          {
+            accessGroup: ACCESS_GROUP,
+            cutoff: "251023T1400",
+            key: await wrap(new Uint8Array(17).fill(7)),
+          },
+        ];
       } else if (variant === "malformed") wrapped.key = "%%%";
       else wrapped.key = (wrapped.key[0] === "A" ? "B" : "A") + wrapped.key.slice(1);
       const result = await client.applyResponse(page, PRIMARY, response, request);

@@ -40,30 +40,43 @@ const OPTIONS = [
   "contentDecoders",
 ];
 
-/** The composition selected when the host injects no other one. */
-const BASE_RESOLVER_FACTORY = (/** @type {object} */ options) => new ContentKeyResolver(options);
-const BASE_REQUEST_BUILDER_FACTORY = (/** @type {object} */ options) =>
-  new DcaRequestBuilder(options);
+/** @typedef {NonNullable<ConstructorParameters<typeof ContentKeyResolver>[0]> & { cache: ClientCache }} ResolverOptions */
+/** @typedef {NonNullable<ConstructorParameters<typeof DcaRequestBuilder>[0]>} RequestBuilderOptions */
+/**
+ * Only the request duties composition and delivery consume. Extensions may
+ * report additional routes without coupling this entry to their implementation.
+ * @typedef {object} RequestBuilder
+ * @property {(page: import('../core-client/DcaData.js').DcaData, issuerName: string, needed: string[]) => { toObject: () => object }} build
+ * @property {NonNullable<ResolverOptions["periodKeyResponseCoordinate"]>} [acceptsPeriodKeyResponseCoordinate]
+ * @property {import("../adapter-client/routeAttempts.js").RouteProjection} [routeProjection]
+ * @property {(request: object) => import("../adapter-client/routeAttempts.js").ExtensionKeyFamilies} [keyFamilies]
+ */
+/** @typedef {import("../core-client/ContentKeyResolver.js").Cache & { clearReaderContext?: () => void|Promise<void> }} ClientCache */
+/**
+ * @template R
+ * @typedef {{ cache: ClientCache, resolver: R, builder: RequestBuilder, opener: ContentRepresentationOpener }} ClientComposition
+ */
 
 /**
+ * @template [R=ContentKeyResolver]
  * @typedef {object} ComposeClientOptions
- * @property {any} [cache] - the period-key cache this client already
+ * @property {ClientCache} [cache] - the period-key cache this client already
  *   keeps. Left out, this function builds a `PeriodKeyCache` from the cache
  *   options below, which for a host that passed none is an in-memory Map. A
  *   host that evicts by clock builds that cache itself, since `PeriodKeyCache`
  *   takes the clock together with an eviction policy. Passed together with
  *   `storage`, `cacheNamespace` or `cacheKeyBy`, it is refused as `bad_config`.
- * @property {any} [storage] - what that cache is kept in
+ * @property {import("../adapter-client/PeriodKeyCache.js").CacheStorage} [storage] - what that cache is kept in
  * @property {string} [cacheNamespace] - the storage scope this client's
  *   period keys are filed under, when one backend serves several
  * @property {(context: { issuerName?: string, accessGroup: string }) => string} [cacheKeyBy] -
  *   how that cache names a family
- * @property {any} [chainCache] - the selected chain-key extension's
+ * @property {NonNullable<ResolverOptions>["chainCache"] & { clearReaderContext?: () => void|Promise<void> }} [chainCache] - the selected chain-key extension's
  *   cache. The resolver refuses one that arrives without a profile.
- * @property {any} [chainKeyProfile] - that extension's response geometry
+ * @property {NonNullable<ResolverOptions>["chainKeyProfile"]} [chainKeyProfile] - that extension's response geometry
  *   and candidate source. A client that relays chain keys without caching them
  *   passes the profile alone.
- * @property {{ publicKey: JsonWebKey, openDeliveredKeys: Function, assertCanOpenChainKeys?: () => void }} [clientBoundKeyCapability] -
+ * @property {{ publicKey: JsonWebKey } & NonNullable<NonNullable<ResolverOptions>["clientBoundKeyCapability"]>} [clientBoundKeyCapability] -
  *   the selected extension's client capability. With `chainCache`, the
  *   default resolver requires its synchronous `assertCanOpenChainKeys` duty.
  *   Left out, this client asks for nothing but direct transport.
@@ -74,23 +87,47 @@ const BASE_REQUEST_BUILDER_FACTORY = (/** @type {object} */ options) =>
  *   accepted, directly delivered period keys to enter this client's caches
  * @property {boolean} [relayPeriodKeys] - whether requests relay the sealed
  *   period keys authored for unresolved items
- * @property {(options: object) => any} [resolverFactory] - builds the
+ * @property {(options: ResolverOptions) => R} [resolverFactory] - builds the
  *   selected resolver composition
- * @property {object[]} [recoverySources] - item-key recovery owners a
+ * @property {import("../core-client/ContentKeyResolver.js").RecoverySource[]} [recoverySources] - item-key recovery owners a
  *   selected extension registers, handed to the resolver factory. Base reads
  *   none; a browser client asserts each can clear its reader context.
- * @property {object[]} [responseSections] - response-section consumers a
+ * @property {import("../core-client/ContentKeyResolver.js").ResponseSectionConsumer[]} [responseSections] - response-section consumers a
  *   selected extension registers, handed to the resolver factory. Base reads
  *   none; a browser client asserts each can clear its reader context.
- * @property {(options: object) => any} [requestBuilderFactory] - builds the
+ * @property {(options: RequestBuilderOptions) => RequestBuilder} [requestBuilderFactory] - builds the
  *   selected request composition independently of the resolver
  * @property {Record<string, import("../core-client/ContentRepresentationOpener.js").ContentDecoder>} [contentDecoders] -
  *   the representation decoders this client composition supports
  */
 
+/** The composition selected when the host injects no other one. */
+const BASE_RESOLVER_FACTORY = (/** @type {ResolverOptions} */ options) =>
+  new ContentKeyResolver(options);
+/** @returns {RequestBuilder} */
+const BASE_REQUEST_BUILDER_FACTORY = (/** @type {RequestBuilderOptions} */ options) =>
+  new DcaRequestBuilder(options);
+
 /**
+ * @template R
+ * @overload
+ * @param {ComposeClientOptions<R> & { resolverFactory: (options: ResolverOptions) => R }} config
+ * @returns {ClientComposition<R>}
+ */
+/**
+ * @overload
  * @param {ComposeClientOptions} [config]
- * @returns {{ cache: any, resolver: any, builder: any, opener: ContentRepresentationOpener }}
+ * @returns {ClientComposition<ContentKeyResolver>}
+ */
+/**
+ * @template R
+ * @overload
+ * @param {ComposeClientOptions<R>} config
+ * @returns {ClientComposition<R|ContentKeyResolver>}
+ */
+/**
+ * @param {ComposeClientOptions<object>} [config]
+ * @returns {ClientComposition<object>}
  */
 export function composeClient(config = {}) {
   for (const name of Object.keys(config)) {
@@ -134,6 +171,7 @@ export function composeClient(config = {}) {
 
   // A client with no capability asks for direct transport only, and says so
   // by leaving the member out: the request builder offers no public half.
+  /** @type {RequestBuilder} */
   const builder = (config.requestBuilderFactory ?? BASE_REQUEST_BUILDER_FACTORY)({
     ...(config.relayPeriodKeys === undefined ? {} : { relayPeriodKeys: config.relayPeriodKeys }),
     ...(config.clientBoundKeyCapability === undefined

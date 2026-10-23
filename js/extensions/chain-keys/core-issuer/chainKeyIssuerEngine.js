@@ -30,9 +30,16 @@ const MAX_DATE_EPOCH_MS = 8_640_000_000_000_000;
  */
 export function requireChainRepresentation(source) {
   const presented = source.presented;
+  const check = source.checkPeriodKeyOutput;
+  if (check !== undefined && typeof check !== "function") {
+    throw dcaError("bad_config", "a period output check is a synchronous function");
+  }
   /** @type {import('../../../core-issuer/IssuerEngine.js').PeriodCapabilitySource} */
   const required = {
-    ...(presented ? { presented: (request, invocation) => presented(request, invocation) } : {}),
+    ...(check !== undefined ? { checkPeriodKeyOutput: check.bind(source) } : {}),
+    ...(presented
+      ? { presented: (request, invocation) => presented.call(source, request, invocation) }
+      : {}),
     selection(request, invocation, trustedGrants) {
       const select = source.selection(request, invocation, trustedGrants);
       return (accessGroup, periodCount, grant) => {

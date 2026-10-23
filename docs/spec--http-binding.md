@@ -166,7 +166,7 @@ implementation choices. Rows that match a
 | Failure | HTTP status class |
 | --- | --- |
 | Malformed or unsupported request, including an unsupported version or algorithm or a mismatched request context; unauthenticated publisher assertion; unknown, ambiguous, inactive or retired signing `kid` | `4xx` |
-| Request outside a finite admission limit, missing or incompatible request media type, or a refused browser origin | `4xx` |
+| Request outside a finite admission limit or selected-profile finite output processing limit, missing or incompatible request media type, or a refused browser origin | `4xx` |
 | An `issuerName` outside the endpoint's configured operating aliases | `4xx` |
 | Complete authorization denial or definitive authentication failure | `4xx` |
 | Unknown issuer opening key: the requested opening-key version is unavailable within the verified registration | `5xx` |

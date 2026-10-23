@@ -128,17 +128,35 @@ test("finite configured bounds count code points and JSON UTF-8 bytes", () => {
   assert.equal(called, false);
 });
 
-test("publisher validates complete map, copies records and preserves media type", () => {
+/**
+ * The record a delivery carries for one item.
+ *
+ * @param {any} dcaData
+ * @param {string} contentName
+ * @returns {any}
+ */
+const recordOf = (dcaData, contentName) =>
+  dcaData.contentData.find((/** @type {any} */ record) => record.contentName === contentName);
+
+test("publisher validates complete collection, copies records and preserves media type", () => {
   const original = {
-    contentData: { html: { ...item, contentType: "text/html" }, measurements: { ...item } },
+    contentData: [
+      { contentName: "html", ...item, contentType: "text/html" },
+      { contentName: "measurements", ...item },
+    ],
   };
   const result = withContentDescriptions(original, { measurements: desc });
-  assert.equal(result.contentData.html.contentType, "text/html");
-  assert.equal(result.contentData.measurements.contentType, "application/json");
-  assert.notEqual(result.contentData.html, original.contentData.html);
-  result.contentData.measurements.contentDescription.description = "changed";
+  assert.deepEqual(
+    result.contentData.map((/** @type {any} */ record) => record.contentName),
+    ["html", "measurements"],
+    "the records keep their names and order",
+  );
+  assert.equal(recordOf(result, "html").contentType, "text/html");
+  assert.equal(recordOf(result, "measurements").contentType, "application/json");
+  assert.notEqual(recordOf(result, "html"), recordOf(original, "html"));
+  recordOf(result, "measurements").contentDescription.description = "changed";
   assert.equal(desc.description, "Temperature °C");
-  assert.equal(Object.hasOwn(original.contentData.measurements, "contentDescription"), false);
+  assert.equal(Object.hasOwn(recordOf(original, "measurements"), "contentDescription"), false);
   assert.throws(() => withContentDescriptions(original, { missing: desc }));
   assert.throws(() =>
     withContentDescriptions(original, { measurements: desc, html: { version: "2" } }),
@@ -151,15 +169,36 @@ test("publisher validates complete map, copies records and preserves media type"
   );
   const inherited = Object.create({ measurements: desc });
   assert.equal(
-    admit(withContentDescriptions(original, inherited).contentData.measurements).state,
+    admit(recordOf(withContentDescriptions(original, inherited), "measurements")).state,
     "absent",
   );
   assert.throws(() =>
     withContentDescriptions(
-      { contentData: { measurements: { ...item, contentDescription: null } } },
+      { contentData: [{ contentName: "measurements", ...item, contentDescription: null }] },
       {},
     ),
   );
+  assert.throws(
+    () => withContentDescriptions({ contentData: { measurements: { ...item } } }, {}),
+    "the name-keyed map is no collection",
+  );
+  assert.throws(
+    () => withContentDescriptions({ contentData: [{ contentName: "bad|name", ...item }] }, {}),
+    "a record named outside the grammar",
+  );
+});
+
+test("publisher describes the last whole record for a repeated name, and nothing merges", () => {
+  const original = {
+    contentData: [
+      { contentName: "measurements", ...item, contentType: "text/html", extra: "first" },
+      { contentName: "measurements", ...item },
+    ],
+  };
+  const result = withContentDescriptions(original, { measurements: desc });
+  assert.equal(result.contentData.length, 1);
+  assert.equal(recordOf(result, "measurements").contentType, "application/json");
+  assert.equal(Object.hasOwn(recordOf(result, "measurements"), "extra"), false);
 });
 
 test("trusted JSON and NDJSON handlers validate payloads after explicit handoff policy", () => {
@@ -239,8 +278,10 @@ test("real JSON and HTML carrier readers and baseline DcaData preserve descripti
     {
       version: "1",
       resourceJWT: "unused",
-      contentData: { measurements: item },
-      issuerData: { issuer: { unlockUrl: "https://issuer.test/unlock", keyId: "key", sealed: {} } },
+      contentData: [{ contentName: "measurements", ...item }],
+      issuerData: [
+        { issuerName: "issuer", unlockUrl: "https://issuer.test/unlock", keyId: "key", sealed: {} },
+      ],
     },
     { measurements: carrierDescription },
   );
@@ -279,7 +320,7 @@ test("real JSON and HTML carrier readers and baseline DcaData preserve descripti
       schema: opaqueSchema,
     });
     assert.deepEqual(select(opened, policy), { state: "refused", schema: null });
-    reader.dcaData.contentData.measurements.contentDescription = { version: "2", newField: true };
+    recordOf(reader.dcaData, "measurements").contentDescription = { version: "2", newField: true };
     assert.equal(admit(baseline.contentDataFor("measurements")).state, "unsupported");
   }
 });
@@ -288,16 +329,18 @@ test("handoff reports the contentType captured before the await, not the live re
   const delivery = {
     version: "1",
     resourceJWT: "eyJhbGciOiJFUzI1NiJ9.eyJyZW5kZXJJZCI6IkFBQUFBQUFBQUFBQUFBQUFBQUFBQUEifQ.c2ln",
-    contentData: { measurements: { ...item, contentDescription: desc } },
-    issuerData: { issuer: { unlockUrl: "https://issuer.test/unlock", keyId: "key", sealed: {} } },
+    contentData: [{ contentName: "measurements", ...item, contentDescription: desc }],
+    issuerData: [
+      { issuerName: "issuer", unlockUrl: "https://issuer.test/unlock", keyId: "key", sealed: {} },
+    ],
   };
   const page = new DcaData(delivery);
   const captured = page.contentItemFor("measurements");
   const description = admit(page.contentDataFor("measurements"));
   await Promise.resolve();
   // A page script edits the live record while the client awaits the key.
-  delivery.contentData.measurements.contentType = "text/html";
-  delivery.contentData.measurements.contentDescription = { version: "2" };
+  delivery.contentData[0].contentType = "text/html";
+  delivery.contentData[0].contentDescription = { version: "2" };
   const opened = handoff(captured, description, new Uint8Array([1]));
   assert.equal(opened.contentName, "measurements");
   assert.equal(opened.contentType, "application/json");

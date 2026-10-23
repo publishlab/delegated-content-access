@@ -34,7 +34,7 @@ import {
 /**
  * @typedef {{ build: Function, acceptsPeriodKeyResponseCoordinate?:
  *   (accessGroup: string, t: string, request: unknown) => boolean,
- *   keyFamilies?: (request: any) => import("../../../adapter-client/routeAttempts.js").ExtensionKeyFamilies }} InnerRequestBuilder
+ *   keyFamilies?: (request: any) => import("../../../core-client/requestBuilderContracts.js").ExtensionKeyFamilies }} InnerRequestBuilder
  */
 
 const OPTIONS = ["clientPublicKey", "relayPeriodKeys", "innerBuilder", "limits", "narrowing"];
@@ -70,7 +70,8 @@ export class ContentGroupRequestBuilder {
    * @param {Record<string, unknown>} [config.narrowing] - trusted local selection:
    *   `requestedContentGroups` (content name to group list),
    *   `requestedContentKeys` (content name to the one group whose connector
-   *   this builder relays), `requestedChainCutoffs` (window start to cutoff),
+   *   records this builder relays, each as an item route),
+   *   `requestedChainCutoffs` (window start to cutoff),
    *   `requestedContentItems` and `seedWindows` (local only). Selection never
    *   grants entitlement and never widens an attempt's needed names.
    */
@@ -174,7 +175,7 @@ export class ContentGroupRequestBuilder {
    * keys for `requestedContentKeys`, derivation keys (period and chain keys)
    * for `requestedContentGroups`.
    * @param {any} request
-   * @returns {import("../../../adapter-client/routeAttempts.js").ExtensionKeyFamilies}
+   * @returns {import("../../../core-client/requestBuilderContracts.js").ExtensionKeyFamilies}
    */
   keyFamilies(request) {
     const view = this.#view(request);
@@ -187,7 +188,7 @@ export class ContentGroupRequestBuilder {
     };
   }
 
-  /** @type {import("../../../adapter-client/routeAttempts.js").RouteProjection} */
+  /** @type {import("../../../core-client/requestBuilderContracts.js").RouteProjection} */
   get routeProjection() {
     return {
       members: REQUEST_MEMBERS,
@@ -208,9 +209,9 @@ export class ContentGroupRequestBuilder {
         const kept = new Set(routes);
         /** @type {Record<string, string[]>} */
         const groups = {};
-        /** @type {Record<string, {group: string, connector: string}>} */
+        /** @type {Record<string, readonly {group: string, connector: string}[]>} */
         const contentKeys = {};
-        /** @type {Record<string, Record<string, string>>} */
+        /** @type {Record<string, Record<string, readonly string[]>>} */
         const seeds = {};
         for (const [name, entry] of Object.entries(view.contentGroups)) {
           const list = entry.groups.filter((group) => kept.has(groupRoute(name, group)));
@@ -218,9 +219,10 @@ export class ContentGroupRequestBuilder {
           groups[name] = list;
           seeds[name] = { ...view.seeds[name] };
         }
-        for (const [name, entry] of Object.entries(view.contentKeys)) {
+        // An item route keeps every alternative the request carried for it.
+        for (const [name, alternatives] of Object.entries(view.contentKeys)) {
           if (!kept.has(itemRoute(name))) continue;
-          contentKeys[name] = { ...entry };
+          contentKeys[name] = alternatives.map((route) => ({ ...route }));
           seeds[name] = { ...view.seeds[name] };
         }
         if (Object.keys(seeds).length === 0) return {};
@@ -228,7 +230,12 @@ export class ContentGroupRequestBuilder {
           seeds,
           groups,
           contentKeys,
-          cutoffs: view.cutoffs,
+          cutoffs:
+            view.cutoffs === undefined
+              ? undefined
+              : Object.entries(view.cutoffs).flatMap(([windowStart, labels]) =>
+                  labels.map((cutoff) => ({ windowStart, cutoff })),
+                ),
           renderPeriod: view.renderPeriod,
           periodGeometry: view.periodGeometry,
         });

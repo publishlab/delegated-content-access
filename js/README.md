@@ -8,6 +8,7 @@ unless a section specifies the package directory.
 
 ## Implementation and integration
 
+- [js/design--reference.md](design--reference.md) - architecture, dependency boundaries and state ownership
 - [Actor copy manifests](README.md#publisher-client-and-issuer-artifacts) - the runtime directories to copy for each actor:
   [publisher](copy-manifest--publisher.json), [issuer](copy-manifest--issuer.json), [client](copy-manifest--client.json)
 - [js/extensions/](extensions/README.md) - optional capabilities and their composition boundaries
@@ -81,7 +82,7 @@ tooling, portable contract tests or cross-runtime conformance. Those are separat
 selected commands. The gate neither requires PHP nor installs any conformance
 toolchain, and its lint, formatting and checked-JavaScript stages run the
 package's own devDependencies. Install those with
-`corepack pnpm@10.23.0 --dir js install --frozen-lockfile --ignore-scripts`
+`(cd js && corepack pnpm install --frozen-lockfile --ignore-scripts)`
 and install the [browser prerequisite](#browser-prerequisite) before running the gate.
 
 `sh js/check` is the repository entry point. It exits 0 when every
@@ -149,7 +150,8 @@ chain-key primitives and client-bound delivery packages live under
 `verification/vectors/v1/profiles/dca-profile-*/`; neither changes the base vector
 formats. Every set is selected by its path in `verification/vectors/sets.txt`.
 The ECDH-P256 profile
-injects its ephemeral pair and nonce so seal and open are reproducible; the
+injects its ephemeral pair and seeded nonce randomness so seal and open are reproducible;
+each wrapped response key carries its own twelve-octet nonce. The
 RSA-OAEP profile records open only because OAEP sealing is randomized. A fresh
 runtime seal still draws a new ES256 `k`, so replayers compare header and
 payload and verify the signature rather than comparing it.
@@ -180,8 +182,16 @@ RSA-OAEP open under the variant's binding grammar.
 
 ## Browser prerequisite
 
-The gate requires Node 22.22.2, pnpm 10.23.0 and headless Chromium with its
-runtime libraries. Browser tests are part of the required reference and
+Use the latest maintained Node 22 release, the pnpm version selected by
+[`package.json`](package.json), and headless Chromium
+with its runtime libraries. [`.node-version`](.node-version) selects the Node
+major; it does not update an installed runtime. Refresh Node through your
+version manager or development image so security fixes arrive without a
+repository change for each patch. A CI setup should resolve the latest release
+in that major rather than reuse an older cached runtime. Record `node --version`
+with verification results; `package.json` declares the supported runtime range.
+
+Browser tests are part of the required reference and
 experiment stages; without the executable, the gate exits 2 because required
 evidence could not run.
 
@@ -191,10 +201,10 @@ Otherwise, when that variable is unset or empty, they look under
 `chrome-headless-shell` executable. They do not search PATH. A nonempty override
 that names a missing file does not fall back to the cache.
 
-For Linux x64, install the browser in the harness's default cache with:
+For Linux x64, run from `js/` to install the browser in the harness's default cache:
 
 ```sh
-corepack pnpm@10.23.0 dlx @puppeteer/browsers@3.2.2 install chrome-headless-shell@152.0.7977.75 --path "$HOME/.cache/puppeteer"
+corepack pnpm dlx @puppeteer/browsers@3.2.2 install chrome-headless-shell@152.0.7977.75 --path "$HOME/.cache/puppeteer"
 ```
 
 The command downloads the browser; install the system runtime packages listed in
@@ -576,38 +586,51 @@ partial and missing profile evidence.
 
 ## Checks and tests
 
-Run these commands from the repository root. Each command names the `js`
-package explicitly, then names whose implementation it tests and whether it
-selects optional behavior.
+Run these commands from `js/`. Each command names whose implementation it
+tests and whether it selects optional behavior.
 
-The explicit `corepack pnpm@10.23.0` matches this package's `packageManager`
-pin. Update both together when the package changes pnpm versions; relying on a
-different root-level pnpm can fail before it reads the nested package pin.
+Run a current Corepack inside `js/` so it reads `devEngines.packageManager`
+in [`package.json`](package.json) and resolves pnpm 10.x. This allows updates
+without repository edits; a new major remains a deliberate choice. Corepack may
+reuse a cached release, so refresh its cache with the development image or
+`corepack install --global pnpm@10`. Record the actual Node and pnpm versions
+with verification results.
+
+[`pnpm-workspace.yaml`](pnpm-workspace.yaml) delays newly resolved dependency
+versions by seven days through `minimumReleaseAge`. This applies to dependencies
+pnpm resolves, not the pnpm executable selected by Corepack. The committed
+lockfile and
+`--frozen-lockfile --ignore-scripts` install preserve dependency versions and
+skip lifecycle scripts. The age delay does not re-audit existing locked versions
+or replace vulnerability review. For an urgent fix, review a narrowly scoped
+package/version age exception rather than disabling the delay globally.
 
 | Intent                                                                                | Command                                                                                       |
 | ------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------- |
-| Type-check the currently admitted JavaScript source slice                             | `corepack pnpm@10.23.0 --dir js run check:types`                                              |
-| Check source boundaries and extension removability                                    | `corepack pnpm@10.23.0 --dir js run check:boundaries`                                         |
-| Test the base JavaScript reference behavior                                           | `corepack pnpm@10.23.0 --dir js run test:reference:base`                                      |
-| Test content compression only                                                         | `corepack pnpm@10.23.0 --dir js run test:reference:extension:content-compression`             |
-| Test chain keys only                                                                  | `corepack pnpm@10.23.0 --dir js run test:reference:extension:chain-keys`                      |
-| Test client-bound transport only                                                      | `corepack pnpm@10.23.0 --dir js run test:reference:extension:client-bound-transport`          |
-| Test combinations of optional extensions                                              | `corepack pnpm@10.23.0 --dir js run test:reference:compositions`                              |
-| [Test checked-in canonical profile scenarios](test-profiles/README.md#coverage-index) | `corepack pnpm@10.23.0 --dir js run test:reference:profiles`                                  |
-| Test recorded fixtures and vectors                                                    | `corepack pnpm@10.23.0 --dir js run test:reference:vectors`                                   |
-| Test all vector-free JavaScript reference behavior                                    | `corepack pnpm@10.23.0 --dir js run test:reference:public`                                    |
-| Test portable contracts against the inventory-selected bindings                       | `corepack pnpm@10.23.0 --dir js run test:contract`                                            |
-| Test every base target declared by one supplied binding                               | `corepack pnpm@10.23.0 --dir js run test:contract:base -- <binding-relative-to-js>`           |
-| Test the checked-in reference binding's base targets                                  | `corepack pnpm@10.23.0 --dir js run test:contract:reference:base`                             |
-| Test one target against supplied bindings                                             | `corepack pnpm@10.23.0 --dir js run test:contract:<target> -- <binding-relative-to-js> [...]` |
-| Test repository vector tooling                                                        | `corepack pnpm@10.23.0 --dir js run test:tools`                                               |
-| Test every checked-in experiment                                                      | `corepack pnpm@10.23.0 --dir js run test:experiments`                                         |
-| Run the default local gate                                                            | `corepack pnpm@10.23.0 --dir js test`                                                         |
-| Run the gate's behavior half without the portable contracts                           | `corepack pnpm@10.23.0 --dir js run test:unit`                                                |
-| Run the default gate plus experiments                                                 | `corepack pnpm@10.23.0 --dir js run test:all`                                                 |
-| Run the default gate in a single process                                              | `corepack pnpm@10.23.0 --dir js run test:single-process`                                      |
+| Type-check the currently admitted JavaScript source slice                             | `corepack pnpm run check:types`                                              |
+| Check strict consumers of the reference source | `corepack pnpm run check:consumer-types` |
+| Check the same consumers against generated declarations | `corepack pnpm run check:consumer-declarations` |
+| Check source boundaries and extension removability                                    | `corepack pnpm run check:boundaries`                                         |
+| Test the base JavaScript reference behavior                                           | `corepack pnpm run test:reference:base`                                      |
+| Test content compression only                                                         | `corepack pnpm run test:reference:extension:content-compression`             |
+| Test chain keys only                                                                  | `corepack pnpm run test:reference:extension:chain-keys`                      |
+| Test client-bound transport only                                                      | `corepack pnpm run test:reference:extension:client-bound-transport`          |
+| Test combinations of optional extensions                                              | `corepack pnpm run test:reference:compositions`                              |
+| [Test checked-in canonical profile scenarios](test-profiles/README.md#coverage-index) | `corepack pnpm run test:reference:profiles`                                  |
+| Test recorded fixtures and vectors                                                    | `corepack pnpm run test:reference:vectors`                                   |
+| Test all vector-free JavaScript reference behavior                                    | `corepack pnpm run test:reference:public`                                    |
+| Test portable contracts against the inventory-selected bindings                       | `corepack pnpm run test:contract`                                            |
+| Test every base target declared by one supplied binding                               | `corepack pnpm run test:contract:base -- <binding-relative-to-js>`           |
+| Test the checked-in reference binding's base targets                                  | `corepack pnpm run test:contract:reference:base`                             |
+| Test one target against supplied bindings                                             | `corepack pnpm run test:contract:<target> -- <binding-relative-to-js> [...]` |
+| Test repository vector tooling                                                        | `corepack pnpm run test:tools`                                               |
+| Test every checked-in experiment                                                      | `corepack pnpm run test:experiments`                                         |
+| Run the default local gate                                                            | `corepack pnpm test`                                                         |
+| Run the gate's behavior half without the portable contracts                           | `corepack pnpm run test:unit`                                                |
+| Run the default gate plus experiments                                                 | `corepack pnpm run test:all`                                                 |
+| Run the default gate in a single process                                              | `corepack pnpm run test:single-process`                                      |
 
-The package's `test` script (`corepack pnpm@10.23.0 --dir js test`) runs `test:unit` and then
+The package's `test` script (`corepack pnpm test`) runs `test:unit` and then
 `test:contract`. `test:unit` hands Node one glob over
 the package, so it runs every `*.test.js` file outside `experiments/` and `test-contract/`:
 source boundary checks, all reference behavior including the explicit vector tier, extension
@@ -628,18 +651,18 @@ catalogue-bounded and incomplete, not full normative conformance claims.
 Run `claim:evidence` and `claim:all` with Node 24.19 or newer; the ordinary
 Node 22 package gate does not run them.
 
-`corepack pnpm@10.23.0 --dir js test` stops at the first command that exits non-zero, so a red
+`corepack pnpm test` stops at the first command that exits non-zero, so a red
 or incomplete `test:unit` leaves the portable contracts unrun in that
 invocation. After fixing, run
-`corepack pnpm@10.23.0 --dir js run test:contract`, or run
-`corepack pnpm@10.23.0 --dir js run check`, which reports every stage whatever an earlier
+`corepack pnpm run test:contract`, or run
+`corepack pnpm run check`, which reports every stage whatever an earlier
 stage did.
 
 The `test` script runs the discovered test files in parallel, one process per
 file, across however many cores the host has. On this host that is the faster
 mode: 2026-09-20, `corepack pnpm@10.23.0 --dir js test` ran in 5.6s and the single-process run
 in 11.7s, because per-file mode parallelises across cores. Use
-`corepack pnpm@10.23.0 --dir js run test:single-process`
+`corepack pnpm run test:single-process`
 (`--experimental-test-isolation=none`) where that parallelism does not pay: a
 host with few cores, or debugging state that leaks between test files. Node
 sends no per-file summary in that mode, so the `test` script prints no
@@ -649,15 +672,23 @@ slowest-file list there.
 
 | Command                                       | Runs                                                                                                                                |
 | --------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------- |
-| `corepack pnpm@10.23.0 --dir js lint`         | ESLint over every JavaScript file in `js` except `.stryker-tmp` and `node_modules`, the two directories `eslint.config.js` ignores. |
-| `corepack pnpm@10.23.0 --dir js typecheck`    | The admitted checked-JavaScript slice, the same run as `check:types`.                                                               |
-| `corepack pnpm@10.23.0 --dir js test`         | The default local gate: boundaries, contracts, reference behavior, tooling.                                                         |
-| `corepack pnpm@10.23.0 --dir js run check`    | The public gate: lint, format, types, boundaries, vector-free reference behavior, experiments.                                      |
-| `corepack pnpm@10.23.0 --dir js format:check` | Prettier, no writes; fails on any file `corepack pnpm@10.23.0 --dir js format` would rewrite.                                       |
+| `corepack pnpm lint`         | ESLint over every JavaScript file in `js` except `.stryker-tmp` and `node_modules`, the two directories `eslint.config.js` ignores. |
+| `corepack pnpm typecheck`    | The admitted checked-JavaScript slice, the same run as `check:types`.                                                               |
+| `corepack pnpm test`         | The default local gate: boundaries, contracts, reference behavior, tooling.                                                         |
+| `corepack pnpm run check`    | The public gate: lint, format, source types, source and declaration consumers, boundaries, vector-free reference behavior, experiments.                                      |
+| `corepack pnpm format:check` | Prettier, no writes; fails on any file `corepack pnpm format` would rewrite.                                       |
 
-`corepack pnpm@10.23.0 --dir js run check` runs `test-tools/run-gate.js`, which exits 0 when every stage
+`corepack pnpm run check` runs `test-tools/run-gate.js`, which exits 0 when every stage
 held, 1 when a stage failed and 2 when a stage ran partially. `sh js/check`
 forwards to it.
+
+Both consumer checks run automatically in the public gate. They use the explicit
+fixtures and strict options in `test-reference/tsconfig.types.json`, including
+`types: []` and `skipLibCheck: false`. The declaration check emits `.d.ts` files
+into a temporary directory, copies the same consumers there, then checks them
+with JavaScript source files excluded (`allowJs: false`). It uses the installed
+compiler, copies no runtime sources and removes temporary output on success or failure. It checks
+the selected reference APIs; it does not build or certify a distribution package.
 
 The checked-JavaScript slice covers only the files `jsconfig.json` admits; the
 section below says how to read that list.
@@ -670,11 +701,11 @@ are runtime-neutral: WebCrypto and the shared web APIs, no Node or DOM globals.
 exception: `demo/browser/page.js` is the one DOM file. `tools`, `evidence-benchmarks`,
 `evidence-platform-tests`, `experiments`, extension tests and tools, and every `test*` tree run
 on Node's test runner. A `process` in neutral code or a `document` outside the browser file fails
-`corepack pnpm@10.23.0 --dir js lint`.
+`corepack pnpm lint`.
 
 ## Checked-JavaScript scope
 
-`corepack pnpm@10.23.0 --dir js run check:types` checks types statically; it does not replace a
+`corepack pnpm run check:types` checks types statically; it does not replace a
 behavioral test. The `include` list in `jsconfig.json` is the exact scope: `tsc` checks a file when a glob
 or path in that list names it. Read the list for the current set; this README keeps no copy of it.
 
@@ -692,14 +723,14 @@ a benchmark or another experiment, stays off the admitted list. `tsc` reaches on
 only when an admitted file imports it; the rest is existing type debt, not
 silently checked code.
 
-`corepack pnpm@10.23.0 --dir js test` uses exit 0 for complete agreement, exit 1 for a
+`corepack pnpm test` uses exit 0 for complete agreement, exit 1 for a
 completed check that disagreed, and exit 2 when proof marked todo remains, or
 when the run matched no test file at all. A run that carries both a failure and
 a todo exits 1: exit 2 says the run proved less than intended, not that
 something disagreed. A named lane below the `test` script is a plain
 `node --test` command and reports Node's own 0 or 1, so a todo inside one
 reaches a developer on the next full run.
-`corepack pnpm@10.23.0 --dir js run check` runs
+`corepack pnpm run check` runs
 every stage whatever an earlier stage reported, and exits 2 when a stage did
 not complete.
 
@@ -739,14 +770,30 @@ scenarios may import siblings without changing ownership.
 
 ## Browser denied-unlock cache
 
-`createBrowserClient` installs a bounded ten-minute denial cache. It suppresses
-an equivalent request only after a clean, admitted `notDelivered` report explicitly
-denies every presented family. Missing keys, partial answers, ordinary HTTP
-refusals and transport failures do not create hints. The default cache is in
-memory; inject one shared instance and host storage to retain hints across loads.
-`createDeliveryClient` has no automatic denial cache.
+`createBrowserClient` and `createDeliveryClient` omit denial caching unless the
+application explicitly injects it. This is an optional implementation feature,
+selected when assembling or deploying scripts; no runtime toggle is required.
+Without it, a later attempt can request missing capability again. Positive key
+retention, including period-key and chain-key reuse, remains independent: the
+client still tries held capability before requesting missing keys.
+
+For a straightforward integration, omit the collaborator:
 
 ```js
+import { createBrowserClient } from "./integration-client/createBrowserClient.js";
+
+const client = createBrowserClient(browserConfig); // no denialCache in browserConfig
+```
+
+Consider opting in when equivalent denied requests recur often enough to justify
+expiry and access-change handling. The adapter lives in
+`adapter-client/DeniedUnlockCache.js` and attaches through the `denialCache`
+composition seam. Its default lifetime is ten minutes with at most 256 hints.
+A fresh memory-only instance saves requests within one live client, not across
+full page reloads. Supply host storage when persistence is wanted:
+
+```js
+import { createBrowserClient } from "./integration-client/createBrowserClient.js";
 import { DeniedUnlockCache } from "./adapter-client/DeniedUnlockCache.js";
 
 const denialCache = new DeniedUnlockCache({
@@ -779,14 +826,24 @@ denialCache.setContext(nextSession.accessContextId);
 
 The issuer selects `notDeliveredReport: "complete"` when it wants complete family
 denials to be observable as `200` results. That report is optional on the wire.
-Automatic hints include the exact render and requested material; they do not infer
-that a reader denied one article is denied every article. `denyContext` is the
+With the adapter injected, the browser client automatically records a hint only
+after a clean, admitted `notDelivered` report explicitly denies every presented
+family. Missing keys,
+partial answers, ordinary HTTP refusals and transport failures do not create
+hints. Automatic hints include the exact render and requested material; they do
+not infer that a reader denied one article is denied every article. `denyContext` is the
 trusted issuer integration's explicit broader no-access decision; it suppresses
 all requests for that publisher/issuer/endpoint in the current context, for this
 cache's configured duration. Login/logout/access-change handling clears both
 kinds of hint. An old pending declaration cannot refill a changed context.
-Pass `denialCache: false`
-to disable browser suppression. A host may inject a structural collaborator
+Entitlement changes elsewhere may not notify this client; choose a bounded
+lifetime to limit stale suppression. For an explicit retry, await
+`client.clearAccessDecisions()` before invoking acquisition again. Clearing hints
+does not itself send a request or remove held keys; a fresh acquisition call alone
+does not bypass an unexpired hint.
+
+Omitting `denialCache` (or passing `false`) composes without suppression and does
+not read persisted denial hints. A host may inject a structural collaborator
 implementing `capture`, `deny`, `denyContext`, `invalidate` and `setContext`; no
 subclass is required. Hints contain fingerprints and deadlines, no keys,
 credentials or response bodies. After a storage fault the instance uses memory
@@ -797,7 +854,7 @@ cannot determine the ownership of an event the host has already misattributed.
 
 ## Browser reader-context lifecycle
 
-Both methods are available even with `denialCache: false`:
+Both methods are available when denial caching is omitted or `denialCache: false`:
 
 | Method                                | Clears                                                                     | Preserves                                                                       |
 | ------------------------------------- | -------------------------------------------------------------------------- | ------------------------------------------------------------------------------- |

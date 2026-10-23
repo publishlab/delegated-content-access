@@ -27,6 +27,9 @@ import { chainKeyCapabilitySource } from "../core-issuer/chainKeyCapabilitySourc
 import { chainKeyRequestInput } from "../core-issuer/chainKeyRequestInput.js";
 import { explicitChainKeyClientProfile } from "../referenceProfile.js";
 import { wholeRenderIssuerSupplyPlan } from "../../../core-publisher/issuerSupplyPlan.js";
+import { issuerBlockOf } from "../../../test-lib/helpers/inspect.js";
+import { contentKeyMap, periodKeyMap } from "../../../test-reference/support/namedRecords.js";
+import { cutoffsOf } from "./world.js";
 
 const { subtle } = globalThis.crypto;
 const PUB = "https://www.news-site.example";
@@ -126,9 +129,11 @@ function requestFor(client, page) {
 
 test("one explicit member projects period keys for a relay-only client", async () => {
   const { client, generation, page, registration } = await world();
-  const chainFamily = page.issuerData[ISSUER].sealed.chainKeys[GROUP];
-  const first = Object.keys(chainFamily).sort()[0];
-  page.issuerData[ISSUER].sealed.chainKeys[GROUP] = { [first]: chainFamily[first] };
+  const sealed = issuerBlockOf(page, ISSUER).sealed;
+  const first = cutoffsOf(sealed.chainKeys, GROUP).sort()[0];
+  sealed.chainKeys = sealed.chainKeys.filter(
+    (/** @type {any} */ record) => record.accessGroup !== GROUP || record.cutoff === first,
+  );
 
   const clientData = client.parse(page);
   const request = parseDcaRequest(JSON.stringify(client.buildRequest(clientData, ISSUER, [NAME])));
@@ -140,13 +145,11 @@ test("one explicit member projects period keys for a relay-only client", async (
   const result = await engine.unlock(request, registration);
 
   assert.deepEqual(result.capabilities, []);
-  assert.deepEqual(result.errors, {});
-  assert.deepEqual(Object.keys(result.periodKeys[GROUP]), ["251023T1415", "251023T1430"]);
-  for (const t of Object.keys(result.periodKeys[GROUP])) {
-    assert.equal(
-      result.periodKeys[GROUP][t],
-      base64urlEncode(await generation.periodKey(GROUP, t)),
-    );
+  assert.deepEqual(result.errors, []);
+  const periodKeys = periodKeyMap(result.periodKeys)[GROUP];
+  assert.deepEqual(Object.keys(periodKeys), ["251023T1415", "251023T1430"]);
+  for (const t of Object.keys(periodKeys)) {
+    assert.equal(periodKeys[t], base64urlEncode(await generation.periodKey(GROUP, t)));
   }
 
   const globalContext = structuredClone(request.toObject());
@@ -188,7 +191,7 @@ test("later period-key projection includes explicit article targets without wide
     clock: new Clock("2025-10-23T14:50:00Z"),
   });
   const result = await engine.unlock(request, registration);
-  assert.deepEqual(Object.keys(result.periodKeys[GROUP]), [
+  assert.deepEqual(Object.keys(periodKeyMap(result.periodKeys)[GROUP]), [
     "251023T1415",
     "251023T1430",
     "251023T1445",
@@ -210,26 +213,33 @@ test("one subterminal member is valid and clamps the projected reach", async () 
   const { client, generation, issuerKeys, page, registration } = await world();
   const t = "251023T1430";
   const capability = await generation.chainCapability(GROUP, t);
-  page.issuerData[ISSUER].sealed.chainKeys[GROUP] = {
-    [t]: await sealKey(capability.key, issuerKeys.publicKey, "ecdh-p256", {
-      random: new Random({ seed: 99 }),
-      binding: {
-        renderId: page.resource.renderId,
-        accessGroup: GROUP,
-        suppliedT: t,
-        chainKey: true,
-        ...GEOMETRY,
-      },
-    }),
-  };
+  issuerBlockOf(page, ISSUER).sealed.chainKeys = [
+    {
+      accessGroup: GROUP,
+      cutoff: t,
+      key: await sealKey(capability.key, issuerKeys.publicKey, "ecdh-p256", {
+        random: new Random({ seed: 99 }),
+        binding: {
+          renderId: page.resource.renderId,
+          accessGroup: GROUP,
+          suppliedT: t,
+          chainKey: true,
+          ...GEOMETRY,
+        },
+      }),
+    },
+  ];
 
   const result = await chainKeyIssuerEngine({
     operatingIssuerNames: [ISSUER],
     accessPolicy: policy(20),
     clock: new Clock(AT),
   }).unlock(requestFor(client, page), registration);
-  assert.deepEqual(Object.keys(result.periodKeys[GROUP]), ["251023T1415", "251023T1430"]);
-  assert.deepEqual(result.errors, {});
+  assert.deepEqual(Object.keys(periodKeyMap(result.periodKeys)[GROUP]), [
+    "251023T1415",
+    "251023T1430",
+  ]);
+  assert.deepEqual(result.errors, []);
 });
 
 test("a valid high-byte chainsPerDay stays intact through BIND and issuer projection", async () => {
@@ -262,8 +272,8 @@ test("a valid high-byte chainsPerDay stays intact through BIND and issuer projec
   });
   const requestDocument = structuredClone(requestFor(client, page).toObject());
   requestDocument.periodGeometry = geometry;
-  requestDocument.requestedPeriodKeys = { [GROUP]: [t] };
-  requestDocument.sealed.chainKeys = { [GROUP]: { [t]: sealed } };
+  requestDocument.requestedPeriodKeys = [{ accessGroup: GROUP, periods: [t] }];
+  requestDocument.sealed.chainKeys = [{ accessGroup: GROUP, cutoff: t, key: sealed }];
   const request = parseDcaRequest(JSON.stringify(requestDocument));
 
   const result = await chainKeyIssuerEngine({
@@ -271,9 +281,12 @@ test("a valid high-byte chainsPerDay stays intact through BIND and issuer projec
     accessPolicy: policy(1),
     clock: new Clock(AT),
   }).unlock(request, registration);
-  assert.deepEqual(Object.keys(result.periodKeys[GROUP]), [t]);
-  assert.equal(result.periodKeys[GROUP][t], base64urlEncode(await generation.periodKey(GROUP, t)));
-  assert.deepEqual(result.errors, {});
+  assert.deepEqual(Object.keys(periodKeyMap(result.periodKeys)[GROUP]), [t]);
+  assert.equal(
+    periodKeyMap(result.periodKeys)[GROUP][t],
+    base64urlEncode(await generation.periodKey(GROUP, t)),
+  );
+  assert.deepEqual(result.errors, []);
 });
 
 test("a malformed shared geometry pair is rejected before opening a key", async () => {
@@ -290,18 +303,25 @@ test("a malformed shared geometry pair is rejected before opening a key", async 
 });
 
 test("a present malformed chain collection refuses the whole request beside period keys", () => {
-  for (const malformed of [null, [], "bad", 5, true]) {
+  for (const malformed of [
+    null,
+    {},
+    { [GROUP]: { "251023T1415": "sealed-chain-key" } },
+    "bad",
+    5,
+    true,
+  ]) {
     const request = new DcaRequest({
       periodGeometry: GEOMETRY,
       sealed: {
-        periodKeys: { [GROUP]: { "251023T1415": "sealed-period-key" } },
+        periodKeys: [{ accessGroup: GROUP, period: "251023T1415", key: "sealed-period-key" }],
         chainKeys: malformed,
       },
     });
     assert.throws(
       () => chainKeyRequestInput(request),
       (/** @type {any} */ error) => error.code === "binding_failed",
-      "a collection that is not a map is a structural refusal of the request",
+      "a collection that is not a record array is a structural refusal of the request",
     );
     assert.throws(
       () =>
@@ -318,18 +338,22 @@ test("geometry substitution fails the chain BIND while an independent content si
   const { client, generation, issuerKeys, page, registration } = await world();
   const first = "251023T1430";
   const capability = await generation.chainCapability(GROUP, first);
-  page.issuerData[ISSUER].sealed.chainKeys[GROUP] = {
-    [first]: await sealKey(capability.key, issuerKeys.publicKey, "ecdh-p256", {
-      random: new Random({ seed: 100 }),
-      binding: {
-        renderId: page.resource.renderId,
-        accessGroup: GROUP,
-        suppliedT: first,
-        chainKey: true,
-        ...GEOMETRY,
-      },
-    }),
-  };
+  issuerBlockOf(page, ISSUER).sealed.chainKeys = [
+    {
+      accessGroup: GROUP,
+      cutoff: first,
+      key: await sealKey(capability.key, issuerKeys.publicKey, "ecdh-p256", {
+        random: new Random({ seed: 100 }),
+        binding: {
+          renderId: page.resource.renderId,
+          accessGroup: GROUP,
+          suppliedT: first,
+          chainKey: true,
+          ...GEOMETRY,
+        },
+      }),
+    },
+  ];
   page.periodGeometry = { chainsPerDay: 4, periodMinutes: 15 };
 
   const result = await chainKeyIssuerEngine({
@@ -337,30 +361,38 @@ test("geometry substitution fails the chain BIND while an independent content si
     accessPolicy: policy(2, true),
     clock: new Clock(AT),
   }).unlock(requestFor(client, page), registration);
-  assert.deepEqual(Object.keys(result.contentKeys), [NAME]);
-  assert.deepEqual(result.periodKeys, {});
-  assert.deepEqual(result.errors, {
-    [`${GROUP}|${first}`]: { error: "unseal_failed", message: "sealed value could not be opened" },
-  });
+  assert.deepEqual(Object.keys(contentKeyMap(result.contentKeys)), [NAME]);
+  assert.deepEqual(result.periodKeys, []);
+  assert.deepEqual(result.errors, [
+    {
+      coordinate: `${GROUP}|${first}`,
+      error: "unseal_failed",
+      message: "sealed value could not be opened",
+    },
+  ]);
 });
 
 test("duplicate-window and message-limit collections are invalid before opening", async () => {
   const { client, page } = await world();
   const request = client.buildRequest(client.parse(page), ISSUER, [NAME]);
-  const family = request.sealed.chainKeys[GROUP];
-  const first = Object.keys(family).sort()[0];
-  request.sealed.chainKeys[GROUP] = {
-    [first]: family[first],
-    "251023T2330": family[first],
-  };
+  const first = cutoffsOf(request.sealed.chainKeys, GROUP).sort()[0];
+  const sealed = request.sealed.chainKeys.find(
+    (/** @type {any} */ record) => record.accessGroup === GROUP && record.cutoff === first,
+  ).key;
+  request.sealed.chainKeys = [
+    { accessGroup: GROUP, cutoff: first, key: sealed },
+    { accessGroup: GROUP, cutoff: "251023T2330", key: sealed },
+  ];
   assert.equal(
     chainKeyRequestInput(parseDcaRequest(JSON.stringify(request))).family(GROUP).kind,
     "invalid",
   );
 
-  request.sealed.chainKeys = Object.fromEntries(
-    Array.from({ length: 17 }, (_, index) => [`g${index}`, { [first]: family[first] }]),
-  );
+  request.sealed.chainKeys = Array.from({ length: 17 }, (_, index) => ({
+    accessGroup: `g${index}`,
+    cutoff: first,
+    key: sealed,
+  }));
   const input = chainKeyRequestInput(parseDcaRequest(JSON.stringify(request)));
   assert.ok(input.presented.every((accessGroup) => input.family(accessGroup).kind === "invalid"));
 });
@@ -374,24 +406,22 @@ test("one policy horizon crosses the stationary UTC window with the next supplie
     clock: new Clock(at),
   }).unlock(requestFor(client, page), registration);
 
-  assert.deepEqual(Object.keys(result.periodKeys[GROUP]), [
+  const periodKeys = periodKeyMap(result.periodKeys)[GROUP];
+  assert.deepEqual(Object.keys(periodKeys), [
     "251023T1415",
     "251023T1430",
     "251023T2345",
     "251024T0000",
   ]);
-  for (const t of Object.keys(result.periodKeys[GROUP])) {
-    assert.equal(
-      result.periodKeys[GROUP][t],
-      base64urlEncode(await generation.periodKey(GROUP, t)),
-    );
+  for (const t of Object.keys(periodKeys)) {
+    assert.equal(periodKeys[t], base64urlEncode(await generation.periodKey(GROUP, t)));
   }
 });
 
 test("the final profile coordinate is retained when policy reach extends beyond 2099", () => {
   const request = new DcaRequest({
     periodGeometry: GEOMETRY,
-    sealed: { chainKeys: { [GROUP]: { "991231T2345": "last" } } },
+    sealed: { chainKeys: [{ accessGroup: GROUP, cutoff: "991231T2345", key: "last" }] },
   });
   const grant = { accessGroup: GROUP, futurePeriodCount: 2, authorizePeriod: () => true };
   const select = chainKeyCapabilitySource().selection(
@@ -408,14 +438,16 @@ test("the final profile coordinate is retained when policy reach extends beyond 
   );
 });
 
-test("period-key projection selection obeys the per-family and response ceilings", () => {
+test("selection bounds future coordinates per family before actual candidate accounting", () => {
   const request = new DcaRequest({
     periodGeometry: { chainsPerDay: 1, periodMinutes: 5 },
     sealed: {
-      chainKeys: {
-        premium: { "251023T2355": "AQ", "251024T2355": "Ag" },
-        archive: { "251023T2355": "Aw", "251024T2355": "BA" },
-      },
+      chainKeys: [
+        { accessGroup: "premium", cutoff: "251023T2355", key: "AQ" },
+        { accessGroup: "premium", cutoff: "251024T2355", key: "Ag" },
+        { accessGroup: "archive", cutoff: "251023T2355", key: "Aw" },
+        { accessGroup: "archive", cutoff: "251024T2355", key: "BA" },
+      ],
     },
   });
   const grants = ["premium", "archive"].map((accessGroup) => ({
@@ -435,5 +467,5 @@ test("period-key projection selection obeys the per-family and response ceilings
   const count = (answer) =>
     answer.selected.reduce((total, entry) => total + entry.targetTs.length, 0);
   assert.equal(count(archive), 288);
-  assert.equal(count(premium), 224);
+  assert.equal(count(premium), 288);
 });

@@ -18,6 +18,244 @@ than list individual commits. The [specifications](docs/spec---overview.md) defi
   below, then read the relevant entries. A JavaScript API change does not by
   itself require an independent implementation to adopt that API.
 
+## v1.0.0-alpha.3 - 2026-10-23
+
+Changes since [v1.0.0-alpha.2, publication commit 14cd688](https://github.com/publishlab/delegated-content-access/commit/14cd688db74086cd718139e8cbda1efd0f05f37b),
+published on 20 October 2026.
+
+### Publisher compression target policy
+
+The optional `CompressingSealer` now checks complete ordered encoding sequences
+on raw and prepared input. Its default target accepts unencoded content and one
+gzip layer. A baseline-only target selects `[[]]` and uses `identity` for raw
+input; additional prepared sequences require explicit configuration and matching
+client decoders. The generic Sealer and wire format are unchanged.
+
+Custom gzip encoders receive disposable input bytes, so output validation and
+retries retain the originally captured content.
+
+### Breaking: collections are arrays of named records
+
+Every collection of content items, issuers, keys, connectors, sealed material,
+request selections and reports is now a JSON array. Each record names its
+identity and coordinates as fields instead of using dynamic object keys. Fixed
+sections such as `keys`, `sealed`, `contentGroupKeys` and `periodGeometry` stay
+objects, and ordinary `keys` stay separate from `contentGroupKeys`. The
+[data-format example](docs/design--data-format--example.md#period-keys--chains--html-delivery)
+shows a complete exchange.
+
+- Delivery: `contentData` holds `{contentName, ...}` items, `issuerData` holds
+  `{issuerName, ...}` blocks and `sealedContent` or `dca-sealed-content` holds
+  `{contentName, content}`.
+- Item wraps: `keys` holds `{accessGroup, period, key}`; the former `t` is now
+  `period`. Content-group `connectors` hold `{group, connector}`.
+- Sealed and returned keys: `contentKeys` hold `{contentName, key}`,
+  `periodKeys` hold `{accessGroup, period, key}` and `chainKeys` hold
+  `{accessGroup, cutoff, key}`. Content-group period and chain records use
+  `contentName` and `group` instead of `accessGroup`; their content-key records
+  use only `contentName` and `key`. Seeds are `{contentName, windowStart, key}`.
+  A client-bound protected value sits unchanged under `key`.
+- Reports and selections: `errors` holds `{coordinate, error, message?}`,
+  `notDelivered` holds `{accessGroup, reason, message?}`, and
+  `requestedPeriodKeys`, `requestedContentGroups`, `requestedContentKeys`,
+  `requestedChainCutoffs` and `boundCandidates` become records.
+- Required empty collections are `[]`, so `keys.contentKeys` and request
+  `sealed.contentKeys` may be empty arrays. Optional collections keep their
+  omission rules and are not sent empty.
+
+Repeated records now have stated meanings. A repeated descriptor or status
+record, such as an item, issuer block, sealed-content record, error or report,
+resolves to the last whole record with no merging. Repeated key material and
+connectors at one coordinate are candidate alternatives that count toward
+existing limits. Repeated request selections take the union of groups or
+periods and the lowest chain cutoff, and repeated item routes stay
+alternatives. This is separate from duplicate JSON member names, whose rule is
+unchanged. This representation change leaves labels, BIND, AAD, nonces and
+derivations unchanged; array position enters none of them. The separate
+cryptographic changes below still apply.
+
+**Incompatibility:** there is no dual parser, toggle, version change or
+profile identifier. A reader of the former object maps cannot read the new
+arrays, and a new reader refuses the old maps. Republish retained deliveries
+and update every publisher, issuer, client and relay together. Signed response
+transcripts and whole-message vectors change shape; cryptographic inputs and
+outputs at each coordinate do not.
+
+**Who updates:** every role. Optional profiles stay optional; a baseline-only
+peer still needs the new baseline representation.
+
+Authority: [data format](docs/spec--data-format.md#23-collections-of-named-records),
+[core protocol](docs/spec--core-protocol.md#7-baseline-issuer-core-result),
+[period keys](docs/spec-profile--period-keys.md#56-family-reports-notdelivered),
+[chain keys](docs/spec-profile--chain-keys.md#124-requested-article-periods) and the
+[content groups proposal](docs/spec-profile--content-groups.md#unlock-request).
+
+### Breaking: ordinary ECDH envelope omits its nonce
+
+Ordinary `ecdh-p256` envelopes now contain a 65-octet uncompressed ephemeral
+P-256 public point followed by 32 octets of encrypted key and GCM tag:
+**97 decoded octets / 130 unpadded base64url characters**, formerly 109 / 146.
+The AES-GCM nonce is twelve implicit zero octets. Each seal requires a fresh
+ephemeral keypair, including seals at the same coordinate; changing BIND cannot
+make agreement reuse safe. The raw 32-octet shared x-coordinate remains the
+AES-256-GCM key, without a KDF, and the issuer reconstructs the same BIND.
+
+**Incompatibility:** publishers and issuers must update together. The ordinary
+opener requires exactly 97 octets and refuses the former carried-nonce layout;
+there is no selector, old-format fallback or automatic retry. Republish retained
+deliveries for the new opener, or serve them through a separately maintained
+old implementation. Clients relay the sealed value as before.
+
+RSA-OAEP, compact-ECDH HPKE and issuer-response nonces retain their separate
+procedures; content-group seed envelopes follow in the next entry. This adoption
+is an ordinary-envelope change, not adoption of the paused nonce-free response
+experiment.
+
+Authority: [sealed-key envelopes Section 4](docs/spec--sealed-key-envelopes.md#4-ecdh-p-256-envelope).
+
+### Breaking: content-group seed envelope omits its nonce
+
+Optional content-groups `ecdh-p256-content-name-seed` envelopes now contain the
+65-octet uncompressed ephemeral P-256 public point followed by 48 octets of
+encrypted seed and GCM tag: **113 decoded octets / 151 unpadded base64url
+characters**, formerly 125 / 167. The AES-GCM nonce is twelve implicit zero
+octets, as for the ordinary envelope above. Each seal requires a fresh
+ephemeral keypair, including rival seeds at the same coordinate. The raw
+32-octet x-coordinate key, seed AAD, seed derivation, chain and period keys,
+connectors and wire members are unchanged.
+
+**Incompatibility:** publishers and issuers that selected content groups must
+update together. The issuer requires exactly 113 octets and refuses the former
+125-octet layout; there is no selector, fallback or retry. Republish retained
+deliveries, or open them through a separately maintained old implementation.
+Clients relay seed envelopes unchanged and never open them. Content-group seed
+envelopes require ordinary ECDH; composition with compact ECDH remains undefined
+and must be refused.
+
+**Who updates:** content-group publishers and issuers. Baseline-only
+implementations gain no duty.
+
+Authority: [content groups](docs/spec-profile--content-groups.md#seed-envelope-and-issuer-custody).
+
+### Breaking: content-group response member is contentGroupKeys
+
+The optional content-groups response member is now `contentGroupKeys`, replacing
+`contentGroups`. Its `contentKeys`, `periodKeys`, `chainKeys` and `errors`
+remain beneath it, separate from ordinary `keys`. Issuers, clients, relays and
+response-signing consumers that selected this profile must update the response
+name together; the old spelling is not an alias. Publisher item configuration
+`contentGroups`, request selectors and cryptographic derivation inputs retain
+their names and meaning. Baseline-only implementations have no new duty.
+
+Authority: [content groups](docs/spec-profile--content-groups.md#reading-the-key-records).
+
+### Issuer response limits: overflow refuses the whole exchange
+
+For selected chain-key or content-group behavior, exceeding the specified
+response-output bounds for mandatory output refuses the whole exchange with
+`too_many_entries`, including otherwise successful sibling keys. Issuers first
+clamp their optional future horizon to remaining capacity, keeping each
+coordinate's complete candidate set. They do not trim mandatory candidates or
+silently omit mandatory families to fit the answer. Chain-projected output counts distinct
+period-key candidates after duplicate-key removal; content-group bounds count
+the candidate and error records their specification defines. Clients may need
+bounded requests; no automatic retry or one-response success is promised.
+
+Authority: [chain-key bounds](docs/spec-profile--chain-keys.md#221-protocol-maxima)
+and [content-group response admission](docs/spec-profile--content-groups.md#direct-response-and-retention).
+
+### Reference behavior: candidate recovery and input validation
+
+The JavaScript reference now reserves mandatory and ordinary fallback candidates
+before allocating optional chain horizons. It retains complete rival sets at a
+coordinate and stops optional output at the existing limits; mandatory overflow
+still refuses the whole exchange. Across successive renders, publisher
+preparation safely handles inherited names such as `constructor` and preserves
+own JSON members such as `__proto__` as data.
+
+Recipient-grant clients try older candidates when a newer key fails body
+authentication. Accepted content-group response candidates remain pending
+independently of retained-rival and window capacities. Same-window pending
+rivals do not each count as a window. The content-group client supplies
+`maxResponseMembers` for both cache member bounds and `maxWindowsPerGroup` for
+`maxWindowsPerFamily`. A failed recovery guess leaves an eligible unavailable-key
+retry available. These changes preserve
+existing authorization and wire formats. Custom period sources receive the
+actual ordinary `periodKeyCount` and immutable `selectedCapabilities`; optional
+production may explicitly return `{kind: "omitted"}`. See the
+[period-source contract](js/PORTING.md#chain-key-request-relay) for composition
+and budget ownership.
+
+Content-group admission refuses explicit null collections where arrays or error
+records are required. Opaque recipient grants validate content-name syntax;
+the signed form's 64-name and distinct-array restrictions do not apply to local
+opaque-store encoding. The exported RSA public-offer helper now projects only
+admitted public fields and rejects private JWK input; the default client already
+prevented private material from reaching an offer. Seed-envelope key type, curve
+and private derivation-usage faults now remain configuration errors, producing
+HTTP 500 at the issuer boundary. Wrong valid-key authentication remains a
+uniform HTTP 400 refusal.
+
+Browser HTTP handling now preserves CORS headers on POST refusals, admits media
+type parameters under the specified grammar, and rejects unsupported preflight
+schemes. A circuit-breaker-skipped issuer no longer establishes eligibility for
+conditional fallback.
+These are reference corrections, not new baseline or optional-profile duties.
+
+### Design note: response nonce removal remains deferred
+
+Issuer responses retain their transmitted nonces. A future construction could
+derive a separate encryption key for each entry and use a fixed nonce. Group,
+window and cutoff alone are insufficient: different candidate keys may share
+those coordinates. A small entry number, unique within one fresh response
+agreement and bound alongside the key kind and full semantic coordinates,
+could distinguish them. Carrying that number with its entry would preserve
+reordering and independent opening. Its exact encoding, tests and net wire
+savings remain future work; this note introduces no field or requirement.
+
+### Breaking: period-key wrap nonce is derived
+
+Period-key wrap entries no longer carry `nonce`. An ordinary entry is
+`{accessGroup, period, key}`; a marked omission entry also carries `bind`. Publisher and client
+each derive the 12-octet wrap nonce as the first 12 octets of SHA-256 over a
+domain string, a zero octet, the 16 decoded render-ID octets, and the
+length-prefixed octets of the item name, access group, `t` and the selected
+wrap AAD. The ordinary wrap AAD stays empty. AES-128-GCM, the 16-octet period
+key, the 16-octet content key and the 32-octet `key` value are unchanged.
+[PORTING.md](js/PORTING.md#derived-wrap-nonce) gives a byte vector.
+
+The derivation relies on a fresh random render ID per render and one content
+key per render and item, both already required. The aggregate ceiling of
+`2^32` wraps per period-key bytes across all producers stays, as does the
+recommendation to choose a lower local ceiling.
+
+**Incompatibility:** there is no toggle, negotiation or fallback. A reader
+built for the random wrap nonce cannot open new data, because new entries
+carry no nonce for it to use. A new reader ignores a carried `nonce` and
+derives its own, so it fails to open old data sealed with a random wrap nonce.
+Regenerate old deliveries, or keep a separately selected old reader for them;
+the presence of a wrap-entry `nonce` never selects one.
+
+**Who updates:** period-key publishers and clients. Under the content-key seal
+omission prototype, its issuer also derives the nonce and its forwarded
+`boundCandidates` lose `nonce`. This wrap change leaves other issuer processing,
+BIND, envelope nonce procedures and issuer responses unchanged. Period-key
+support stays optional; every implementation that selects it uses this procedure.
+
+Authority: [content protection](docs/spec--content-protection.md#41-wrap-nonce),
+[data format](docs/spec--data-format.md#41-contentdata) and
+[period keys](docs/spec-profile--period-keys.md#62-wrapping-and-rollover).
+
+### Browser integration: denial caching is opt-in
+
+[Browser-origin Section 2.6](docs/spec-profile--browser-origin.md#26-avoiding-repeated-denied-unlocks)
+changes retention of denial scheduling hints from SHOULD to optional MAY.
+This changes request scheduling, not issuer authorization or wire compatibility.
+
+`createBrowserClient` now omits denial scheduling by default. Opt in with
+`denialCache: new DeniedUnlockCache()`; period-key and chain-key retention
+remain independent of that choice.
+
 ## v1.0.0-alpha.2 — 2026-10-20
 
 These changes are compared with the last public working draft,

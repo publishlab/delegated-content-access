@@ -1,0 +1,26 @@
+{
+  "vectorFormat": "html-writer/1",
+  "case": "dangerous-script-spellings",
+  "input": {
+    "dcaData": {
+      "v": 1,
+      "renderID": "html-carrier-contract",
+      "resource": {
+        "uri": "https://publisher.example/article",
+        "data": {
+          "spellings": ["</script>", "</SCRIPT", "<!--<script>"]
+        }
+      },
+      "opaqueWriterSentinel": {
+        "retained": true,
+        "nested": ["unknown field", 3, null]
+      }
+    },
+    "sealedContent": [
+      {
+        "contentName": "article",
+        "content": "AAAA"
+      }
+    ]
+  }
+}

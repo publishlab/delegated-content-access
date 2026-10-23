@@ -204,3 +204,92 @@ test("client-bound agreement follows signature and both origin checks", async ()
   assert.equal(meter.counts.generateKey, 1);
   assert.ok(meter.counts.deriveBits > 0);
 });
+
+test("post-origin transport refusals preserve exact CORS and caller/server status classes", async (t) => {
+  for (const [name, config, offer, status, code] of [
+    [
+      "invalid host mode",
+      {
+        transportPolicy: { modeFor: () => "neither" },
+        clientBoundProfile: { ...ecdhProfile, RANDOM_REQUIRED: false },
+      },
+      undefined,
+      500,
+      "bad_transport_policy",
+    ],
+    [
+      "missing offer",
+      {
+        transportMode: "client-bound",
+        clientBoundProfile: { ...ecdhProfile, RANDOM_REQUIRED: false },
+      },
+      undefined,
+      400,
+      "client_key_required",
+    ],
+    [
+      "RSA offer at ECDH endpoint",
+      {
+        transportMode: "client-bound",
+        clientBoundProfile: { ...ecdhProfile, RANDOM_REQUIRED: false },
+      },
+      { kty: "RSA", n: "AQ", e: "AQAB" },
+      400,
+      "bad_client_key",
+    ],
+    [
+      "malformed EC offer",
+      {
+        transportMode: "client-bound",
+        clientBoundProfile: { ...ecdhProfile, RANDOM_REQUIRED: false },
+      },
+      { kty: "EC", crv: "P-256", x: "bad", y: "bad" },
+      400,
+      "bad_client_key",
+    ],
+    [
+      "host transport failure",
+      {
+        transportMode: "client-bound",
+        clientBoundProfile: {
+          METHOD: "test-failure",
+          RANDOM_REQUIRED: false,
+          seal() {
+            throw new Error("host transport fault");
+          },
+        },
+      },
+      {},
+      500,
+      "internal_error",
+    ],
+  ]) {
+    await t.test(name, async () => {
+      const stage = await actorWorld(config);
+      const page = await stage.publisher.render(article("A"));
+      const request = requestFor(page);
+      if (offer !== undefined) request.clientPublicKey = offer;
+      const spy = adapterResponses();
+      let response;
+      try {
+        response = await stage.network.post(UNLOCK_URL, request, { origin: ORIGIN });
+      } finally {
+        spy.stop();
+      }
+      assert.equal(response.status, status, name);
+      if (code !== "internal_error") assert.equal(response.body.error, code, name);
+      assert.equal(stage.keyStores.primary.reachCount, 0, name);
+      assert.equal(spy.responses.length, 1);
+      assert.deepEqual(
+        corsFieldsOf(spy.responses[0]),
+        {
+          "access-control-allow-origin": ORIGIN,
+          "access-control-allow-credentials": "true",
+        },
+        name,
+      );
+      assert.equal(spy.responses[0].headers["cache-control"], "no-store");
+      assert.equal(spy.responses[0].headers.vary, "Origin");
+    });
+  }
+});

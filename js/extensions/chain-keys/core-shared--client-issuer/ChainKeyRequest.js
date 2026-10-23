@@ -14,11 +14,11 @@ export class ChainKeyRequest extends DcaRequest {
    * @param {DcaRequest} request
    * @param {object} added
    * @param {unknown} [added.periodGeometry]
-   * @param {Record<string, Record<string, string>>} [added.chainKeys]
-   * @param {Record<string, string[]>} [added.requestedPeriodKeys]
+   * @param {Record<string, unknown>[]} [added.chainKeys] - `{accessGroup, cutoff, key}` records
+   * @param {{ accessGroup: string, periods: string[] }[]} [added.requestedPeriodKeys]
    * @returns {ChainKeyRequest}
    */
-  static fromRequest(request, { periodGeometry, chainKeys = {}, requestedPeriodKeys } = {}) {
+  static fromRequest(request, { periodGeometry, chainKeys = [], requestedPeriodKeys } = {}) {
     if (!(request instanceof DcaRequest)) {
       throw dcaError("bad_config", "a chain-key request is added to a DcaRequest; build one first");
     }
@@ -34,7 +34,7 @@ export class ChainKeyRequest extends DcaRequest {
       ...(requestedPeriodKeys === undefined ? {} : { requestedPeriodKeys }),
       sealed: {
         ...sealed,
-        ...(Object.keys(chainKeys).length === 0 ? {} : { chainKeys }),
+        ...(chainKeys.length === 0 ? {} : { chainKeys }),
       },
     };
     if (clientPublicKey !== undefined) document.clientPublicKey = clientPublicKey;

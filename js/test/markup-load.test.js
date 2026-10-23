@@ -22,6 +22,7 @@ import { actorWorld } from "../demo/scenarios/world.js";
 import { ARTICLES, CONTENT_NAME } from "../demo/scenarios/fixtures.js";
 import { utf8Decode } from "../core-shared/codec.js";
 import { domOver } from "../test-lib/helpers/domOver.js";
+import { sealedContentByName } from "../test-lib/helpers/inspect.js";
 
 describe("The markup path, end to end: writer to string to Browser.load to open", () => {
   test("the client opens the article off a page it parsed from the writer's markup", async () => {
@@ -31,7 +32,9 @@ describe("The markup path, end to end: writer to string to Browser.load to open"
     // carry, then parsed back to a queryable root: the real string round trip,
     // rather than a root fabricated from the render's values.
     const page = await render("A");
-    const { sealedContent, ...dcaData } = page.asJson();
+    // The writer takes the ciphertext by name, as the Sealer returns it.
+    const { sealedContent: records, ...dcaData } = page.asJson();
+    const sealedContent = sealedContentByName({ sealedContent: records });
     const markup = writeMarkupDelivery({ dcaData, sealedContent });
     const root = domOver(markup, { publisherOrigin: page.publisherOrigin });
 

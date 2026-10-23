@@ -80,7 +80,7 @@ const BASE_DOCUMENT_MEMBERS = Object.freeze(["keys", "errors", "notDelivered"]);
  * @type {Readonly<Record<string, (request: DcaRequest) => boolean>>}
  */
 const BUILT_IN_EXTENSION_COORDINATES = Object.freeze({
-  "chain-keys": (request) => Object.keys(request.sealedChainKeys ?? {}).length > 0,
+  "chain-keys": (request) => (request.sealedChainKeys ?? []).some(isRecord),
 });
 const LIMITS = ["maxBodyBytes", "maxEntries", "maxEntriesPerGroup"];
 const MAX_DATE_EPOCH_MS = 8_640_000_000_000_000;
@@ -106,38 +106,90 @@ function cap(limits, name) {
   return value;
 }
 
-/** @param {any} value */
-function nonemptyStringMap(value) {
+/**
+ * Whether a capability's entries are a non-empty list of `{t, key}` string
+ * pairs: one distinct candidate per entry, several allowed at one label.
+ *
+ * @param {any} value
+ */
+function nonemptyEntries(value) {
   return (
-    value !== null &&
-    typeof value === "object" &&
-    !Array.isArray(value) &&
-    Object.keys(value).length > 0 &&
-    Object.values(value).every((entry) => typeof entry === "string")
-  );
-}
-
-/** @param {any} value */
-function nonemptyPeriodKeyMap(value) {
-  return (
-    nonemptyStringMap(value) &&
-    Object.values(value).every((entry) => binaryStringBytes(entry)?.length === 16)
-  );
-}
-
-/** @param {any} value */
-function isPeriodKeyResult(value) {
-  return (
-    value !== null &&
-    typeof value === "object" &&
-    !Array.isArray(value) &&
-    Object.entries(value).every(
-      ([accessGroup, family]) =>
-        isAccessGroup(accessGroup) &&
-        nonemptyPeriodKeyMap(family) &&
-        Object.keys(family).every(isPeriodKeyLabel),
+    Array.isArray(value) &&
+    value.length > 0 &&
+    value.every(
+      (entry) =>
+        entry !== null &&
+        typeof entry === "object" &&
+        !Array.isArray(entry) &&
+        typeof own(entry, "t") === "string" &&
+        typeof own(entry, "key") === "string",
     )
   );
+}
+
+/** @param {any} value */
+function isRecord(value) {
+  return value !== null && typeof value === "object" && !Array.isArray(value);
+}
+
+/**
+ * Whether an engine's content-key result is a list of `{contentName, key}`
+ * records with a string key each.
+ *
+ * @param {any} value
+ */
+function isContentKeyResult(value) {
+  return (
+    Array.isArray(value) &&
+    value.every(
+      (record) =>
+        isRecord(record) &&
+        isContentName(own(record, "contentName")) &&
+        typeof own(record, "key") === "string",
+    )
+  );
+}
+
+/**
+ * Whether an engine's period-key result is a list of `{accessGroup, period,
+ * key}` records, each a 16-byte key at an admitted coordinate.
+ *
+ * @param {any} value
+ */
+function isPeriodKeyResult(value) {
+  return (
+    Array.isArray(value) &&
+    value.every(
+      (record) =>
+        isRecord(record) &&
+        isAccessGroup(own(record, "accessGroup")) &&
+        isPeriodKeyLabel(own(record, "period")) &&
+        binaryStringBytes(own(record, "key"))?.length === 16,
+    )
+  );
+}
+
+/**
+ * Whether an engine's error result is a list of error records, one per
+ * coordinate, each with a string `coordinate` and `error`.
+ *
+ * @param {any} value
+ */
+function isErrorResult(value) {
+  if (!Array.isArray(value)) return false;
+  const seen = new Set();
+  for (const record of value) {
+    const coordinate = own(record, "coordinate");
+    if (
+      !isRecord(record) ||
+      typeof coordinate !== "string" ||
+      typeof own(record, "error") !== "string" ||
+      seen.has(coordinate)
+    )
+      return false;
+    seen.add(coordinate);
+  }
+  return true;
 }
 
 /**
@@ -163,11 +215,12 @@ const NOT_DELIVERED_REASONS = Object.freeze(["denied", "unavailable"]);
 
 /**
  * Whether an engine's not-delivered report is one this processor can put in a
- * document: a map of admitted access-group names to a known reason and an
- * optional string message, where no named family also has a period key, a
- * chain key or a period-coordinate error in the same answer. Period keys Section 5.6
- * forbids that coexistence, and a client refuses the whole response for it,
- * so a report that breaks it is an engine fault rather than a delivery.
+ * document: a list of records, one per admitted access group, each with a
+ * known reason and an optional string message, where no named family also
+ * has a period key, a chain key or a period-coordinate error in the same
+ * answer. Period keys Section 5.6 forbids that coexistence, and a client
+ * refuses the whole response for it, so a report that breaks it is an engine
+ * fault rather than a delivery.
  *
  * @param {any} report
  * @param {any} result - the engine answer the report came with
@@ -175,23 +228,28 @@ const NOT_DELIVERED_REASONS = Object.freeze(["denied", "unavailable"]);
  * @returns {boolean}
  */
 function isNotDeliveredReport(report, result, capabilities) {
-  if (report === null || typeof report !== "object" || Array.isArray(report)) return false;
-  for (const accessGroup of Object.keys(report)) {
-    const entry = own(report, accessGroup);
+  if (!Array.isArray(report)) return false;
+  const seen = new Set();
+  for (const entry of report) {
+    const accessGroup = own(entry, "accessGroup");
     const message = own(entry, "message");
     if (
+      !isRecord(entry) ||
       !isAccessGroup(accessGroup) ||
-      entry === null ||
-      typeof entry !== "object" ||
-      Array.isArray(entry) ||
+      seen.has(accessGroup) ||
       !NOT_DELIVERED_REASONS.includes(own(entry, "reason")) ||
       (message !== undefined && typeof message !== "string") ||
-      Object.hasOwn(result.periodKeys ?? {}, accessGroup) ||
+      (result.periodKeys ?? []).some(
+        (/** @type {any} */ record) => own(record, "accessGroup") === accessGroup,
+      ) ||
       capabilities.some((capability) => capability?.accessGroup === accessGroup) ||
-      Object.keys(result.errors).some((coordinate) => coordinate.startsWith(`${accessGroup}|`))
+      result.errors.some((/** @type {any} */ record) =>
+        String(own(record, "coordinate")).startsWith(`${accessGroup}|`),
+      )
     ) {
       return false;
     }
+    seen.add(accessGroup);
   }
   return true;
 }
@@ -209,7 +267,7 @@ function isTypedCapability(capability) {
     typeof capability.accessGroup === "string" &&
     capability.accessGroup.length > 0 &&
     Object.hasOwn(capability, "entries") &&
-    nonemptyStringMap(capability.entries) &&
+    nonemptyEntries(capability.entries) &&
     Object.hasOwn(capability, "interpretation") &&
     capability.interpretation !== null &&
     typeof capability.interpretation === "object" &&
@@ -245,7 +303,7 @@ export class IssuerProcessor {
   #maxEntriesPerGroup;
 
   /**
-   * @param {{ checkVersion?: (request: DcaRequest) => void, checkOperatingIssuerName: (request: DcaRequest) => void, unlock: (request: DcaRequest, registration: any, policyInput?: any, invocation?: import('./IssuerEngine.js').IssuerUnlockInvocation) => Promise<{ contentKeys: Record<string, string>, periodKeys?: Record<string, Record<string, string>>, capabilities?: any[], errors: Record<string, object>, notDelivered?: Record<string, { reason: string, message?: string }>, policyData?: any, sections?: Record<string, any> }> }} issuerEngine
+   * @param {{ checkVersion?: (request: DcaRequest) => void, checkOperatingIssuerName: (request: DcaRequest) => void, unlock: (request: DcaRequest, registration: any, policyInput?: any, invocation?: import('./IssuerEngine.js').IssuerUnlockInvocation) => Promise<{ contentKeys: { contentName: string, key: string }[], periodKeys?: { accessGroup: string, period: string, key: string }[], capabilities?: any[], errors: { coordinate: string, error: string, message?: string }[], notDelivered?: { accessGroup: string, reason: string, message?: string }[], policyData?: any, sections?: Record<string, any> }> }} issuerEngine
    *   Its optional checkVersion guard is synchronous pure and returns void;
    *   an unlock-only injected engine uses the baseline version guard.
    * @param {object} [options]
@@ -253,7 +311,7 @@ export class IssuerProcessor {
    *   the admission caps this deployment replaces; every member left out keeps
    *   its `DEFAULT_LIMITS` value. A present member must be a positive number,
    *   so a member written as `undefined` counts as supplied and is refused.
-   * @param {Record<string, (record: any) => { section: string, accessGroup: string, entries: Record<string, string>, periodGeometry: { chainsPerDay: number, periodMinutes: number } }>} [options.capabilityEncoders] -
+   * @param {Record<string, (record: any) => { section: string, accessGroup: string, entries: { t: string, key: string }[], periodGeometry: { chainsPerDay: number, periodMinutes: number } }>} [options.capabilityEncoders] -
    *   the selected typed-capability projections for this issuer deployment
    * @param {string[]} [options.selectedExtensions] - the extensions this issuer
    *   deployment has selected, named the way the request members are. List an
@@ -388,11 +446,11 @@ export class IssuerProcessor {
    * malformed, or unconfigured representation.
    *
    * @param {any[]} capabilities
-   * @returns {{ keys: Record<string, Record<string, string>>, contexts: Record<string, { chainsPerDay: number, periodMinutes: number }> }}
+   * @returns {{ keys: { accessGroup: string, cutoff: string, key: string }[], contexts: Record<string, { chainsPerDay: number, periodMinutes: number }> }}
    */
   #encodeCapabilities(capabilities) {
-    /** @type {Record<string, Record<string, string>>} */
-    const encoded = {};
+    /** @type {{ accessGroup: string, cutoff: string, key: string }[]} */
+    const encoded = [];
     /** @type {Record<string, { chainsPerDay: number, periodMinutes: number }>} */
     const contexts = {};
     for (const capability of capabilities) {
@@ -416,7 +474,7 @@ export class IssuerProcessor {
         contribution.section !== "chainKeys" ||
         typeof contribution.accessGroup !== "string" ||
         contribution.accessGroup.length === 0 ||
-        !nonemptyStringMap(contribution.entries) ||
+        !nonemptyEntries(contribution.entries) ||
         contribution.periodGeometry === null ||
         typeof contribution.periodGeometry !== "object" ||
         Array.isArray(contribution.periodGeometry) ||
@@ -430,13 +488,14 @@ export class IssuerProcessor {
           "a capability encoder returns one known nonempty section contribution with complete chain geometry",
         );
       }
-      if (Object.hasOwn(encoded, contribution.accessGroup)) {
+      if (Object.hasOwn(contexts, contribution.accessGroup)) {
         throw dcaError(
           "bad_config",
           "capability encoders may not collide on one response section and access group",
         );
       }
-      setOwn(encoded, contribution.accessGroup, contribution.entries);
+      for (const { t, key } of contribution.entries)
+        encoded.push({ accessGroup: contribution.accessGroup, cutoff: t, key });
       if (Object.keys(contexts).length > 0) {
         const first = Object.values(contexts)[0];
         if (
@@ -461,12 +520,10 @@ export class IssuerProcessor {
    * @returns {boolean}
    */
   #overCap(request) {
-    // Count before signature verification or private-key work. This count is
-    // coarser than the engine's walk on purpose: the engine skips a section
-    // or group that is not a map, while an array is counted here by its
-    // indices. So this check can refuse a malformed request for size when the
-    // engine would have answered it with nothing. An admission check should
-    // err in that direction, and it is cheaper than deciding shape twice.
+    // Count raw array elements before signature verification, private-key
+    // work or deduplication, including malformed and repeated records. Period
+    // and chain records share their named access group's cap. A non-array
+    // section counts nothing here and is refused by structural admission.
 
     // Read the raw container rather than the narrowed accessors; the comment
     // in #hasInvalidBaseCoordinate explains why.
@@ -497,34 +554,33 @@ export class IssuerProcessor {
     if (sealed === null || typeof sealed !== "object" || Array.isArray(sealed)) return true;
     // Delivery blocks may omit this member, but the request container is
     // required even when only selected period coordinates are presented.
-    if (own(sealed, "contentKeys") === undefined) return true;
-
-    // Read the sections as they arrived. The accessors used below narrow any
-    // value that is not a non-array object to `undefined`. A malformed named
-    // map would then look the same as an absent one, and a well-formed sibling
-    // section would carry the request on. A present named map that is not a
-    // non-array object fails admission for the whole request, like every other
-    // request map, so this loop reads it from the raw container.
-    for (const name of ["contentKeys", ...(this.#periodKeyInput ? ["periodKeys"] : [])]) {
-      const section = own(request.sealed, name);
-      if (section === undefined) continue;
-      if (section === null || typeof section !== "object" || Array.isArray(section)) return true;
-    }
-
-    for (const contentName of Object.keys(request.sealedContentKeys ?? {})) {
-      if (!isContentName(contentName)) return true;
+    // Read the collections as they arrived: a present collection that is not
+    // an array fails admission for the whole request, like every other
+    // request collection.
+    const contentKeys = own(sealed, "contentKeys");
+    if (!Array.isArray(contentKeys)) return true;
+    // An element that is not a record names no item and is skipped; a record
+    // whose identity is missing or outside the grammar refuses the request.
+    // Its `key` is judged later, at its own coordinate.
+    for (const record of contentKeys) {
+      if (isRecord(record) && !isContentName(own(record, "contentName"))) return true;
     }
 
     if (this.#periodKeyInput) {
-      const supplied = own(request.sealed, "periodKeys");
-      if (supplied !== undefined && Object.keys(request.sealedPeriodKeys ?? {}).length === 0) {
-        return true;
-      }
-      for (const [accessGroup, periods] of Object.entries(request.sealedPeriodKeys ?? {})) {
-        if (!isAccessGroup(accessGroup)) return true;
-        if (periods === null || typeof periods !== "object" || Array.isArray(periods)) return true;
-        if (Object.keys(periods).length === 0) return true;
-        if (Object.keys(periods).some((t) => !isPeriodKeyLabel(t))) return true;
+      const periodKeys = own(sealed, "periodKeys");
+      if (periodKeys !== undefined) {
+        // Every element names a coordinate here, as every member of the old
+        // family maps did: a non-record, a bad accessGroup or a bad period
+        // label refuses the whole request, and so does an empty collection.
+        if (!Array.isArray(periodKeys) || periodKeys.length === 0) return true;
+        for (const record of periodKeys) {
+          if (
+            !isRecord(record) ||
+            !isAccessGroup(own(record, "accessGroup")) ||
+            !isPeriodKeyLabel(own(record, "period"))
+          )
+            return true;
+        }
       }
     }
 
@@ -564,11 +620,12 @@ export class IssuerProcessor {
     // that extension. An issuer that relays chain families and answers with
     // period keys has selected chain keys and returns no chain section at
     // all, so a response encoder is the wrong signal to read here.
+    // Only a record presents a coordinate; a skipped element presents none.
     const sections = [
       request.sealedContentKeys,
       ...(this.#periodKeyInput ? [request.sealedPeriodKeys] : []),
     ];
-    if (sections.some((section) => Object.keys(section ?? {}).length > 0)) return false;
+    if (sections.some((section) => (section ?? []).some(isRecord))) return false;
     for (const presents of this.#extensionCoordinates.values()) {
       if (presents(request) === true) return false;
     }
@@ -766,11 +823,9 @@ export class IssuerProcessor {
     if (
       result === null ||
       typeof result !== "object" ||
-      result.contentKeys === null ||
-      typeof result.contentKeys !== "object" ||
+      !isContentKeyResult(result.contentKeys) ||
       (result.periodKeys !== undefined && !isPeriodKeyResult(result.periodKeys)) ||
-      result.errors === null ||
-      typeof result.errors !== "object" ||
+      !isErrorResult(result.errors) ||
       (result.capabilities !== undefined && !Array.isArray(result.capabilities)) ||
       hasNonemptyUncomposedCapability(result, "periodCapabilities") ||
       hasNonemptyUncomposedCapability(result, "chainKeys") ||
@@ -784,7 +839,7 @@ export class IssuerProcessor {
       return this.#fail("internal_error");
     }
 
-    /** @type {{ keys: Record<string, Record<string, string>>, contexts: Record<string, { chainsPerDay: number, periodMinutes: number }> }} */
+    /** @type {{ keys: { accessGroup: string, cutoff: string, key: string }[], contexts: Record<string, { chainsPerDay: number, periodMinutes: number }> }} */
     let encodedCapabilities;
     try {
       encodedCapabilities = this.#encodeCapabilities(result.capabilities ?? []);
@@ -796,24 +851,24 @@ export class IssuerProcessor {
     const document = { keys: { contentKeys: result.contentKeys } };
 
     // The cached delivery path depends on which fields are present, so an
-    // empty periodKeys object would mean something different from no field.
-    if (result.periodKeys && Object.keys(result.periodKeys).length > 0) {
+    // empty periodKeys collection would mean something different from no field.
+    if (result.periodKeys && result.periodKeys.length > 0) {
       document.keys.periodKeys = result.periodKeys;
     }
-    if (Object.keys(encodedCapabilities.keys).length > 0) {
+    if (encodedCapabilities.keys.length > 0) {
       document.keys.chainKeys = encodedCapabilities.keys;
     }
 
     // A success response can carry per-item failures alongside coordinates
     // that did open. The same response carries the relabel defense and the
     // ordinary stale-key answer.
-    if (Object.keys(result.errors).length > 0) {
+    if (result.errors.length > 0) {
       document.errors = result.errors;
     }
 
     // An empty report is no member: period keys Section 5.6 requires a present
     // `notDelivered` to name at least one family.
-    if (result.notDelivered !== undefined && Object.keys(result.notDelivered).length > 0) {
+    if (result.notDelivered !== undefined && result.notDelivered.length > 0) {
       document.notDelivered = result.notDelivered;
     }
 

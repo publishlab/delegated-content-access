@@ -32,12 +32,13 @@ export class OmissionRequest extends DcaRequest {
    * @param {object} added
    * @param {string[]} [added.extensions] - what this client supports, offered
    *   rather than demanded
-   * @param {Record<string, any[]>} [added.boundCandidates] - bound
-   *   `contentData` entries by contentName, each carrying the accessGroup and
-   *   t it was read at. Labels only; they select which blob the issuer tries.
+   * @param {Record<string, unknown>[]} [added.boundCandidates] - bound
+   *   `contentData` wrap entries, each record carrying the contentName,
+   *   accessGroup and period it was read at. Labels only; they select which
+   *   blob the issuer tries.
    * @returns {OmissionRequest}
    */
-  static fromRequest(request, { extensions = [], boundCandidates = {} } = {}) {
+  static fromRequest(request, { extensions = [], boundCandidates = [] } = {}) {
     if (!(request instanceof DcaRequest)) {
       throw dcaError("bad_config", "an omission request is added to a DcaRequest; build one first");
     }
@@ -50,7 +51,7 @@ export class OmissionRequest extends DcaRequest {
       ...(extensions.length > 0 ? { extensions: [...extensions] } : {}),
       sealed,
     };
-    if (Object.keys(boundCandidates).length > 0) document.boundCandidates = boundCandidates;
+    if (boundCandidates.length > 0) document.boundCandidates = boundCandidates;
     if (clientPublicKey !== undefined) document.clientPublicKey = clientPublicKey;
 
     return new OmissionRequest(document);
@@ -69,14 +70,14 @@ export class OmissionRequest extends DcaRequest {
   }
 
   /**
-   * The forwarded candidates, or undefined when the request carries none.
-   * Container-checked the way base checks its sealed sections: an array or a
-   * non-object here is not a map of candidates.
+   * The forwarded candidate records, or undefined when the request carries
+   * none. Container-checked the way base checks its sealed collections: a
+   * value that is not an array is not a collection of candidates.
    *
-   * @returns {Record<string, unknown>|undefined}
+   * @returns {unknown[]|undefined}
    */
   get boundCandidates() {
     const value = own(this.toObject(), "boundCandidates");
-    return value !== null && typeof value === "object" && !Array.isArray(value) ? value : undefined;
+    return Array.isArray(value) ? value : undefined;
   }
 }

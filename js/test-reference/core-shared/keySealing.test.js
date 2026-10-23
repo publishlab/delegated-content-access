@@ -10,6 +10,7 @@
 // binding.
 
 import { describe } from "node:test";
+import { envelopeBehavior } from "../../test-lib/suites/envelope-behavior.js";
 import assert from "node:assert/strict";
 
 import { seal, open } from "../../core-shared--publisher-issuer/keySealing.js";
@@ -124,7 +125,7 @@ test("a kdf option is refused rather than sealed under a second construction", a
 });
 
 // The portable twin of the case above. `kdf` is refused before the key or the
-// nonce source is read, so the twin passes the stand-in key and no `random`.
+// key is read, so the twin passes the stand-in key and no `random`.
 portableKeySealingDynamicTest(
   "a kdf option is refused rather than sealed under a second construction, under a stand-in key",
   async () => {
@@ -149,14 +150,14 @@ portableKeySealingDynamicTest(
   },
 );
 
-test("the ECDH blob is ephemeral public key, nonce, ciphertext and tag", async () => {
+test("the ECDH blob is ephemeral public key, ciphertext and tag, with no carried nonce", async () => {
   const random = seededRandom(SEED);
   const { publicKey } = await issuerKeypair();
 
   const blob = await seal(random.bytes(16), publicKey, "ecdh-p256", { random, binding: BINDING });
   const bytes = base64urlDecode(blob);
 
-  assert.equal(bytes.length, 65 + 12 + 16 + 16, "the spec's 109-byte blob");
+  assert.equal(bytes.length, 65 + 16 + 16, "the spec's 97-byte blob");
   assert.equal(bytes[0], 0x04, "uncompressed P-256 point");
 });
 
@@ -214,6 +215,140 @@ test("an injected ephemeral keypair makes a seal replayable", async () => {
   assert.deepEqual(await open(first, privateKey, "ecdh-p256", { binding: BINDING }), keyBytes);
 });
 
+test("ECDH zero-nonce carrier matches an independent raw-x AES-256-GCM answer", async () => {
+  // Isolated test-vector keys: P-256 private scalars 1 and 2. The literal
+  // answer was computed with Node createECDH/computeSecret + createCipheriv,
+  // literal ASCII BIND and twelve zero nonce bytes, without reference helpers.
+  const issuerJwk = {
+    kty: "EC",
+    crv: "P-256",
+    x: "axfR8uEsQkf4vOblY6RA8ncDfYEt6zOg9KE5RdiYwpY",
+    y: "T-NC4v4af5uO5-tKfA-eFivOM1drMV7Oy7ZAaDe_UfU",
+  };
+  const ephemeralJwk = {
+    kty: "EC",
+    crv: "P-256",
+    x: "fPJ7GI0DT36KUjgDBLUaw8CJaeJ38hs1pgtI_EdmmXg",
+    y: "B3dVENuO0EApPZrGn3Qw27p9reY86YIpngS3nSJ4c9E",
+  };
+  const algorithm = { name: "ECDH", namedCurve: "P-256" };
+  const publicKey = await crypto.subtle.importKey("jwk", issuerJwk, algorithm, true, []);
+  const privateKey = await crypto.subtle.importKey(
+    "jwk",
+    {
+      ...issuerJwk,
+      d: "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAE",
+    },
+    algorithm,
+    false,
+    ["deriveBits"],
+  );
+  const ephemeralKeyPair = {
+    publicKey: await crypto.subtle.importKey("jwk", ephemeralJwk, algorithm, true, []),
+    privateKey: await crypto.subtle.importKey(
+      "jwk",
+      {
+        ...ephemeralJwk,
+        d: "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAI",
+      },
+      algorithm,
+      false,
+      ["deriveBits"],
+    ),
+  };
+  const expected =
+    "BHzyexiNA09-ilI4AwS1GsPAiWnid_IbNaYLSPxHZpl4B3dVENuO0EApPZrGn3Qw27p9reY86YIpngS3nSJ4c9EtlKnLANVYCNM88cGezOesegTB9nfkUMncQXrLj6aaLw";
+  const payload = Uint8Array.from({ length: 16 }, (_, i) => i);
+  assert.equal(
+    await seal(payload, publicKey, "ecdh-p256", {
+      binding: BINDING,
+      ephemeralKeyPair,
+    }),
+    expected,
+  );
+  assert.deepEqual(await open(expected, privateKey, "ecdh-p256", { binding: BINDING }), payload);
+
+  // An old-format carrier with an explicit zero nonce would authenticate
+  // under a fallback parser. Refuse its 109-byte layout instead.
+  const current = base64urlDecode(expected);
+  const old = new Uint8Array(109);
+  old.set(current.subarray(0, 65));
+  old.set(current.subarray(65), 77);
+  await refuses(
+    () => open(base64urlEncode(old), privateKey, "ecdh-p256", { binding: BINDING }),
+    { code: "unseal_failed", message: /exactly 97 bytes/ },
+    "the old carried-nonce carrier is not another opening procedure",
+  );
+});
+
+test("ECDH captures Buffer payload and BIND before asynchronous work", async () => {
+  const recipient = await issuerKeypair();
+  const payload = Buffer.from(Array.from({ length: 16 }, (_, i) => i));
+  const original = Uint8Array.from(payload);
+  const binding = { ...BINDING };
+  const pending = seal(payload, recipient.publicKey, "ecdh-p256", { binding });
+  payload.fill(0xff);
+  binding.contentName = "sidebar";
+  const blob = await pending;
+  const openingBinding = { ...BINDING };
+  const opening = open(blob, recipient.privateKey, "ecdh-p256", { binding: openingBinding });
+  openingBinding.contentName = "sidebar";
+  assert.deepEqual(await opening, original);
+  await refuses(
+    () => open(blob, recipient.privateKey, "ecdh-p256", { binding }),
+    "unseal_failed",
+    "the edited coordinate is not the captured one",
+  );
+});
+
+test("same-coordinate rival payloads each open with independent ephemeral points", async () => {
+  const recipient = await issuerKeypair();
+  const firstKey = new Uint8Array(16).fill(1);
+  const secondKey = new Uint8Array(16).fill(2);
+  const first = await seal(firstKey, recipient.publicKey, "ecdh-p256", { binding: BINDING });
+  const second = await seal(secondKey, recipient.publicKey, "ecdh-p256", { binding: BINDING });
+  assert.notDeepEqual(
+    base64urlDecode(first).subarray(0, 65),
+    base64urlDecode(second).subarray(0, 65),
+  );
+  for (const entries of [
+    [
+      [first, firstKey],
+      [second, secondKey],
+    ],
+    [
+      [second, secondKey],
+      [first, firstKey],
+    ],
+  ]) {
+    const wire = JSON.parse(JSON.stringify(entries.map(([blob]) => blob)));
+    for (let i = 0; i < entries.length; i++) {
+      assert.deepEqual(
+        await open(wire[i], recipient.privateKey, "ecdh-p256", { binding: BINDING }),
+        entries[i][1],
+      );
+    }
+  }
+});
+
+// The shared suite exercises shipped envelope operations for each supported BIND
+// coordinate, without selecting optional period/chain derivation implementations.
+envelopeBehavior(
+  {
+    createRecipient: () => issuerKeypair(),
+    seal: (bytes, recipient, binding) => seal(bytes, recipient.publicKey, "ecdh-p256", { binding }),
+    open: async (blob, recipient, binding) => {
+      try {
+        return await open(blob, recipient.privateKey, "ecdh-p256", { binding });
+      } catch (error) {
+        assert.ok(error instanceof DcaError, `expected a DcaError, got ${error}`);
+        throw error;
+      }
+    },
+  },
+  test,
+);
+
 test("another issuer's private key does not unseal the blob", async () => {
   const random = seededRandom(SEED);
   const mine = await issuerKeypair();
@@ -236,7 +371,7 @@ test("a tampered blob fails the GCM tag", async () => {
   const blob = await seal(random.bytes(16), publicKey, "ecdh-p256", { random, binding: BINDING });
 
   const bytes = base64urlDecode(blob);
-  bytes[100] ^= 0x01;
+  bytes[bytes.length - 1] ^= 0x01;
 
   await assert.rejects(
     () => open(base64urlEncode(bytes), privateKey, "ecdh-p256", { binding: BINDING }),
@@ -377,8 +512,7 @@ describe("RSA-OAEP - the second seal algorithm", () => {
   });
 
   test("an RSA-OAEP seal needs no Random - OAEP does its own padding", async () => {
-    // The ECDH blob carries a nonce the sealer has to supply. This one does
-    // not, so demanding a Random here would be theatre.
+    // RSA-OAEP draws its padding randomness inside WebCrypto.
     const { publicKey, privateKey } = await issuerKeypair("rsa-oaep");
     const keyBytes = seededRandom(SEED).bytes(16);
 
@@ -589,7 +723,7 @@ describe("RSA-OAEP - the second seal algorithm", () => {
     const blob = await seal(random.bytes(16), publicKey, "rsa-oaep", { binding: BINDING });
 
     const bytes = base64urlDecode(blob);
-    bytes[100] ^= 0x01;
+    bytes[bytes.length - 1] ^= 0x01;
 
     await refuses(
       () => open(base64urlEncode(bytes), privateKey, "rsa-oaep", { binding: BINDING }),
@@ -611,7 +745,7 @@ describe("RSA-OAEP - the second seal algorithm", () => {
 
   test("CONFUSION: an ECDH blob handed to an RSA issuer fails typed", async () => {
     // The realistic mix-up: a publisher configured `ecdh-p256` for an issuer
-    // whose key is RSA. 125 bytes into a 256-byte slot.
+    // whose key is RSA. 97 bytes into a 256-byte slot.
     const random = seededRandom(SEED);
     const ecdh = await issuerKeypair();
     const rsa = await issuerKeypair("rsa-oaep");
@@ -636,9 +770,8 @@ describe("RSA-OAEP - the second seal algorithm", () => {
 
     const rsaBlob = await seal(keyBytes, rsa.publicKey, "rsa-oaep", { binding: BINDING });
 
-    // 256 bytes clears the ECDH length floor, so this goes all the way into
-    // the P-256 point import and has to come back typed, not as a raw
-    // WebCrypto DataError.
+    // The ECDH exact-length check refuses the 256-byte RSA carrier before
+    // any P-256 point import.
     await refuses(
       () => open(rsaBlob, ecdh.privateKey, "ecdh-p256", { binding: BINDING }),
       "unseal_failed",
@@ -812,7 +945,7 @@ describe("which failure keeps which identity", () => {
     const rsaBlob = await seal(keyBytes, rsa.publicKey, "rsa-oaep", { binding: BINDING });
 
     const altered = base64urlDecode(ecdhBlob);
-    altered[100] ^= 0x01;
+    altered[altered.length - 1] ^= 0x01;
 
     // A value the wire could not have carried: `atob` refuses it, and the
     // caller gets the coordinate's answer rather than a raw codec throw.
@@ -896,12 +1029,12 @@ describe("which failure keeps which identity", () => {
     assert.equal(
       mineBlob.length % 4,
       2,
-      "the last character of a 109-byte envelope carries four unused bits",
+      "the last character of a 97-byte envelope carries four unused bits",
     );
     const tailBits = `${mineBlob.slice(0, -1)}${alphabet[alphabet.indexOf(mineBlob.slice(-1)) | 1]}`;
 
     // Padding and a last character with its unused bits set follow from the
-    // 146-character length, so both of those spellings are here on every
+    // 130-character length, so both of those spellings are here on every
     // run. The standard alphabet respells `-` and `_`, and whether the
     // drawn envelope carries one of them is the draw's business, so that
     // spelling joins the list where it has something to respell.
@@ -1004,7 +1137,7 @@ describe("which failure keeps which identity", () => {
 describe("The canonical payload width", () => {
   const PERIOD_BINDING = { renderId: BINDING.renderId, accessGroup: "premium", t: "251023T1415" };
 
-  test("c, p and pc envelopes all carry 16 bytes in 109-byte ECDH envelopes", async () => {
+  test("c, p and pc envelopes all carry 16 bytes in 97-byte ECDH envelopes", async () => {
     const random = seededRandom(SEED);
     const { publicKey, privateKey } = await issuerKeypair();
     const bindings = [
@@ -1022,8 +1155,8 @@ describe("The canonical payload width", () => {
     for (const binding of bindings) {
       const payload = random.bytes(16);
       const blob = await seal(payload, publicKey, "ecdh-p256", { random, binding });
-      assert.equal(base64urlDecode(blob).length, 109);
-      assert.equal(blob.length, 146);
+      assert.equal(base64urlDecode(blob).length, 97);
+      assert.equal(blob.length, 130);
       assert.deepEqual(await open(blob, privateKey, "ecdh-p256", { binding }), payload);
     }
   });
@@ -1044,7 +1177,7 @@ describe("The canonical payload width", () => {
   });
 
   // The portable twin of the case above. `payloadBytes` is refused before the
-  // key or the nonce source is read.
+  // key is read.
   portableKeySealingDynamicTest(
     "payloadBytes is no longer a profile selector, under a stand-in key",
     async () => {

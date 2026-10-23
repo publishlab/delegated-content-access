@@ -32,6 +32,7 @@ import { base64urlEncode, utf8Decode, utf8Encode } from "../../core-shared/codec
 import { decrypt, encrypt } from "../../core-shared/aead.js";
 import { deriveAesGcmKey, generateEcdhKeyPair } from "../../core-shared/cryptoProvider.js";
 import { issuerKeypair, signingKeypair } from "../support/keys.js";
+import { contentKeyMap, errorMap } from "../support/namedRecords.js";
 
 const ORIGIN = "https://publisher.example";
 const NAME = "issuer";
@@ -124,8 +125,8 @@ test("an absent envelope member opens with the ordinary procedure the entry perm
     const { calls, unlock } = await world({ envelopes });
     const { status, body } = await unlock();
     assert.equal(status, 200, String(envelopes));
-    assert.equal(body.errors, undefined, String(envelopes));
-    assert.equal(typeof body.keys?.contentKeys?.[BODY], "string", String(envelopes));
+    assert.equal(errorMap(body.errors), undefined, String(envelopes));
+    assert.equal(typeof contentKeyMap(body.keys?.contentKeys)?.[BODY], "string", String(envelopes));
     assert.equal(calls.length, 0, "the selected opener runs only when the request selects it");
   }
 });
@@ -134,8 +135,12 @@ test("an entry that permits only the extension procedure refuses an absent membe
   const { calls, unlock } = await world({ envelopes: [PROCEDURE] });
   const { status, body } = await unlock();
   assert.equal(status, 200);
-  assert.equal(body.keys?.contentKeys?.[BODY], undefined, "a valid ordinary envelope stays shut");
-  assert.ok(body.errors?.[BODY]);
+  assert.equal(
+    contentKeyMap(body.keys?.contentKeys)?.[BODY],
+    undefined,
+    "a valid ordinary envelope stays shut",
+  );
+  assert.ok(errorMap(body.errors)?.[BODY]);
   assert.equal(calls.length, 0);
 });
 
@@ -144,8 +149,8 @@ test("a permitted selected procedure opens under the BIND octets and the key pai
     const { calls, pair, unlock } = await world({ envelopes });
     const { status, body } = await unlock(PROCEDURE);
     assert.equal(status, 200);
-    assert.equal(body.errors, undefined);
-    assert.equal(body.keys.contentKeys[BODY], base64urlEncode(OPENED));
+    assert.equal(errorMap(body.errors), undefined);
+    assert.equal(contentKeyMap(body.keys.contentKeys)[BODY], base64urlEncode(OPENED));
     assert.equal(calls.length, 1);
     assert.equal(typeof calls[0].sealed, "string");
     assert.equal(calls[0].key.privateKey, pair.privateKey);
@@ -162,11 +167,11 @@ test("a selected procedure the key entry does not permit opens nothing", async (
     const { status, body } = await unlock(PROCEDURE);
     assert.equal(status, 200, String(envelopes));
     assert.equal(
-      body.keys?.contentKeys?.[BODY],
+      contentKeyMap(body.keys?.contentKeys)?.[BODY],
       undefined,
       "no fallback to the ordinary procedure",
     );
-    assert.ok(body.errors?.[BODY], String(envelopes));
+    assert.ok(errorMap(body.errors)?.[BODY], String(envelopes));
     assert.equal(calls.length, 0);
   }
 });
@@ -238,7 +243,7 @@ test("a procedure that declares its key types refuses an entry of another type a
   const fitting = await world({ procedures: declared(["rsa-oaep", "ecdh-p256"]) });
   const { status, body } = await fitting.unlock(PROCEDURE);
   assert.equal(status, 200);
-  assert.equal(body.keys.contentKeys[BODY], base64urlEncode(OPENED));
+  assert.equal(contentKeyMap(body.keys.contentKeys)[BODY], base64urlEncode(OPENED));
 });
 
 test("a malformed or unknown envelope member opens nothing and never falls back", async () => {
@@ -246,8 +251,12 @@ test("a malformed or unknown envelope member opens nothing and never falls back"
     const { calls, unlock } = await world();
     const { status, body } = await unlock(envelope);
     assert.equal(status, 200, JSON.stringify(envelope));
-    assert.equal(body.keys?.contentKeys?.[BODY], undefined, JSON.stringify(envelope));
-    assert.ok(body.errors?.[BODY], JSON.stringify(envelope));
+    assert.equal(
+      contentKeyMap(body.keys?.contentKeys)?.[BODY],
+      undefined,
+      JSON.stringify(envelope),
+    );
+    assert.ok(errorMap(body.errors)?.[BODY], JSON.stringify(envelope));
     assert.equal(calls.length, 0);
   }
 });
@@ -262,8 +271,8 @@ test("an opener failure is the ordinary per-item refusal", async () => {
     const { unlock } = await world({ procedures: { envelopeProcedures: { [PROCEDURE]: opener } } });
     const { status, body } = await unlock(PROCEDURE);
     assert.equal(status, 200);
-    assert.equal(body.keys?.contentKeys?.[BODY], undefined);
-    assert.ok(body.errors?.[BODY]);
+    assert.equal(contentKeyMap(body.keys?.contentKeys)?.[BODY], undefined);
+    assert.ok(errorMap(body.errors)?.[BODY]);
   }
 });
 
@@ -300,7 +309,7 @@ test("prototype-looking procedure names stay own members with their declared key
       assert.equal(body.keys, undefined);
     } else {
       assert.equal(status, 200);
-      assert.equal(body.keys?.contentKeys?.[BODY], base64urlEncode(OPENED));
+      assert.equal(contentKeyMap(body.keys?.contentKeys)?.[BODY], base64urlEncode(OPENED));
     }
   }
 });
@@ -368,7 +377,7 @@ test("a selected extension procedure gives a section source no ordinary opener t
   // base coordinate; the source has no opener under it, so its envelope stays shut.
   const selected = await unlock(PROCEDURE, { fakeAsk });
   assert.equal(selected.status, 200);
-  assert.equal(selected.body.keys.contentKeys[BODY], base64urlEncode(OPENED));
+  assert.equal(contentKeyMap(selected.body.keys.contentKeys)[BODY], base64urlEncode(OPENED));
   assert.deepEqual(selected.body.fakeSection, { opened: "unseal_failed" });
   assert.equal(ordinaryOpens, 1, "the ordinary opener is not a fallback");
   assert.equal(calls.length, 1, "the extension procedure opened the base coordinate only");

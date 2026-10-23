@@ -86,7 +86,6 @@ const REFUSAL_DESCRIPTION =
 
 const RENDER_ID_BYTES = 16;
 const CONTENT_KEY_BYTES = 16;
-const NONCE_BYTES = 12;
 
 const DESCRIPTION =
   "One render built through the Sealer factory from plain setup. " +
@@ -103,14 +102,16 @@ const DESCRIPTION =
   "and verifies under expected.signingPublicKey; a signature is not pinned. " +
   "expected.draws lists every value the render draws from the stream, in stream " +
   "order, with its offset, length and bytes. The draws cover the stream from its first " +
-  "byte to its last, and the wire carries no nonce or wrap entry they do not list. " +
+  "byte to its last. Ordinary ECDH envelopes draw and carry no nonce. " +
   "renderId is resource.renderId. Each content nonce is twelve zero octets, not a draw or wire member. " +
-  "wrapNonce is the nonce of the " +
-  "contentData[contentName].keys[accessGroup] entry for t, and that entry's key opens " +
-  "under the fixed period key, with no aad, to the contentKey. envelopeNonce is bytes " +
-  "65 to 77 of the ECDH envelope at issuerData[issuerName].sealed.contentKeys" +
-  "[contentName] or .periodKeys[accessGroup][t]. The contentKey is not on the wire: " +
-  "sealedContent[name] opens under it, with twelve zero nonce octets and expected.content[name].aad " +
+  "A period-key wrap draws no nonce either. Each item a content call names an access group for " +
+  "carries one wrap per period fixedPeriodKeys holds for that group, and no other: the " +
+  "contentData record with that contentName has a keys array of {accessGroup, period, key}; " +
+  "each key opens under the fixed period key for that accessGroup and period, with no aad, to the contentKey, using " +
+  'the nonce first12(SHA-256(UTF8("dca-derivation-content-key-wrap-nonce") || 0x00 || the 16 ' +
+  "octets resource.renderId decodes to || LP(contentName) || LP(accessGroup) || LP(t) || LP(empty aad))), where LP(x) is " +
+  "the four-octet big-endian octet length of x followed by its octets. The contentKey is not on the wire: " +
+  "the sealedContent record with that contentName opens its content under it, with twelve zero nonce octets and expected.content[name].aad " +
   "as additionalData, to expected.content[name].plaintext. The item record carries no aad; " +
   "build it as the content AAD of docs/spec--content-protection.md Section 3.2 and compare " +
   "it with the recorded bytes: LP(resource.renderId) || LP(contentName), where " +
@@ -119,13 +120,13 @@ const DESCRIPTION =
   "its BIND and the key it opens to, opensTo. Open one as the issuer does: ECDH between " +
   "expected.issuerPrivateKeys[keyId] (PKCS#8 PEM, never part of the setup) and the " +
   "65-byte point at the envelope's start, the 32-byte x-coordinate as the AES-256-GCM " +
-  "key with no KDF, bytes 65 to 77 as the nonce, the rest as ciphertext and tag, and " +
+  "key with no KDF, twelve zero nonce octets, bytes 65 onward as ciphertext and tag, and " +
   "the BIND as aad. ECDH ephemeral keys and ECDSA signatures come from the platform, " +
   "not the stream, and are not pinned.";
 
 /**
  * @typedef {object} Draw
- * @property {string} draw - renderId, contentKey, wrapNonce or envelopeNonce
+ * @property {string} draw - renderId or contentKey
  * @property {number} length
  * @property {string} [issuerName]
  * @property {string} [contentName]
@@ -134,19 +135,14 @@ const DESCRIPTION =
  */
 
 /**
- * The draws of a render, in the order the reference makes them: the render
- * id; each item's content key; each item's wrap nonce per
- * access group and period; then, for each ECDH issuer in order, the nonce of
- * each item's content-key envelope and of each period envelope. An RSA-OAEP issuer
- * takes its padding randomness from the platform and draws nothing.
+ * Only the render id and each item's content key are drawn from this stream.
+ * Ordinary ECDH envelopes use an implicit zero nonce and fresh platform pairs;
+ * period wraps derive their nonce. RSA padding randomness is platform-owned.
  *
- * @param {{ issuerName: string, algorithm: string }[]} issuers
  * @param {{ name: string, accessGroups: string[] }[]} items
- * @param {(accessGroup: string) => string[]} periodsOf - the periods an access group is sealed for
  * @returns {Draw[]}
  */
-function drawsOf(issuers, items, periodsOf) {
-  const groups = [...new Set(items.flatMap((item) => item.accessGroups))];
+function drawsOf(items) {
   return [
     { draw: "renderId", length: RENDER_ID_BYTES },
     ...items.map(({ name: contentName }) => ({
@@ -154,36 +150,6 @@ function drawsOf(issuers, items, periodsOf) {
       length: CONTENT_KEY_BYTES,
       contentName,
     })),
-    ...items.flatMap(({ name: contentName, accessGroups }) =>
-      accessGroups.flatMap((accessGroup) =>
-        periodsOf(accessGroup).map((t) => ({
-          draw: "wrapNonce",
-          length: NONCE_BYTES,
-          contentName,
-          accessGroup,
-          t,
-        })),
-      ),
-    ),
-    ...issuers
-      .filter(({ algorithm }) => algorithm === "ecdh-p256")
-      .flatMap(({ issuerName }) => [
-        ...items.map(({ name: contentName }) => ({
-          draw: "envelopeNonce",
-          length: NONCE_BYTES,
-          issuerName,
-          contentName,
-        })),
-        ...groups.flatMap((accessGroup) =>
-          periodsOf(accessGroup).map((t) => ({
-            draw: "envelopeNonce",
-            length: NONCE_BYTES,
-            issuerName,
-            accessGroup,
-            t,
-          })),
-        ),
-      ]),
   ];
 }
 
@@ -193,7 +159,7 @@ function drawsOf(issuers, items, periodsOf) {
  */
 const RSA_OAEP_NOTE =
   " An issuer whose input.setup.issuers entry has algorithm RSA-OAEP draws nothing " +
-  "from the stream, so no envelopeNonce names it; its padding randomness comes from " +
+  "from the stream; its padding randomness comes from " +
   "the platform, and its envelope bytes are not pinned. expected.envelopes lists its " +
   "envelopes beside the ECDH ones. Open one as the issuer does: RSA-OAEP with SHA-256, " +
   "MGF1 with SHA-256 and an empty label, under expected.issuerPrivateKeys[keyId] " +
@@ -252,9 +218,7 @@ function record(name, setup, render) {
   /** @type {{ issuerName: string, keyId: string, algorithm: string }[]} */
   const issuers = setup.issuers;
   const items = render.content;
-  /** @param {string} accessGroup */
-  const periodsOf = (accessGroup) => Object.keys(fixedPeriodKeys?.[accessGroup] ?? {});
-  const layout = drawsOf(issuers, items, periodsOf);
+  const layout = drawsOf(items);
   if (layout.reduce((sum, { length }) => sum + length, 0) !== randomStream.length)
     throw new Error(`${name}: the draw layout does not cover the setup's random stream`);
 

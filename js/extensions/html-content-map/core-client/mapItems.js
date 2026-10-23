@@ -28,6 +28,9 @@
 import { DcaError, dcaError } from "../../../core-shared/errors.js";
 
 /** @typedef {'opened'|'locked'|'failed'} ItemState */
+/** The acquisition result this mapper observes; response bodies stay with the client.
+ * @typedef {{ status: number }|{ skipped: string }} MapUnlockResult
+ */
 
 /**
  * The base client pieces this module drives. `createBrowserClient` returns all
@@ -39,7 +42,7 @@ import { DcaError, dcaError } from "../../../core-shared/errors.js";
  * @property {any} resolver - `core-client/ContentKeyResolver.js` or a
  *   composition answering `resolveDetailed` and `contentKeyWithOriginFor`
  * @property {any} opener - `core-client/ContentRepresentationOpener.js`
- * @property {(contentNames: string[]) => Promise<import("../../../integration-client/createDeliveryClient.js").UnlockResult>} unlock
+ * @property {(contentNames: string[]) => Promise<MapUnlockResult>} unlock
  */
 
 /**
@@ -79,6 +82,8 @@ export function decodeMapItemText(bytes) {
  */
 export async function openMapItems(client, contentNames) {
   const { dcaData, reader, resolver, opener, unlock } = client;
+  if (typeof resolver?.resolveAuthenticated !== "function")
+    throw dcaError("bad_config", "map opening needs authenticated item-key selection");
   /** @type {Set<string>} */
   const locked = new Set();
 
@@ -116,7 +121,28 @@ export async function openMapItems(client, contentNames) {
       bytes = await opener.open({
         item,
         ciphertext: reader.extract(contentName),
-        resolveKey: async () => (await resolver.contentKeyWithOriginFor(dcaData, contentName)).key,
+        // Rival candidates for one item are held newest first, and the newest
+        // may be a wrong one: the opener's predicate selects the one that
+        // opens, and the key comes out of the predicate rather than a second
+        // read of the live delivery.
+        resolveKey: async (/** @type {any} */ authenticate) => {
+          /** @type {any} */
+          let opened = null;
+          await resolver.resolveAuthenticated(
+            dcaData,
+            [contentName],
+            async (
+              /** @type {string} */ _name,
+              /** @type {any} */ candidate,
+              /** @type {any} */ origin,
+            ) => {
+              const opens = await authenticate(candidate, origin);
+              if (opens) opened = candidate;
+              return opens;
+            },
+          );
+          return opened;
+        },
       });
     } catch (cause) {
       // A typed refusal is a defective item: record, AEAD or representation.

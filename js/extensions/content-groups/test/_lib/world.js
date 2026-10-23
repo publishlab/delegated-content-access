@@ -178,8 +178,12 @@ export async function world({ issuers = ["issuer"] } = {}) {
         const reader = new JsonDeliveryReader(writeJsonDelivery(render), {
           publisherOrigin: origin,
         });
+        // The test keeps the ciphertexts by name for its own `extract`.
         const sealedContent = Object.fromEntries(
-          Object.keys(reader.dcaData.contentData).map((name) => [name, reader.extract(name)]),
+          reader.dcaData.contentData.map((/** @type {any} */ { contentName }) => [
+            contentName,
+            reader.extract(contentName),
+          ]),
         );
         return { page: copy(reader.dcaData), sealedContent, origin };
       },

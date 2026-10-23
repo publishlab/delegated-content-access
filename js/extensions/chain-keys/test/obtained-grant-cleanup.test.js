@@ -18,6 +18,7 @@ import { ResponseAssociation } from "../../../core-client/ResponseAssociation.js
 import { encrypt } from "../../../core-shared/aead.js";
 import { base64urlDecode, base64urlEncode, utf8Encode } from "../../../core-shared/codec.js";
 import { Storage } from "../../../demo/actors/Storage.js";
+import { contentKeyWrapNonceOctets } from "../../../test-reference/support/contentKeyWrapNonceOctets.js";
 import { ChainKeyCache } from "../core-client/ChainKeyCache.js";
 import { ChainKeyRequestBuilder } from "../core-client/ChainKeyRequestBuilder.js";
 import { explicitChainKeyClientProfile } from "../referenceProfile.js";
@@ -43,42 +44,48 @@ function compactJwt(payload) {
 
 /** One chain-carrying render whose item "a" is wrapped under the C1 period key. */
 async function render() {
-  const wrapNonce = new Uint8Array(12).fill(11);
-  const resource = { origin: PUB, resourceId: "123456", renderId: "r-1" };
+  const renderId = "AAAAAAAAAAAAAAAAAAAAAA";
+  const wrapNonce = contentKeyWrapNonceOctets({
+    renderId,
+    contentName: "a",
+    accessGroup: GROUP,
+    t: TARGET_T,
+  });
+  const resource = { origin: PUB, resourceId: "123456", renderId };
   return new DcaData(
     {
       version: "1",
       resource,
       resourceJWT: compactJwt(resource),
       periodGeometry: GEOMETRY,
-      issuerData: {
-        [CHAIN]: {
+      issuerData: [
+        {
+          issuerName: CHAIN,
           keyId: "k1",
           unlockUrl: "https://chain.example/unlock",
-          sealed: { chainKeys: { [GROUP]: { [TERMINAL_T]: "AAAA" } } },
+          sealed: { chainKeys: [{ accessGroup: GROUP, cutoff: TERMINAL_T, key: "AAAA" }] },
         },
-      },
-      contentData: {
-        a: {
+      ],
+      contentData: [
+        {
+          contentName: "a",
           contentType: "text/plain",
           nonce: base64urlEncode(new Uint8Array(12).fill(1)),
-          keys: {
-            [GROUP]: [
-              {
-                t: TARGET_T,
-                nonce: base64urlEncode(wrapNonce),
-                key: base64urlEncode(
-                  await encrypt(
-                    base64urlDecode(C1.periodKey),
-                    wrapNonce,
-                    new Uint8Array(16).fill(20),
-                  ),
+          keys: [
+            {
+              accessGroup: GROUP,
+              period: TARGET_T,
+              key: base64urlEncode(
+                await encrypt(
+                  base64urlDecode(C1.periodKey),
+                  wrapNonce,
+                  new Uint8Array(16).fill(20),
                 ),
-              },
-            ],
-          },
+              ),
+            },
+          ],
         },
-      },
+      ],
     },
     { publisherOrigin: PUB },
   );
@@ -119,7 +126,7 @@ for (const [name, entry] of Object.entries(ENTRIES)) {
       CHAIN,
       {
         periodGeometry: GEOMETRY,
-        keys: { chainKeys: { [GROUP]: { [TERMINAL_T]: C1.rootChainKey } } },
+        keys: { chainKeys: [{ accessGroup: GROUP, cutoff: TERMINAL_T, key: C1.rootChainKey }] },
       },
       new ResponseAssociation(data, CHAIN, request),
     );

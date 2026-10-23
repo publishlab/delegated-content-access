@@ -16,6 +16,7 @@ import { parseBearerAuthorization } from "../../adapter-issuer/parseBearerAuthor
 import { checkEnvelopes, checkVersion, publisherFor } from "../../core-issuer/IssuerEngine.js";
 import { normalizePublisherOrigin } from "../../core-shared/publisherOrigin.js";
 import { dcaError } from "../../core-shared/errors.js";
+import { isContentName } from "../../core-shared/names.js";
 
 /** @param {unknown} value @returns {value is Record<string, any>} */
 function record(value) {
@@ -49,9 +50,7 @@ function admittedGrant(grant, issuerId, registrationId, resourceId, nowMs) {
     grant.revoked === false &&
     Array.isArray(grant.contentNames) &&
     grant.contentNames.length > 0 &&
-    grant.contentNames.every(
-      (/** @type {unknown} */ name) => typeof name === "string" && name.length > 0,
-    )
+    grant.contentNames.every(isContentName)
   );
 }
 

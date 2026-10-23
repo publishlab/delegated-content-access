@@ -8,6 +8,7 @@
 // comes from the composition rather than from a payload length.
 
 import { dcaError } from "../../../core-shared/errors.js";
+import { base64urlEncode } from "../../../core-shared/codec.js";
 import { chainMemberLimit } from "../../../core-shared/chainMemberLimit.js";
 import {
   MAX_PERIOD_KEYS_PER_FAMILY,
@@ -145,6 +146,11 @@ export function chainKeyCapabilitySource({
   };
 
   return {
+    checkPeriodKeyOutput(count) {
+      if (count > MAX_PERIOD_KEYS_PER_RESPONSE) {
+        throw dcaError("too_many_entries", "period keys exceed the response output bound");
+      }
+    },
     presented(request) {
       return { accessGroups: carrierOf(request).presented };
     },
@@ -173,13 +179,13 @@ export function chainKeyCapabilitySource({
           permits: authorizerFor(grant),
           targets: new Map(),
           articleTargets: new Set(),
+          futureTargets: new Set(),
           denied: false,
           authorized: false,
           authorizedUnsupplied: false,
         });
       }
 
-      let responsePeriodKeys = 0;
       /** @param {any} state @param {string} t */
       const consider = (state, t) => {
         if (!state.permits(t)) {
@@ -193,21 +199,14 @@ export function chainKeyCapabilitySource({
           return false;
         }
         if (state.targets.has(t)) return true;
-        if (
-          representation === "period-keys" &&
-          (state.targets.size >= MAX_PERIOD_KEYS_PER_FAMILY ||
-            responsePeriodKeys >= MAX_PERIOD_KEYS_PER_RESPONSE)
-        )
-          return false;
         state.targets.set(t, member);
-        if (representation === "period-keys") responsePeriodKeys++;
         return true;
       };
 
       const ordered = [...states.keys()].sort();
-      // Reserve every sourceable article target across all families before any
-      // current/future grant can occupy a response slot. The request reader has
-      // already admitted, sorted and deduplicated the untrusted hint arrays.
+      // Mark all sourceable article targets as mandatory. Actual candidate
+      // capacity is reserved after opening, before optional output is admitted.
+      // The reader already admitted, sorted and deduplicated these hints.
       for (const accessGroup of ordered) {
         const state = states.get(accessGroup);
         if (state.family.kind !== "valid") continue;
@@ -251,6 +250,7 @@ export function chainKeyCapabilitySource({
           }
           const t = chainKeyLabelAt(targetMinute);
           if (!consider(state, t)) break;
+          state.futureTargets.add(t);
         }
       }
 
@@ -287,10 +287,14 @@ export function chainKeyCapabilitySource({
               chainsPerDay: state.family.geometry.chainsPerDay,
               periodMinutes: state.family.geometry.periodMinutes,
               targetTs: [],
+              articleTs: [],
+              futureTs: [],
             };
             byMember.set(member.t, selected);
           }
           selected.targetTs.push(t);
+          if (state.articleTargets.has(t)) selected.articleTs.push(t);
+          if (state.futureTargets.has(t)) selected.futureTs.push(t);
         }
         /** @type {any[]} */
         const selected = [];
@@ -313,13 +317,18 @@ export function chainKeyCapabilitySource({
             if (entry.targetTs.length === 0) continue;
           }
           selected.push({
-            selection: Object.freeze({ ...entry, targetTs: Object.freeze(entry.targetTs) }),
+            selection: Object.freeze({
+              ...entry,
+              targetTs: Object.freeze(entry.targetTs),
+              articleTs: Object.freeze(entry.articleTs),
+              futureTs: Object.freeze(entry.futureTs),
+            }),
             article: entry.targetTs.some((/** @type {string} */ t) => state.articleTargets.has(t)),
           });
         }
         if (selected.length > 0) {
           candidates.set(accessGroup, selected);
-        } else if (state.authorizedUnsupplied && state.targets.size === 0) {
+        } else if (state.authorizedUnsupplied && state.family.members.length > 0) {
           answers.set(accessGroup, AUTHORIZED_UNAVAILABLE);
         } else if (state.denied && !state.authorized) {
           answers.set(accessGroup, DENIED);
@@ -356,9 +365,10 @@ export function chainKeyCapabilitySource({
       };
     },
 
-    capabilities({ request, open }) {
+    capabilities({ request, open, periodKeyCount, selectedCapabilities }) {
       const input = carrierOf(request);
-      return async (accessGroup, selected) => {
+      /** @param {string} accessGroup @param {any[]} selected */
+      const represent = async (accessGroup, selected) => {
         const family = input.family(accessGroup);
         if (family.kind !== "valid") {
           throw dcaError(
@@ -367,76 +377,106 @@ export function chainKeyCapabilitySource({
           );
         }
         const periods = [];
-        for (const selection of /** @type {any[]} */ (selected)) {
-          const member = family.members.find(
+        const representedSelections = [];
+        let futureStopped = false;
+        for (const original of /** @type {any[]} */ (selected)) {
+          // A failed opening stops the optional consecutive horizon. Later
+          // independently selected articles still answer, at their own cutoff.
+          const selection =
+            representation === "chain-keys" && futureStopped
+              ? {
+                  ...original,
+                  targetTs: original.targetTs.filter((/** @type {string} */ t) =>
+                    original.articleTs.includes(t),
+                  ),
+                }
+              : original;
+          if (selection.targetTs.length === 0) continue;
+          representedSelections.push(selection);
+          // Rival records at this cutoff are rival candidates: each opens on
+          // its own, every one that opens contributes, and the coordinate
+          // fails only when none does.
+          const candidates = family.members.filter(
             (/** @type {any} */ candidate) => candidate.t === selection.t,
           );
           // The selection authorized this member before its value was
           // looked at. A value the reader refused is answered here without
           // reaching the opener, so its bytes are never decoded or opened.
           if (
-            !member &&
+            candidates.length === 0 &&
             family.malformedMembers.some(
               (/** @type {any} */ candidate) => candidate.t === selection.t,
             )
           ) {
             periods.push({ t: selection.t, error: UNSEAL_FAILED });
+            if (selection.futureTs.length > 0) futureStopped = true;
             continue;
           }
-          if (!member) {
+          if (candidates.length === 0) {
             throw dcaError(
               "bad_config",
               "selected chain member remains present through capability production",
             );
           }
-          // The coordinate is the binding this chain key was sealed at,
-          // and the chain grammar names its position `suppliedT`.
-          const opened = await open(member.sealed, {
-            accessGroup,
-            suppliedT: selection.t,
-            chainKey: true,
-            chainsPerDay: selection.chainsPerDay,
-            periodMinutes: selection.periodMinutes,
-          });
-          if ("error" in opened) {
-            periods.push({ t: selection.t, error: opened.error });
-            continue;
-          }
-          // Material that opens to anything but one chain key is
-          // malformed sealed material, like a tag that will not
-          // verify, so it reads as the same per-coordinate
-          // unseal_failed. A value that is not bytes at all comes
-          // from a broken opener, and it falls through to the
-          // construction's typed refusal. The source catches nothing
-          // below this line: a refusal there is a fault in this
-          // issuer, and it propagates with the error code the
-          // construction threw.
-          if (opened.bytes?.length !== profile.chainKeyBytes) {
-            periods.push({ t: selection.t, error: UNSEAL_FAILED });
-            continue;
-          }
-          const cutoffT = selection.targetTs[selection.targetTs.length - 1];
-          if (representation === "chain-keys") {
-            const chainKey = await derivedChainKeyFromChainKey({
+          /** @type {any[]} */
+          const produced = [];
+          /** @type {any} */
+          let failure = null;
+          for (const member of candidates) {
+            // The coordinate is the binding this chain key was sealed at,
+            // and the chain grammar names its position `suppliedT`.
+            const opened = await open(member.sealed, {
+              accessGroup,
+              suppliedT: selection.t,
+              chainKey: true,
+              chainsPerDay: selection.chainsPerDay,
+              periodMinutes: selection.periodMinutes,
+            });
+            if ("error" in opened) {
+              failure ??= opened.error;
+              continue;
+            }
+            // Material that opens to anything but one chain key is
+            // malformed sealed material, like a tag that will not
+            // verify, so it reads as the same per-coordinate
+            // unseal_failed. A value that is not bytes at all comes
+            // from a broken opener, and it falls through to the
+            // construction's typed refusal. The source catches nothing
+            // below this line: a refusal there is a fault in this
+            // issuer, and it propagates with the error code the
+            // construction threw.
+            if (opened.bytes?.length !== profile.chainKeyBytes) {
+              failure ??= UNSEAL_FAILED;
+              continue;
+            }
+            const cutoffT = selection.targetTs[selection.targetTs.length - 1];
+            if (representation === "chain-keys") {
+              const chainKey = await derivedChainKeyFromChainKey({
+                chainKey: opened.bytes,
+                accessGroup,
+                suppliedT: selection.t,
+                targetT: cutoffT,
+                geometry: family.geometry,
+              });
+              produced.push({ t: cutoffT, bytes: chainKey });
+              continue;
+            }
+            const expansion = await derivedPeriodKeysFromChainKey({
               chainKey: opened.bytes,
               accessGroup,
               suppliedT: selection.t,
-              targetT: cutoffT,
+              cutoffT,
               geometry: family.geometry,
             });
-            periods.push({ t: cutoffT, bytes: chainKey });
-            continue;
+            const wanted = new Set(selection.targetTs);
+            for (const periodKey of expansion) {
+              if (wanted.has(periodKey.t)) produced.push({ t: periodKey.t, bytes: periodKey.key });
+            }
           }
-          const expansion = await derivedPeriodKeysFromChainKey({
-            chainKey: opened.bytes,
-            accessGroup,
-            suppliedT: selection.t,
-            cutoffT,
-            geometry: family.geometry,
-          });
-          const wanted = new Set(selection.targetTs);
-          for (const periodKey of expansion) {
-            if (wanted.has(periodKey.t)) periods.push({ t: periodKey.t, bytes: periodKey.key });
+          if (produced.length > 0) periods.push(...produced);
+          else {
+            periods.push({ t: selection.t, error: failure ?? UNSEAL_FAILED });
+            if (selection.futureTs.length > 0) futureStopped = true;
           }
         }
         if (representation === "chain-keys") {
@@ -447,7 +487,7 @@ export function chainKeyCapabilitySource({
                 chainsPerDay: family.geometry.chainsPerDay,
                 periodMinutes: family.geometry.periodMinutes,
               },
-              selections: /** @type {any[]} */ (selected).map((selection) => ({
+              selections: representedSelections.map((selection) => ({
                 suppliedT: selection.t,
                 cutoffT: selection.targetTs[selection.targetTs.length - 1],
               })),
@@ -459,6 +499,116 @@ export function chainKeyCapabilitySource({
           kind: "period-keys",
           interpretation: { selections: selected },
           periods,
+        };
+      };
+      if (representation === "chain-keys") return represent;
+
+      // Each invocation owns its preparation. The same request may be reused or
+      // overlap another unlock without sharing selections, keys or budgets.
+      const families = [...selectedCapabilities]
+        .sort((a, b) =>
+          a.accessGroup < b.accessGroup ? -1 : a.accessGroup > b.accessGroup ? 1 : 0,
+        )
+        .map(({ accessGroup, selected }) => ({
+          accessGroup,
+          selected,
+          periods: [],
+          candidates: new Set(),
+          produced: new Map(),
+        }));
+      let count = periodKeyCount;
+      /** @param {any} family @param {string} t */
+      const at = async (family, t) => {
+        const candidates = new Map();
+        for (const selection of family.selected) {
+          if (!selection.targetTs.includes(t)) continue;
+          let production = family.produced.get(selection);
+          if (!production) {
+            // One bounded expansion per supplied member. An article may need
+            // an earlier point in the same expansion as the optional horizon;
+            // only admitted labels enter output or consume capacity below.
+            production = represent(family.accessGroup, [selection]);
+            family.produced.set(selection, production);
+          }
+          const answer = await production;
+          for (const period of answer.periods) {
+            if ("error" in period) {
+              if (
+                !family.periods.some(
+                  (/** @type {any} */ held) => held.t === period.t && "error" in held,
+                )
+              )
+                family.periods.push(period);
+            } else if (period.t === t) {
+              candidates.set(base64urlEncode(period.bytes), period);
+            }
+          }
+        }
+        return [...candidates.values()];
+      };
+      /** @param {any} family @param {any[]} candidates */
+      const keep = (family, candidates) => {
+        for (const period of candidates) {
+          const identity = JSON.stringify([period.t, base64urlEncode(period.bytes)]);
+          if (family.candidates.has(identity)) continue;
+          family.candidates.add(identity);
+          family.periods.push(period);
+          count++;
+        }
+      };
+      /** @param {any} family @param {'articleTs'|'futureTs'} field */
+      const labels = (family, field) =>
+        [
+          ...new Set(family.selected.flatMap((/** @type {any} */ selection) => selection[field])),
+        ].sort();
+      const prepare = async () => {
+        // Actual article candidates across ALL families and already-opened
+        // ordinary fallback are mandatory. No optional label can displace them.
+        for (const family of families) {
+          for (const t of labels(family, "articleTs")) keep(family, await at(family, t));
+        }
+        if (
+          count > MAX_PERIOD_KEYS_PER_RESPONSE ||
+          families.some((family) => family.candidates.size > MAX_PERIOD_KEYS_PER_FAMILY)
+        ) {
+          throw dcaError("too_many_entries", "mandatory period keys exceed the output bounds");
+        }
+        for (const family of families) {
+          for (const t of labels(family, "futureTs")) {
+            if (
+              family.candidates.size >= MAX_PERIOD_KEYS_PER_FAMILY ||
+              count >= MAX_PERIOD_KEYS_PER_RESPONSE
+            )
+              break;
+            const candidates = await at(family, t);
+            if (candidates.length === 0) break;
+            const added = candidates.filter(
+              (period) =>
+                !family.candidates.has(JSON.stringify([period.t, base64urlEncode(period.bytes)])),
+            );
+            if (
+              family.candidates.size + added.length > MAX_PERIOD_KEYS_PER_FAMILY ||
+              count + added.length > MAX_PERIOD_KEYS_PER_RESPONSE
+            )
+              break;
+            // Keep every distinct rival for this label, or stop before it.
+            keep(family, added);
+          }
+        }
+      };
+      /** @type {Promise<void>|undefined} */
+      let prepared;
+      return async (accessGroup) => {
+        prepared ??= prepare();
+        await prepared;
+        const family = families.find((entry) => entry.accessGroup === accessGroup);
+        if (!family)
+          throw dcaError("bad_config", "a capability lookup names an authorized selection");
+        if (family.periods.length === 0) return { kind: /** @type {const} */ ("omitted") };
+        return {
+          kind: "period-keys",
+          interpretation: { selections: family.selected },
+          periods: family.periods,
         };
       };
     },

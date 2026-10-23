@@ -13,9 +13,13 @@ const context = Object.freeze({ publisher: "https://publisher.example", ...geome
 test("the chain profile admits period-key output at a coordinate covered by a chain request", () => {
   const request = {
     sealed: {
-      chainKeys: {
-        premium: { "251023T1400": base64urlEncode(new Uint8Array(16).fill(7)) },
-      },
+      chainKeys: [
+        {
+          accessGroup: "premium",
+          cutoff: "251023T1400",
+          key: base64urlEncode(new Uint8Array(16).fill(7)),
+        },
+      ],
     },
     periodGeometry: { chainsPerDay: 2, periodMinutes: 15 },
   };
@@ -31,7 +35,7 @@ test("the chain profile admits period-key output at a coordinate covered by a ch
   assert.equal(
     explicitChainKeyClientProfile.acceptsPeriodKeyResponseCoordinate("premium", "251023T1415", {
       ...request,
-      sealed: { chainKeys: {} },
+      sealed: { chainKeys: [] },
     }),
     false,
     "an unpresented family has no chain-key reach",
@@ -67,12 +71,24 @@ test("chain response geometry comes only from the captured request, never respon
   const request = Object.freeze({
     periodGeometry: geometry,
     sealed: {
-      chainKeys: { premium: { "251023T1400": base64urlEncode(new Uint8Array(16).fill(7)) } },
+      chainKeys: [
+        {
+          accessGroup: "premium",
+          cutoff: "251023T1400",
+          key: base64urlEncode(new Uint8Array(16).fill(7)),
+        },
+      ],
     },
   });
   const response = {
     keys: {
-      chainKeys: { premium: { "251023T1400": base64urlEncode(new Uint8Array(16).fill(8)) } },
+      chainKeys: [
+        {
+          accessGroup: "premium",
+          cutoff: "251023T1400",
+          key: base64urlEncode(new Uint8Array(16).fill(8)),
+        },
+      ],
     },
   };
   const parameters = (answer, asked = request) =>

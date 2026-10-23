@@ -39,22 +39,20 @@ export function page() {
   return {
     version: "1",
     resourceJWT: JWT,
-    contentData: {
-      bodytext: { contentType: "text/plain", nonce: NONCE },
-      headline: { contentType: "text/plain", nonce: NONCE },
-    },
-    issuerData: Object.fromEntries(
-      Object.entries(WIDGETS).map(([issuer, widgets]) => [
-        issuer,
-        {
-          keyId: "kid",
-          sealed: {
-            contentKeys: {},
-            widgetSeeds: Object.fromEntries(Object.keys(widgets).map((n) => [n, `seed-${n}`])),
-          },
-        },
-      ]),
-    ),
+    contentData: [
+      { contentName: "bodytext", contentType: "text/plain", nonce: NONCE },
+      { contentName: "headline", contentType: "text/plain", nonce: NONCE },
+    ],
+    // The base page members are record arrays. `widgetSeeds` belongs to this
+    // invented extension; the base walk never reads it, so it keeps a map.
+    issuerData: Object.entries(WIDGETS).map(([issuerName, widgets]) => ({
+      issuerName,
+      keyId: "kid",
+      sealed: {
+        contentKeys: [],
+        widgetSeeds: Object.fromEntries(Object.keys(widgets).map((n) => [n, `seed-${n}`])),
+      },
+    })),
   };
 }
 

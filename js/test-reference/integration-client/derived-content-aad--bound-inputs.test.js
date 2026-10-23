@@ -4,19 +4,21 @@
 // Sections 3.2 and 5.4). The issuer receives only period-key envelopes, so every
 // content key a reader holds came through one period grant that also reaches the
 // sibling item and any later render of the same resource in the same period. That
-// grant is what makes a moved or edited record worth testing: the wrap carries no
-// slot binding, so the retained period key still recovers the moved record's own
-// content key, and only the content AAD can refuse it.
+// grant is what makes a moved or edited record worth testing.
 //
-// Each case below shows both halves: the retained grant still yields a content key
-// for the edited delivery, and opening that item fails authentication with no
-// plaintext. No case falls back to a carried `aad`.
+// A moved record meets two independent refusals. The period-wrap nonce derives
+// from the render ID and the item name (Section 4.1), so the retained grant
+// recovers no key for a record moved to another slot or render. And the key the
+// record's own slot recovers does not open the moved ciphertext under the new
+// slot's content AAD. Each move below checks both, and no plaintext is released.
+// No case falls back to a carried `aad`.
 
 import test from "node:test";
 import assert from "node:assert/strict";
 import { decrypt, encrypt } from "../../core-shared/aead.js";
 import { base64urlDecode, base64urlEncode, utf8Encode } from "../../core-shared/codec.js";
 import { contentAadOctets } from "../support/contentAadOctets.js";
+import { contentRecordOf, periodsOn } from "../../test-lib/helpers/inspect.js";
 import {
   BODY,
   DECODERS,
@@ -25,6 +27,8 @@ import {
   LOCKED,
   RESOURCE_ID,
   encodedItem,
+  periodKeysAnswered,
+  putItemRecord,
   segment,
   text,
   world,
@@ -40,8 +44,8 @@ async function granted() {
   const grantee = w.client(delivered);
   assert.equal(text((await grantee.open(BODY.name)).bytes), BODY.value);
   assert.equal(w.exchanges.length, 1);
-  assert.deepEqual(w.exchanges[0].body.keys.contentKeys, {}, "no item key was delivered");
-  assert.ok(Object.keys(w.exchanges[0].body.keys.periodKeys[GROUP]).length > 0);
+  assert.deepEqual(w.exchanges[0].body.keys.contentKeys, [], "no item key was delivered");
+  assert.ok(periodKeysAnswered(w.exchanges[0].body, GROUP).length > 0);
   return { w, delivered, cache: grantee.cache, grantee };
 }
 
@@ -51,20 +55,45 @@ async function granted() {
  * @param {any} cache
  * @param {string} contentName
  * @param {string} why
+ * @param {Uint8Array} sourceKey - the key the moved record's own slot recovers
  */
-async function refusedUnderRetainedKey(w, delivered, cache, contentName, why) {
+async function refusedUnderRetainedKey(w, delivered, cache, contentName, why, sourceKey) {
   const reader = w.retained(delivered, cache);
-  const key = await reader.resolver.contentKeyFor(reader.dcaData, contentName);
-  assert.ok(key instanceof Uint8Array, `${why}: the retained period grant still recovers a key`);
+  assert.equal(
+    await reader.resolver.contentKeyFor(reader.dcaData, contentName),
+    null,
+    `${why}: the moved wrap recovers no key at its new slot`,
+  );
   let opened = null;
   await assert.rejects(
     (async () => {
       opened = await reader.openLocal(contentName);
     })(),
-    { code: "decrypt_failed" },
+    { code: "no_key" },
     why,
   );
   assert.equal(opened, null, `${why}: no plaintext is released`);
+  await assert.rejects(
+    decrypt(
+      sourceKey,
+      new Uint8Array(12),
+      base64urlDecode(delivered.sealedContent[contentName]),
+      contentAadOctets(delivered.dcaData, contentName),
+    ),
+    `${why}: the record's own key fails the new slot's content AAD`,
+  );
+}
+
+/**
+ * The content key one item's own slot recovers under the reader's grant.
+ *
+ * @param {any} reader @param {string} contentName
+ * @returns {Promise<Uint8Array>}
+ */
+async function slotKey(reader, contentName) {
+  const key = await reader.resolver.contentKeyFor(reader.dcaData, contentName);
+  assert.ok(key instanceof Uint8Array);
+  return key;
 }
 
 test("a retained period grant opens every item of the render it came from", async () => {
@@ -76,12 +105,13 @@ test("a retained period grant opens every item of the render it came from", asyn
   assert.equal(text(encoded.bytes), ENCODED.plaintext);
   assert.equal(encoded.contentType, ENCODED.contentType);
   for (const name of [BODY.name, LOCKED.name, ENCODED.name]) {
-    assert.equal(Object.hasOwn(delivered.dcaData.contentData[name], "aad"), false);
+    assert.equal(Object.hasOwn(contentRecordOf(delivered.dcaData, name), "aad"), false);
   }
 });
 
 test("name changes fail while claims and handling metadata retain authentication", async () => {
-  const { w, delivered, cache } = await granted();
+  const { w, delivered, cache, grantee } = await granted();
+  const bodyKey = await slotKey(grantee, BODY.name);
   const [header, payload] = delivered.dcaData.resourceJWT.split(".");
   const claims = JSON.parse(new TextDecoder().decode(base64urlDecode(payload)));
   const headerClaims = JSON.parse(new TextDecoder().decode(base64urlDecode(header)));
@@ -116,7 +146,7 @@ test("name changes fail while claims and handling metadata retain authentication
       "contentName slot: the record and its ciphertext under another name",
       "bodytext-copy",
       (copy) => {
-        copy.dcaData.contentData["bodytext-copy"] = copy.dcaData.contentData[BODY.name];
+        putItemRecord(copy.dcaData, "bodytext-copy", contentRecordOf(copy.dcaData, BODY.name));
         copy.sealedContent["bodytext-copy"] = copy.sealedContent[BODY.name];
       },
     ],
@@ -124,42 +154,42 @@ test("name changes fail while claims and handling metadata retain authentication
       "contentType: another type",
       BODY.name,
       (copy) => {
-        copy.dcaData.contentData[BODY.name].contentType = "text/plain";
+        contentRecordOf(copy.dcaData, BODY.name).contentType = "text/plain";
       },
     ],
     [
       "contentType: the same type in another case",
       BODY.name,
       (copy) => {
-        copy.dcaData.contentData[BODY.name].contentType = "TEXT/HTML";
+        contentRecordOf(copy.dcaData, BODY.name).contentType = "TEXT/HTML";
       },
     ],
     [
       "contentType: an added parameter",
       BODY.name,
       (copy) => {
-        copy.dcaData.contentData[BODY.name].contentType = "text/html; charset=utf-8";
+        contentRecordOf(copy.dcaData, BODY.name).contentType = "text/html; charset=utf-8";
       },
     ],
     [
       "encodings added to an item that had none",
       BODY.name,
       (copy) => {
-        copy.dcaData.contentData[BODY.name].contentEncodings = ["x-identity"];
+        contentRecordOf(copy.dcaData, BODY.name).contentEncodings = ["x-identity"];
       },
     ],
     [
       "encodings: one layer removed",
       ENCODED.name,
       (copy) => {
-        copy.dcaData.contentData[ENCODED.name].contentEncodings = ["x-reverse"];
+        contentRecordOf(copy.dcaData, ENCODED.name).contentEncodings = ["x-reverse"];
       },
     ],
     [
       "encodings: the whole list removed",
       ENCODED.name,
       (copy) => {
-        delete copy.dcaData.contentData[ENCODED.name].contentEncodings;
+        delete contentRecordOf(copy.dcaData, ENCODED.name).contentEncodings;
       },
     ],
     [
@@ -168,14 +198,14 @@ test("name changes fail while claims and handling metadata retain authentication
       "encodings: the same layers reordered",
       ENCODED.name,
       (copy) => {
-        copy.dcaData.contentData[ENCODED.name].contentEncodings = ["x-identity", "x-reverse"];
+        contentRecordOf(copy.dcaData, ENCODED.name).contentEncodings = ["x-identity", "x-reverse"];
       },
     ],
     [
       "encodings: a repeated layer added",
       ENCODED.name,
       (copy) => {
-        copy.dcaData.contentData[ENCODED.name].contentEncodings = [
+        contentRecordOf(copy.dcaData, ENCODED.name).contentEncodings = [
           "x-reverse",
           "x-identity",
           "x-identity",
@@ -192,19 +222,19 @@ test("name changes fail while claims and handling metadata retain authentication
     const originalAad = contentAadOctets(delivered.dcaData, source);
     if (contentName === "bodytext-copy") {
       assert.notDeepEqual(changedAad, originalAad, why);
-      await refusedUnderRetainedKey(w, copy, cache, contentName, why);
+      await refusedUnderRetainedKey(w, copy, cache, contentName, why, bodyKey);
     } else {
       assert.deepEqual(changedAad, originalAad, `${why}: metadata leaves the tag unchanged`);
       const opened = await w.retained(copy, cache).openLocal(contentName);
       let expected = utf8Encode(contentName === ENCODED.name ? ENCODED.plaintext : BODY.value);
       if (contentName === ENCODED.name) expected.reverse();
       for (const encoding of [
-        ...(copy.dcaData.contentData[contentName].contentEncodings ?? []),
+        ...(contentRecordOf(copy.dcaData, contentName).contentEncodings ?? []),
       ].reverse()) {
         expected = DECODERS[encoding](expected);
       }
       assert.deepEqual(opened.bytes, expected, `${why}: selected processing applies`);
-      assert.equal(opened.contentType, copy.dcaData.contentData[contentName].contentType, why);
+      assert.equal(opened.contentType, contentRecordOf(copy.dcaData, contentName).contentType, why);
     }
   }
 
@@ -217,14 +247,14 @@ test("name changes fail while claims and handling metadata retain authentication
 
 /**
  * Move ciphertext and its whole item record (nonce, contentType, wraps) between
- * two slots of one delivery.
+ * two slots of one delivery. Each record takes the name of the slot it lands in.
  *
  * @param {any} delivered
  */
 function swapSlots(delivered) {
   const moved = structuredClone(delivered);
-  moved.dcaData.contentData[BODY.name] = delivered.dcaData.contentData[LOCKED.name];
-  moved.dcaData.contentData[LOCKED.name] = delivered.dcaData.contentData[BODY.name];
+  putItemRecord(moved.dcaData, BODY.name, contentRecordOf(delivered.dcaData, LOCKED.name));
+  putItemRecord(moved.dcaData, LOCKED.name, contentRecordOf(delivered.dcaData, BODY.name));
   moved.sealedContent[BODY.name] = delivered.sealedContent[LOCKED.name];
   moved.sealedContent[LOCKED.name] = delivered.sealedContent[BODY.name];
   return moved;
@@ -232,18 +262,26 @@ function swapSlots(delivered) {
 
 test("a complete record moved to another slot fails, and its carried old AAD does not reopen it", async () => {
   const { w, delivered, cache, grantee } = await granted();
-  const lockedKey = await grantee.resolver.contentKeyFor(grantee.dcaData, LOCKED.name);
-  assert.ok(lockedKey instanceof Uint8Array);
+  const lockedKey = await slotKey(grantee, LOCKED.name);
+  const bodyKey = await slotKey(grantee, BODY.name);
 
   const moved = swapSlots(delivered);
-  const reader = w.retained(moved, cache);
-  assert.deepEqual(
-    await reader.resolver.contentKeyFor(reader.dcaData, BODY.name),
+  await refusedUnderRetainedKey(
+    w,
+    moved,
+    cache,
+    BODY.name,
+    "LOCKED's record in BODY's slot",
     lockedKey,
-    "the moved wrap recovers the moved record's own key under the same grant",
   );
-  await refusedUnderRetainedKey(w, moved, cache, BODY.name, "LOCKED's record in BODY's slot");
-  await refusedUnderRetainedKey(w, moved, cache, LOCKED.name, "BODY's record in LOCKED's slot");
+  await refusedUnderRetainedKey(
+    w,
+    moved,
+    cache,
+    LOCKED.name,
+    "BODY's record in LOCKED's slot",
+    bodyKey,
+  );
 
   // The record itself is intact: under its own slot's transcript, spelled by
   // hand, the moved ciphertext opens.
@@ -263,13 +301,14 @@ test("a complete record moved to another slot fails, and its carried old AAD doe
   // string that names the source slot.
   for (const aad of [`${RESOURCE_ID}|1|${LOCKED.name}`, `${RESOURCE_ID}|1|${BODY.name}`, 7, {}]) {
     const carried = structuredClone(moved);
-    carried.dcaData.contentData[BODY.name].aad = aad;
+    contentRecordOf(carried.dcaData, BODY.name).aad = aad;
     await refusedUnderRetainedKey(
       w,
       carried,
       cache,
       BODY.name,
       `carried aad ${JSON.stringify(aad)}`,
+      lockedKey,
     );
   }
 });
@@ -282,32 +321,33 @@ test("old-format contrast: the same move opens when the AAD travels with the rec
   // Only what the contrast needs is kept: both items are resealed under the
   // retired `resourceId|1|contentName` string with the keys the period grant
   // recovered, the records are swapped, and a reader that trusts the carried string
-  // opens LOCKED's plaintext in BODY's slot. The stock client refuses the same page.
+  // and holds LOCKED's key opens LOCKED's plaintext in BODY's slot. The stock client
+  // refuses the same page: the moved wrap opens no key there, and the content AAD
+  // refuses LOCKED's key. A wrap without the derived nonce's slot binding handed
+  // the moved record's key to that reader; here it is taken from LOCKED's own slot.
   const { w, delivered, cache, grantee } = await granted();
   const old = structuredClone(delivered);
   for (const item of [BODY, LOCKED]) {
     const key = await grantee.resolver.contentKeyFor(grantee.dcaData, item.name);
     assert.ok(key instanceof Uint8Array);
-    const nonce = crypto.getRandomValues(new Uint8Array(12));
+    const nonce = new Uint8Array(12);
     const aad = `${RESOURCE_ID}|1|${item.name}`;
     const ciphertext = await encrypt(key, nonce, utf8Encode(item.value), utf8Encode(aad));
-    old.dcaData.contentData[item.name] = {
-      ...old.dcaData.contentData[item.name],
+    putItemRecord(old.dcaData, item.name, {
+      ...contentRecordOf(old.dcaData, item.name),
       nonce: base64urlEncode(nonce),
       aad,
-    };
+    });
     old.sealedContent[item.name] = base64urlEncode(ciphertext);
   }
   const moved = swapSlots(old);
 
-  const reader = w.retained(moved, cache);
-  const slotKey = await reader.resolver.contentKeyFor(reader.dcaData, BODY.name);
-  assert.ok(slotKey instanceof Uint8Array);
-  const record = moved.dcaData.contentData[BODY.name];
+  const lockedKey = await slotKey(grantee, LOCKED.name);
+  const record = contentRecordOf(moved.dcaData, BODY.name);
   assert.equal(
     text(
       await decrypt(
-        slotKey,
+        lockedKey,
         base64urlDecode(record.nonce),
         base64urlDecode(moved.sealedContent[BODY.name]),
         utf8Encode(record.aad),
@@ -316,17 +356,25 @@ test("old-format contrast: the same move opens when the AAD travels with the rec
     LOCKED.value,
     "a carried-AAD reader fills BODY's slot with LOCKED's plaintext",
   );
-  await refusedUnderRetainedKey(w, moved, cache, BODY.name, "the stock client on the old page");
+  await refusedUnderRetainedKey(
+    w,
+    moved,
+    cache,
+    BODY.name,
+    "the stock client on the old page",
+    lockedKey,
+  );
 });
 
 test("a complete record moved into a fresh render of the same resourceId and period fails", async () => {
-  const { w, delivered: prior, cache } = await granted();
+  const { w, delivered: prior, cache, grantee } = await granted();
+  const priorBodyKey = await slotKey(grantee, BODY.name);
   const current = await w.render({ items: [BODY, LOCKED, encodedItem()] });
   assert.notEqual(prior.dcaData.resourceJWT, current.dcaData.resourceJWT);
   assert.equal(current.dcaData.resource.resourceId, prior.dcaData.resource.resourceId);
   assert.deepEqual(
-    current.dcaData.contentData[BODY.name].keys[GROUP].map((/** @type {any} */ e) => e.t),
-    prior.dcaData.contentData[BODY.name].keys[GROUP].map((/** @type {any} */ e) => e.t),
+    periodsOn(current.dcaData, BODY.name, GROUP),
+    periodsOn(prior.dcaData, BODY.name, GROUP),
     "both renders wrap under the same period coordinates",
   );
 
@@ -341,10 +389,14 @@ test("a complete record moved into a fresh render of the same resourceId and per
     ["the prior record with its old-format string", `${RESOURCE_ID}|1|${BODY.name}`],
   ]) {
     const mixed = structuredClone(current);
-    mixed.dcaData.contentData[BODY.name] = structuredClone(prior.dcaData.contentData[BODY.name]);
+    putItemRecord(
+      mixed.dcaData,
+      BODY.name,
+      structuredClone(contentRecordOf(prior.dcaData, BODY.name)),
+    );
     mixed.sealedContent[BODY.name] = prior.sealedContent[BODY.name];
-    if (carry !== undefined) mixed.dcaData.contentData[BODY.name].aad = carry;
-    await refusedUnderRetainedKey(w, mixed, cache, BODY.name, String(name));
+    if (carry !== undefined) contentRecordOf(mixed.dcaData, BODY.name).aad = carry;
+    await refusedUnderRetainedKey(w, mixed, cache, BODY.name, String(name), priorBodyKey);
   }
 });
 
@@ -358,6 +410,8 @@ test("NFC and NFD resource identifiers keep distinct authentic signing input and
   );
   const expectedAads = [];
   const readers = [];
+  /** @type {Uint8Array[]} */
+  const keys = [];
   for (const [index, delivered] of deliveries.entries()) {
     const reader = w.client(delivered);
     assert.equal(text((await reader.open(BODY.name)).bytes), BODY.value);
@@ -387,6 +441,7 @@ test("NFC and NFD resource identifiers keep distinct authentic signing input and
     );
     expectedAads.push(expected);
     readers.push(reader);
+    keys.push(/** @type {Uint8Array} */ (key));
   }
   assert.equal(w.exchanges.length, 2);
   assert.notDeepEqual(expectedAads[0], expectedAads[1]);
@@ -399,6 +454,7 @@ test("NFC and NFD resource identifiers keep distinct authentic signing input and
       readers[index].cache,
       BODY.name,
       "the other authentic Unicode signing input cannot open this ciphertext",
+      keys[index],
     );
   }
 });

@@ -19,6 +19,14 @@ import {
 } from "../core-shared/construction.js";
 import { openSeed } from "../core-shared/seed-envelope.js";
 import { DERIVING_CHAIN, allZeroed, recordingChain } from "./_lib/derivingChainPort.js";
+import {
+  connectorOf,
+  connectorsOf,
+  issuerBlock,
+  item,
+  seedOf as seedEnvelope,
+  seedRecords,
+} from "./_lib/records.js";
 
 const subtle = globalThis.crypto.subtle;
 const ORIGIN = "https://news.example";
@@ -116,9 +124,11 @@ test("a real page carries connectors and per-issuer seed envelopes", async () =>
   assert.equal(page.renderPeriod, T14);
   assert.deepEqual(page.periodGeometry, GEOMETRY);
   assert.equal(page.contentGroups, undefined);
-  assert.deepEqual(Object.keys(page.contentData.bodytext.connectors), ["politics", "sports"]);
-  assert.deepEqual(Object.keys(page.contentData.headline.connectors), ["politics"]);
-  assert.equal(page.contentData.purchase.connectors, undefined);
+  /** @param {string} name */
+  const groupsOf = (name) => connectorsOf(page, name).map((record) => record.group);
+  assert.deepEqual(groupsOf("bodytext"), ["politics", "sports"]);
+  assert.deepEqual(groupsOf("headline"), ["politics"]);
+  assert.equal(item(page, "purchase").connectors, undefined);
 
   // Every connector hides the key that opens its item's body under the
   // derived content AAD.
@@ -126,9 +136,8 @@ test("a real page carries connectors and per-issuer seed envelopes", async () =>
     ["bodytext", "text/html"],
     ["headline", "text/plain"],
   ]) {
-    const record = page.contentData[contentName];
     const keys = await Promise.all(
-      Object.entries(record.connectors).map(([group, connector]) =>
+      connectorsOf(page, contentName).map(({ group, connector }) =>
         keyBehind(/** @type {string} */ (connector), { contentName, group, renderId }),
       ),
     );
@@ -141,14 +150,22 @@ test("a real page carries connectors and per-issuer seed envelopes", async () =>
 
   // issuerA holds two windows of bodytext only; issuerB one window of headline
   // beside its ordinary content key for purchase.
-  const sealedA = page.issuerData.issuerA.sealed;
-  const sealedB = page.issuerData.issuerB.sealed;
+  const sealedA = issuerBlock(page, "issuerA").sealed;
+  const sealedB = issuerBlock(page, "issuerB").sealed;
+  /** @param {string} issuerName */
+  const seedCoordinates = (issuerName) =>
+    seedRecords(page, issuerName).map(({ contentName, windowStart }) => [contentName, windowStart]);
   assert.deepEqual(Object.keys(sealedA), ["contentWindowSeeds"]);
-  assert.deepEqual(Object.keys(sealedA.contentWindowSeeds), ["bodytext"]);
-  assert.deepEqual(Object.keys(sealedA.contentWindowSeeds.bodytext), [W12, W00]);
+  assert.deepEqual(seedCoordinates("issuerA"), [
+    ["bodytext", W12],
+    ["bodytext", W00],
+  ]);
   assert.deepEqual(Object.keys(sealedB), ["contentKeys", "contentWindowSeeds"]);
-  assert.deepEqual(Object.keys(sealedB.contentKeys), ["purchase"]);
-  assert.deepEqual(Object.keys(sealedB.contentWindowSeeds), ["headline"]);
+  assert.deepEqual(
+    sealedB.contentKeys.map((/** @type {any} */ record) => record.contentName),
+    ["purchase"],
+  );
+  assert.deepEqual(seedCoordinates("issuerB"), [["headline", W12]]);
   for (const [issuerName, keys, contentName, window] of /** @type {const} */ ([
     ["issuerA", issuerA, "bodytext", W12],
     ["issuerA", issuerA, "bodytext", W00],
@@ -165,7 +182,7 @@ test("a real page carries connectors and per-issuer seed envelopes", async () =>
       },
       DERIVING_CHAIN,
     );
-    const envelope = page.issuerData[issuerName].sealed.contentWindowSeeds[contentName][window];
+    const envelope = seedEnvelope(page, issuerName, contentName, window);
     assert.deepEqual(
       await openSeed(envelope, keys.privateKey, aad),
       await seedOf(contentName, window),
@@ -204,7 +221,7 @@ test("a connector item with no seeded render window and no ordinary route has no
     data: {},
     items: [ITEMS()[0]],
   });
-  assert.ok(/** @type {any} */ (dcaData).contentData.bodytext.connectors.politics);
+  assert.ok(connectorOf(dcaData, "bodytext", "politics"));
 });
 
 test("an issuer's promised connector routes fit maxResponseMembers; its possible choices need not", async () => {
@@ -255,7 +272,10 @@ test("an ordinary-only render, even with an empty group list, carries no content
   assert.equal(page.renderPeriod, undefined);
   assert.equal(page.periodGeometry, undefined);
   assert.equal(decodePayload(page.resourceJWT).contentKeyCommitments, undefined);
-  assert.deepEqual(Object.keys(page.issuerData), ["issuerB"]);
+  assert.deepEqual(
+    page.issuerData.map((/** @type {any} */ block) => block.issuerName),
+    ["issuerB"],
+  );
 });
 
 test("the item's group list is copied when the render is handed over", async () => {
@@ -264,10 +284,10 @@ test("the item's group list is copied when the render is handed over", async () 
   const pending = publisher.publish({ resourceId: "story1", data: {}, items });
   items[0].contentGroups?.push("opinion");
   const { dcaData } = await pending;
-  assert.deepEqual(Object.keys(/** @type {any} */ (dcaData).contentData.bodytext.connectors), [
-    "politics",
-    "sports",
-  ]);
+  assert.deepEqual(
+    connectorsOf(dcaData, "bodytext").map((record) => record.group),
+    ["politics", "sports"],
+  );
 });
 
 test("configuration and item input are refused before a render draws anything", async () => {

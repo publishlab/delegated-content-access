@@ -34,7 +34,9 @@ export class Page {
    * @param {object} config
    * @param {string} config.publisherOrigin - delivery context, not wire data
    * @param {object} config.dcaData - what the publisher signed and shipped
-   * @param {object} config.sealedContent - contentName to base64url ciphertext
+   * @param {object} config.sealedContent - contentName to base64url ciphertext,
+   *   as the Sealer returns it; the JSON form carries it as
+   *   `{contentName, content}` records
    */
   constructor(config) {
     for (const name of Object.keys(config ?? {})) {
@@ -60,7 +62,13 @@ export class Page {
     // mangled field three layers on. It has to be a check of its own, because
     // JSON.stringify does not refuse: it turns a CryptoKey into {} and drops an
     // undefined member silently.
-    const wire = { ...config.dcaData, sealedContent: config.sealedContent };
+    const wire = {
+      ...config.dcaData,
+      sealedContent: Object.entries(config.sealedContent).map(([contentName, content]) => ({
+        contentName,
+        content,
+      })),
+    };
     assertWireSafe(wire);
     this.#wire = JSON.stringify(wire);
   }

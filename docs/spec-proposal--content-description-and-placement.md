@@ -40,7 +40,7 @@ replaces it. No new baseline description or placement support is required.
 
 ### Description format
 
-The candidate member is `contentData[contentName].contentDescription`. It is optional
+The candidate member is `contentDescription` in an item's `contentData` record. It is optional
 for every item, including a mapped item. Omission means no supplied description;
 it does not mean an unknown media type. A description-aware consumer selects this
 contract through its application configuration, independently of HTML placement.
@@ -123,6 +123,7 @@ the current data format.
 
 ```json
 {
+  "contentName": "measurements",
   "contentType": "application/json",
   "contentDescription": {
     "version": "1",

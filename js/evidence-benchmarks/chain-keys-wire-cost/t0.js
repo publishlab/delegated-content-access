@@ -24,12 +24,14 @@ for (const [name, universe, active] of [
       ...(slots === 1 ? {} : { chainItemSlots: slots }),
     });
     const page = await render(undefined, active);
-    assert.deepEqual(Object.keys(page.contentData.bodytext.keys), active);
-    assert.deepEqual(
-      Object.keys(page.issuerData.paywall_subscription_service.sealed.chainKeys),
-      active,
-    );
-    for (const group of active) assert.equal(page.contentData.bodytext.keys[group].length, slots);
+    const wraps = page.contentData.find((record) => record.contentName === "bodytext").keys;
+    const supplied = page.issuerData.find(
+      (record) => record.issuerName === "paywall_subscription_service",
+    ).sealed.chainKeys;
+    assert.deepEqual([...new Set(wraps.map((record) => record.accessGroup))], active);
+    assert.deepEqual([...new Set(supplied.map((record) => record.accessGroup))], active);
+    for (const group of active)
+      assert.equal(wraps.filter((record) => record.accessGroup === group).length, slots);
     const { client } = t0Client();
     const { data, request, response } = await exchange(world, client, page);
     assert.equal(response.status, 200);
@@ -40,12 +42,17 @@ for (const [name, universe, active] of [
         baselineResponse,
         "item alternatives do not change granted capability bytes",
       );
-    assert.deepEqual(Object.keys(response.body.keys.chainKeys), active);
+    assert.deepEqual(
+      [...new Set(response.body.keys.chainKeys.map((record) => record.accessGroup))],
+      active,
+    );
     for (const group of active)
-      assert.deepEqual(Object.keys(response.body.keys.chainKeys[group]), [
-        "251023T1100",
-        "251023T1700",
-      ]);
+      assert.deepEqual(
+        response.body.keys.chainKeys
+          .filter((record) => record.accessGroup === group)
+          .map((record) => record.cutoff),
+        ["251023T1100", "251023T1700"],
+      );
     assert.equal(
       utf8Decode(await client.decrypt(data, "bodytext", client.extract(page, "bodytext"))),
       TEXT,

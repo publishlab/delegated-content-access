@@ -56,6 +56,18 @@ import {
   deliveryPlan,
   periodOnlyPolicy,
 } from "../extensions/chain-keys/test/world.js";
+import { issuerBlockOf, wrapsOf } from "../test-lib/helpers/inspect.js";
+
+/**
+ * One accessGroup's records in a record array such as `sealed.chainKeys` or
+ * `keys.periodKeys`, in array order; none when the collection is absent.
+ *
+ * @param {unknown} records
+ * @param {string} [accessGroup]
+ * @returns {any[]}
+ */
+const recordsOf = (records, accessGroup = ACCESS_GROUP) =>
+  Array.isArray(records) ? records.filter((record) => record?.accessGroup === accessGroup) : [];
 
 /** @param {"period-keys"|"chain-keys"} responseForm */
 async function selectedWorld(responseForm) {
@@ -114,11 +126,11 @@ async function selectedWorld(responseForm) {
 
 /** @param {any} delivery */
 function suppliedChainOnly(delivery) {
-  const sealed = delivery.issuerData[ISSUER_NAME].sealed;
+  const sealed = issuerBlockOf(delivery, ISSUER_NAME).sealed;
   assert.equal(sealed.contentKeys, undefined);
   assert.equal(sealed.periodKeys, undefined);
-  assert.ok(sealed.chainKeys[ACCESS_GROUP]);
-  assert.ok(delivery.contentData[CONTENT_NAME].keys[ACCESS_GROUP].length > 0);
+  assert.ok(recordsOf(sealed.chainKeys).length > 0);
+  assert.ok(wrapsOf(delivery, CONTENT_NAME, ACCESS_GROUP).length > 0);
   assert.ok(delivery.periodGeometry);
 }
 
@@ -143,21 +155,24 @@ test(
     assert.equal(exchanges.length, 1);
 
     const [{ request, response }] = exchanges;
-    assert.deepEqual(request.sealed.contentKeys, {});
+    assert.deepEqual(request.sealed.contentKeys, []);
     assert.equal(request.sealed.periodKeys, undefined);
     assert.deepEqual(
       request.sealed.chainKeys,
-      page.asJson().issuerData[ISSUER_NAME].sealed.chainKeys,
+      issuerBlockOf(page.asJson(), ISSUER_NAME).sealed.chainKeys,
     );
     assert.deepEqual(request.periodGeometry, page.asJson().periodGeometry);
     assert.equal(response.keys.chainKeys, undefined, "this route never sends a chain key");
     assert.equal(response.periodGeometry, undefined);
-    assert.deepEqual(response.keys.contentKeys, {});
-    const periodKeys = response.keys.periodKeys[ACCESS_GROUP];
+    assert.deepEqual(response.keys.contentKeys, []);
+    const periodKeys = recordsOf(response.keys.periodKeys);
     const labels = ["251023T1415"];
-    assert.deepEqual(Object.keys(periodKeys), labels);
-    for (const t of labels) {
-      assert.equal(periodKeys[t], base64urlEncode(await generation.periodKey(ACCESS_GROUP, t)));
+    assert.deepEqual(
+      periodKeys.map(({ period }) => period),
+      labels,
+    );
+    for (const { period, key } of periodKeys) {
+      assert.equal(key, base64urlEncode(await generation.periodKey(ACCESS_GROUP, period)));
     }
   },
 );
@@ -186,17 +201,17 @@ test(
     const [{ request, response }] = exchanges;
     assert.deepEqual(
       request.sealed.chainKeys,
-      page.asJson().issuerData[ISSUER_NAME].sealed.chainKeys,
+      issuerBlockOf(page.asJson(), ISSUER_NAME).sealed.chainKeys,
     );
     assert.deepEqual(request.periodGeometry, page.asJson().periodGeometry);
-    assert.deepEqual(response.keys.contentKeys, {});
+    assert.deepEqual(response.keys.contentKeys, []);
     assert.equal(response.keys.periodKeys, undefined);
-    const chainKeys = response.keys.chainKeys[ACCESS_GROUP];
-    const [cutoff] = Object.keys(chainKeys);
-    assert.equal(Object.keys(chainKeys).length, 1);
+    const chainKeys = recordsOf(response.keys.chainKeys);
+    assert.equal(chainKeys.length, 1);
+    const [{ cutoff, key }] = chainKeys;
     assert.equal(Object.hasOwn(response, "periodGeometry"), false);
     assert.equal(
-      chainKeys[cutoff],
+      key,
       base64urlEncode((await generation.chainCapability(ACCESS_GROUP, cutoff)).key),
     );
     const derived = await chainCache.candidates(ACCESS_GROUP, cutoff, {
@@ -237,13 +252,13 @@ test(
     const [{ request, response }] = exchanges;
     assert.deepEqual(
       request.sealed.chainKeys,
-      page.asJson().issuerData[ISSUER_NAME].sealed.chainKeys,
+      issuerBlockOf(page.asJson(), ISSUER_NAME).sealed.chainKeys,
     );
     assert.equal(Object.hasOwn(response, "periodGeometry"), false);
     assert.equal(response.keys.periodKeys, undefined);
-    const [cutoff] = Object.keys(response.keys.chainKeys[ACCESS_GROUP]);
+    const [{ cutoff, key }] = recordsOf(response.keys.chainKeys);
     assert.equal(
-      response.keys.chainKeys[ACCESS_GROUP][cutoff],
+      key,
       base64urlEncode((await generation.chainCapability(ACCESS_GROUP, cutoff)).key),
     );
   },
@@ -264,11 +279,13 @@ test("an unknown member in a chain-key response is ignored and supplies no chain
       ) {
         const answer = await world.network.post(url, request, options);
         const body = JSON.parse(JSON.stringify(answer.body));
-        const labels = Object.keys(body.keys?.chainKeys?.[ACCESS_GROUP] ?? {});
+        const labels = recordsOf(body.keys?.chainKeys).map(({ cutoff }) => cutoff);
         issuedLabels.push(...labels);
-        const futureKeys = {
-          [ACCESS_GROUP]: Object.fromEntries(labels.map((t) => [t, decoy])),
-        };
+        const futureKeys = labels.map((cutoff) => ({
+          accessGroup: ACCESS_GROUP,
+          cutoff,
+          key: decoy,
+        }));
         return { ...answer, body: { ...body, keys: { ...body.keys, futureKeys } } };
       },
     },
@@ -359,10 +376,10 @@ test("period-key and chain-key supply reach a period-key-only issuer that grants
 
   const page = await world.render("A");
   const delivery = page.asJson();
-  const supplied = delivery.issuerData[ISSUER_NAME].sealed;
+  const supplied = issuerBlockOf(delivery, ISSUER_NAME).sealed;
   assert.equal(supplied.contentKeys, undefined);
-  assert.ok(Object.keys(supplied.periodKeys[ACCESS_GROUP]).length > 0);
-  assert.ok(Object.keys(supplied.chainKeys[ACCESS_GROUP]).length > 0);
+  assert.ok(recordsOf(supplied.periodKeys).length > 0);
+  assert.ok(recordsOf(supplied.chainKeys).length > 0);
   assert.ok(delivery.periodGeometry);
 
   const exchanges = [];
@@ -376,7 +393,7 @@ test("period-key and chain-key supply reach a period-key-only issuer that grants
   const [{ request, response }] = exchanges;
   // The request keeps the period-key members beside the chain-key members:
   // chain-key presence does not replace the period keys.
-  assert.deepEqual(request.sealed.contentKeys, {});
+  assert.deepEqual(request.sealed.contentKeys, []);
   assert.deepEqual(request.sealed.periodKeys, supplied.periodKeys);
   assert.deepEqual(request.sealed.chainKeys, supplied.chainKeys);
   assert.deepEqual(request.periodGeometry, delivery.periodGeometry);
@@ -384,12 +401,17 @@ test("period-key and chain-key supply reach a period-key-only issuer that grants
   // returns no chain key.
   assert.equal(response.keys.chainKeys, undefined);
   assert.equal(response.periodGeometry, undefined);
-  assert.deepEqual(response.keys.contentKeys, {});
-  const periodKeys = response.keys.periodKeys[ACCESS_GROUP];
-  const [firstSupplied] = Object.keys(supplied.periodKeys[ACCESS_GROUP]).sort();
-  assert.deepEqual(Object.keys(periodKeys), [firstSupplied]);
+  assert.deepEqual(response.keys.contentKeys, []);
+  const periodKeys = recordsOf(response.keys.periodKeys);
+  const [firstSupplied] = recordsOf(supplied.periodKeys)
+    .map(({ period }) => period)
+    .sort();
+  assert.deepEqual(
+    periodKeys.map(({ period }) => period),
+    [firstSupplied],
+  );
   assert.equal(
-    periodKeys[firstSupplied],
+    periodKeys[0].key,
     base64urlEncode(await generation.periodKey(ACCESS_GROUP, firstSupplied)),
   );
 
@@ -630,17 +652,20 @@ test(
     const delivery = pages.get(CUTOFF).asJson();
     // Relay: the publisher's chain members and geometry, unchanged, and no
     // content-key or period-key member for the issuer to answer from instead.
-    assert.deepEqual(request.sealed.contentKeys, {});
+    assert.deepEqual(request.sealed.contentKeys, []);
     assert.equal(request.sealed.periodKeys, undefined);
-    assert.deepEqual(request.sealed.chainKeys, delivery.issuerData[ISSUER_NAME].sealed.chainKeys);
+    assert.deepEqual(
+      request.sealed.chainKeys,
+      issuerBlockOf(delivery, ISSUER_NAME).sealed.chainKeys,
+    );
     assert.deepEqual(request.periodGeometry, delivery.periodGeometry);
     // Result form: one positioned chain key under the family's own geometry,
     // with no period key and no content key beside it.
-    assert.deepEqual(response.keys.contentKeys, {});
+    assert.deepEqual(response.keys.contentKeys, []);
     assert.equal(response.keys.periodKeys, undefined);
-    assert.deepEqual(response.keys.chainKeys, {
-      [ACCESS_GROUP]: { [CUTOFF]: WITNESS.cutoffChainKeys[CUTOFF] },
-    });
+    assert.deepEqual(response.keys.chainKeys, [
+      { accessGroup: ACCESS_GROUP, cutoff: CUTOFF, key: WITNESS.cutoffChainKeys[CUTOFF] },
+    ]);
     assert.equal(Object.hasOwn(response, "periodGeometry"), false);
     assert.deepEqual(request.periodGeometry, GEOMETRY);
 
@@ -716,7 +741,10 @@ test(
       },
     ]);
     assert.equal(exchanges.length, 1);
-    assert.ok(exchanges[0].request.sealed.chainKeys[ACCESS_GROUP], "the chain member was relayed");
+    assert.ok(
+      recordsOf(exchanges[0].request.sealed.chainKeys).length > 0,
+      "the chain member was relayed",
+    );
     assert.equal(exchanges[0].status, 401);
     assert.deepEqual(exchanges[0].response, { error: "denied" });
     assert.equal(openingKeyReads(), 0, "the denial opened no chain member");
@@ -758,9 +786,13 @@ test(
           ...body,
           keys: {
             ...body.keys,
-            chainKeys: {
-              [ACCESS_GROUP]: { "251023T1145": body.keys.chainKeys[ACCESS_GROUP][CUTOFF] },
-            },
+            chainKeys: [
+              {
+                accessGroup: ACCESS_GROUP,
+                cutoff: "251023T1145",
+                key: recordsOf(body.keys.chainKeys).find(({ cutoff }) => cutoff === CUTOFF)?.key,
+              },
+            ],
           },
         }),
       },
@@ -777,7 +809,7 @@ test(
       // The issuer granted the canonical cutoff; only the client's view changed.
       assert.deepEqual(
         exchanges[0].response.keys.chainKeys,
-        { [ACCESS_GROUP]: { [CUTOFF]: WITNESS.cutoffChainKeys[CUTOFF] } },
+        [{ accessGroup: ACCESS_GROUP, cutoff: CUTOFF, key: WITNESS.cutoffChainKeys[CUTOFF] }],
         why,
       );
       assert.deepEqual(

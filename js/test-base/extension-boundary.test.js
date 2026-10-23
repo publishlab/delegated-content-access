@@ -6,7 +6,16 @@
 
 import test, { describe } from "node:test";
 import assert from "node:assert/strict";
-import { cpSync, existsSync, mkdirSync, mkdtempSync, readdirSync, rmSync } from "node:fs";
+import {
+  cpSync,
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readdirSync,
+  readFileSync,
+  rmSync,
+  symlinkSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { spawnSync } from "node:child_process";
@@ -53,11 +62,7 @@ function extensionDirectories() {
 
 /** @param {string} extension @returns {string[]} */
 function extensionEntries(extension) {
-  return readdirSync(join(V1_PATH, "extensions", extension), { withFileTypes: true })
-    .filter(
-      (entry) => entry.isFile() && (entry.name.endsWith(".js") || entry.name.endsWith(".mjs")),
-    )
-    .map((entry) => `extensions/${extension}/${entry.name}`);
+  return modulesIn(`extensions/${extension}`).filter((rel) => !isDevelopmentModule(rel));
 }
 
 /**
@@ -267,6 +272,16 @@ describe("Extension runtime dependencies", () => {
       const scratch = mkdtempSync(join(tmpdir(), `dca-closure-${name}-`));
       try {
         copyTreeWithout(scratch, new Set(extensions.filter((other) => !required.has(other))));
+        // The extracted source uses the same declared production packages as
+        // an installed consumer; development packages do not enter this tree.
+        const dependencies = JSON.parse(
+          readFileSync(join(V1_PATH, "package.json"), "utf8"),
+        ).dependencies;
+        for (const dependency of Object.keys(dependencies ?? {})) {
+          const target = join(scratch, "node_modules", dependency);
+          mkdirSync(join(target, ".."), { recursive: true });
+          symlinkSync(join(V1_PATH, "node_modules", dependency), target, "dir");
+        }
         const result = importFrom(scratch, [...BASE_BARRELS, ...extensionEntries(name)]);
         assert.equal(
           result.status,

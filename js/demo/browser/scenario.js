@@ -64,6 +64,7 @@ import { decodeCompactJwt } from "../../core-shared/compactJwt.js";
 import { formatT, DEFAULT_PERIOD } from "../../core-shared--publisher-issuer/periodKeys.js";
 import { dcaError } from "../../core-shared/errors.js";
 import { own } from "../../core-shared/wire.js";
+import { recordsByName } from "../../core-shared--client-publisher/deliveryRecords.js";
 
 const MINUTE = 60_000;
 
@@ -99,6 +100,18 @@ const OPTIONS = ["at", "seed", "advance", "period", "fallback", "primaryOffline"
  */
 
 /**
+ * The item record a delivery carries for one contentName, the last whole one
+ * when several name it.
+ *
+ * @param {any} dcaData
+ * @param {string} contentName
+ * @returns {any}
+ */
+function contentRecordOf(dcaData, contentName) {
+  return recordsByName(own(dcaData, "contentData"), "contentName", () => true)?.get(contentName);
+}
+
+/**
  * The periods a page ships to the client, in wire order - the period it was
  * rendered in first, then forward.
  *
@@ -106,8 +119,12 @@ const OPTIONS = ["at", "seed", "advance", "period", "fallback", "primaryOffline"
  * @returns {string[]}
  */
 function periodsOn(page) {
-  const entries = own(own(own(own(page, "contentData"), CONTENT_NAME), "keys"), ACCESS_GROUP);
-  return Array.isArray(entries) ? entries.map((entry) => own(entry, "t")) : [];
+  const entries = own(contentRecordOf(page, CONTENT_NAME), "keys");
+  return Array.isArray(entries)
+    ? entries
+        .filter((/** @type {any} */ entry) => own(entry, "accessGroup") === ACCESS_GROUP)
+        .map((/** @type {any} */ entry) => own(entry, "period"))
+    : [];
 }
 
 /**
@@ -126,9 +143,13 @@ function publisherArtifact(page) {
   const { sealedContent, ...dcaData } = page;
   const token = own(dcaData, "resourceJWT");
   const decoded = decodeCompactJwt(token);
+  // The writer takes the render's ciphertext by name, as the Sealer returns it.
+  const byName = Object.fromEntries(
+    sealedContent.map((/** @type {any} */ record) => [record.contentName, record.content]),
+  );
 
   return {
-    markup: writeMarkupDelivery({ dcaData, sealedContent }),
+    markup: writeMarkupDelivery({ dcaData, sealedContent: byName }),
     dcaData,
     sealedContent,
     resourceJWT: {
@@ -373,7 +394,7 @@ export async function run(config = {}, clientBound) {
     const load = browser.load(rootFromPage(page));
 
     const resource = own(load.dcaData, "resource");
-    const contentRecord = own(own(load.dcaData, "contentData"), CONTENT_NAME);
+    const contentRecord = contentRecordOf(load.dcaData, CONTENT_NAME);
 
     await record(
       {
@@ -386,7 +407,12 @@ export async function run(config = {}, clientBound) {
         periods: periodsOn(json),
         contentName: CONTENT_NAME,
         contentType: own(contentRecord, "contentType"),
-        ciphertext: own(own(json, "sealedContent"), CONTENT_NAME),
+        ciphertext: own(
+          own(json, "sealedContent").find(
+            (/** @type {any} */ record) => own(record, "contentName") === CONTENT_NAME,
+          ),
+          "content",
+        ),
         publisher,
       },
       load,

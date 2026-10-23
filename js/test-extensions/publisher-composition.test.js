@@ -28,6 +28,7 @@ import {
 import { writeJsonDelivery } from "../adapter-publisher/writeJsonDelivery.js";
 import { JsonDeliveryReader } from "../adapter-client/JsonDeliveryReader.js";
 import { utf8Encode } from "../core-shared/codec.js";
+import { contentNamesOn } from "../test-lib/helpers/inspect.js";
 import { contentGroupsProfile } from "../extensions/content-groups/referenceProfile.js";
 import {
   CHAIN,
@@ -204,7 +205,7 @@ describe("Content-group request bytes against the issuer body limit", () => {
       publisherOrigin: PUBLISHER,
     });
     const sealedContent = Object.fromEntries(
-      Object.keys(reader.dcaData.contentData).map((name) => [name, reader.extract(name)]),
+      contentNamesOn(reader.dcaData).map((name) => [name, reader.extract(name)]),
     );
     return { page: structuredClone(reader.dcaData), sealedContent, origin: PUBLISHER };
   }
@@ -214,7 +215,7 @@ describe("Content-group request bytes against the issuer body limit", () => {
     /** @type {any[]} */
     const sent = [];
     const client = w.reader().client(published, w.issuer(), { sent });
-    await client.unlock(Object.keys(published.page.contentData));
+    await client.unlock(contentNamesOn(published.page));
     return utf8Encode(JSON.stringify(sent[0])).length;
   }
 

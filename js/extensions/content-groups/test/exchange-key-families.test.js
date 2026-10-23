@@ -20,7 +20,7 @@ test("a request with only extension coordinates is an eligible route", async () 
   assert.equal(result.skipped, undefined);
   assert.equal(posted.length, 1);
   assert.deepEqual(posted[0].request.requestedWidgets, { bodytext: ["w1", "w2"] });
-  assert.deepEqual(posted[0].request.sealed.contentKeys, {});
+  assert.deepEqual(posted[0].request.sealed.contentKeys, []);
 });
 
 test("without keyFamilies, extension-only coordinates are no eligible route", async () => {

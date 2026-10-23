@@ -20,6 +20,7 @@ import { Clock } from "../demo/actors/Clock.js";
 import { Random } from "../demo/actors/Random.js";
 import { issuerKeypair, signingKeypair } from "../test-reference/support/keys.js";
 import { ACCESS_GROUP } from "../demo/scenarios/fixtures.js";
+import { issuerBlockOf } from "../test-lib/helpers/inspect.js";
 import {
   GEOMETRY,
   chainGeneration,
@@ -56,12 +57,14 @@ test("a compact-selected issuer's chain keys are compact envelopes under the cha
   sealer.resource("123456", {});
   sealer.content("body", "<p>text</p>", "text/html", { accessGroups: [ACCESS_GROUP] });
   const { dcaData } = await sealer.seal();
-  const block = dcaData.issuerData.compact;
+  const block = issuerBlockOf(dcaData, "compact");
   assert.equal(block.envelope, COMPACT_ECDH);
-  const chains = block.sealed.chainKeys?.[ACCESS_GROUP] ?? {};
-  assert.ok(Object.keys(chains).length > 0, "the plan delivers chain keys");
+  const chains = (block.sealed.chainKeys ?? []).filter(
+    (/** @type {any} */ record) => record.accessGroup === ACCESS_GROUP,
+  );
+  assert.ok(chains.length > 0, "the plan delivers chain keys");
   const renderId = dcaData.resource.renderId;
-  for (const [t, blob] of Object.entries(chains)) {
+  for (const { cutoff: t, key: blob } of chains) {
     const bytes = binaryStringBytes(blob);
     assert.equal(bytes?.length, 65, t);
     const binding = {

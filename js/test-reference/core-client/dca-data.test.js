@@ -36,35 +36,81 @@ const PAGE = {
       }),
     ),
   )}.c2lnbmF0dXJl`,
-  issuerData: {
-    issuer_example: {
+  issuerData: [
+    {
+      issuerName: "issuer_example",
       keyId: "k1",
       unlockUrl: "https://issuer.example/unlock",
       sealed: {
-        contentKeys: { bodytext: "content-blob" },
-        periodKeys: { [GROUP]: { "251023T1500": "period-blob" } },
-        chainKeys: {
-          [GROUP]: {
-            "251023T2300": "chain-blob",
-            "251024T1100": "next-chain-blob",
-          },
-        },
+        contentKeys: [{ contentName: "bodytext", key: "content-blob" }],
+        periodKeys: [{ accessGroup: GROUP, period: "251023T1500", key: "period-blob" }],
+        chainKeys: [
+          { accessGroup: GROUP, cutoff: "251023T2300", key: "chain-blob" },
+          { accessGroup: GROUP, cutoff: "251024T1100", key: "next-chain-blob" },
+        ],
       },
     },
-    other_example: {
+    {
+      issuerName: "other_example",
       keyId: "k9",
       unlockUrl: "https://other.example/unlock",
-      sealed: { contentKeys: { bodytext: "other-blob" } },
+      sealed: { contentKeys: [{ contentName: "bodytext", key: "other-blob" }] },
     },
-  },
-  contentData: {
-    bodytext: {
+  ],
+  contentData: [
+    {
+      contentName: "bodytext",
       contentType: "text/html",
       nonce: "n",
-      keys: { [GROUP]: [{ t: "251023T1500", nonce: "wrap-nonce", key: "wrapped" }] },
+      keys: [{ accessGroup: GROUP, period: "251023T1500", key: "wrapped" }],
     },
-  },
+  ],
 };
+
+/**
+ * A `contentData` collection written from a name-keyed map, so a fixture that
+ * varies one record reads as that record.
+ *
+ * @param {Record<string, any>} records
+ * @returns {any[]}
+ */
+const items = (records) =>
+  Object.entries(records).map(([contentName, record]) => ({ contentName, ...record }));
+
+/**
+ * An `issuerData` collection written the same way.
+ *
+ * @param {Record<string, any>} blocks
+ * @returns {any[]}
+ */
+const issuers = (blocks) =>
+  Object.entries(blocks).map(([issuerName, block]) => ({ issuerName, ...block }));
+
+/**
+ * Wire wrap records for one group, from the `{ t, key }` entries the view
+ * hands a candidate source.
+ *
+ * @param {string} accessGroup
+ * @param {any[]} entries
+ * @returns {any[]}
+ */
+const wraps = (accessGroup, entries) =>
+  entries.map(({ t, ...rest }) => ({ accessGroup, period: t, ...rest }));
+
+/** The one record PAGE carries. */
+const BODY = PAGE.contentData[0];
+
+/**
+ * The wire record a page carries for one item, found by its name.
+ *
+ * @param {DcaData} page
+ * @param {string} contentName
+ * @returns {any}
+ */
+const recordOf = (page, contentName) =>
+  page
+    .toObject()
+    .contentData.find((/** @type {any} */ record) => record.contentName === contentName);
 
 /** What a page raises when its record cannot be used. */
 const badPage = (/** @type {any} */ error) => error.code === "bad_page";
@@ -110,19 +156,19 @@ describe("The page data, and what reads it", () => {
     assert.equal(page.hasIssuer("nobody.example"), false);
     assert.equal(page.keyIdFor("issuer_example"), "k1");
 
-    assert.equal(page.sealedContentKeyFor("issuer_example", "bodytext"), "content-blob");
-    assert.deepEqual(page.sealedPeriodKeysFor("issuer_example", GROUP), {
-      "251023T1500": "period-blob",
-    });
-    assert.deepEqual(page.sealedChainKeysFor("issuer_example", GROUP), {
-      "251023T2300": "chain-blob",
-      "251024T1100": "next-chain-blob",
-    });
+    assert.deepEqual(page.sealedContentKeysFor("issuer_example", "bodytext"), ["content-blob"]);
+    assert.deepEqual(page.sealedPeriodKeysFor("issuer_example", GROUP), [
+      { accessGroup: GROUP, period: "251023T1500", key: "period-blob" },
+    ]);
+    assert.deepEqual(page.sealedChainKeysFor("issuer_example", GROUP), [
+      { accessGroup: GROUP, cutoff: "251023T2300", key: "chain-blob" },
+      { accessGroup: GROUP, cutoff: "251024T1100", key: "next-chain-blob" },
+    ]);
     assert.deepEqual(page.accessGroupsFor("bodytext"), [GROUP]);
     assert.deepEqual(page.sealedEntriesFor("bodytext", GROUP), [
-      { t: "251023T1500", nonce: "wrap-nonce", key: "wrapped" },
+      { t: "251023T1500", key: "wrapped" },
     ]);
-    assert.deepEqual(page.contentDataFor("bodytext"), PAGE.contentData.bodytext);
+    assert.deepEqual(page.contentDataFor("bodytext"), BODY);
 
     // Only the issuer that carries the family, and in the page's order.
     assert.deepEqual(page.issuerNamesFor(GROUP), ["issuer_example"]);
@@ -135,7 +181,7 @@ describe("The page data, and what reads it", () => {
     for (const name of INHERITED) {
       assert.equal(page.hasIssuer(name), false, `hasIssuer(${name})`);
       assert.equal(page.keyIdFor(name), undefined, `keyIdFor(${name})`);
-      assert.equal(page.sealedContentKeyFor(name, name), undefined);
+      assert.deepEqual(page.sealedContentKeysFor(name, name), []);
       assert.equal(page.sealedPeriodKeysFor("issuer_example", name), undefined);
       assert.equal(page.sealedChainKeysFor("issuer_example", name), undefined);
       assert.deepEqual(page.accessGroupsFor(name), [], `accessGroupsFor(${name})`);
@@ -258,8 +304,8 @@ describe("The page data, and what reads it", () => {
     // hand it an entry with no keyId and no blobs.
     const unsealer = new Client({ publisherOrigin: PUBLISHER_ORIGIN });
 
-    for (const entry of [null, false, 0, ""]) {
-      const data = { ...PAGE, issuerData: { [ISSUER_NAME]: entry } };
+    for (const entry of [{}, { keyId: "k1" }, { sealed: {} }]) {
+      const data = { ...PAGE, issuerData: issuers({ [ISSUER_NAME]: entry }) };
 
       assert.equal(
         new DcaData(data).hasIssuer(ISSUER_NAME),
@@ -277,27 +323,24 @@ describe("The page data, and what reads it", () => {
     assert.equal(
       new DcaData({
         ...PAGE,
-        issuerData: {
+        issuerData: issuers({
           [ISSUER_NAME]: { keyId: "k1", unlockUrl: "https://issuer.example/unlock", sealed: {} },
-        },
+        }),
       }).hasIssuer(ISSUER_NAME),
       true,
     );
   });
 
   test("a selected issuer block is usable only when its structure admits it", () => {
-    // The format: a block is usable only when it and its `sealed` member are
-    // non-array objects and `keyId` is a nonempty string. A block
+    // The format: a block is usable only when its `sealed` member is a
+    // non-array object and `keyId` is a nonempty string. A block
     // that is not one carries no route, and the sibling issuer stands.
     const sound = {
       keyId: "k9",
       unlockUrl: "https://other.example/unlock",
-      sealed: { contentKeys: { bodytext: "other-blob" } },
+      sealed: { contentKeys: [{ contentName: "bodytext", key: "other-blob" }] },
     };
     const malformed = [
-      [],
-      "a string",
-      42,
       { keyId: "k1", unlockUrl: "https://issuer.example/unlock" },
       { keyId: 7, unlockUrl: "https://issuer.example/unlock", sealed: {} },
       { keyId: "", unlockUrl: "https://issuer.example/unlock", sealed: {} },
@@ -308,84 +351,98 @@ describe("The page data, and what reads it", () => {
       const label = JSON.stringify(block);
       const page = new DcaData({
         ...PAGE,
-        issuerData: { issuer_example: block, other_example: sound },
+        issuerData: issuers({ issuer_example: block, other_example: sound }),
       });
 
       assert.equal(page.hasIssuer("issuer_example"), false, label);
       assert.equal(page.keyIdFor("issuer_example"), undefined, label);
-      assert.equal(page.sealedContentKeyFor("issuer_example", "bodytext"), undefined, label);
+      assert.deepEqual(page.sealedContentKeysFor("issuer_example", "bodytext"), [], label);
       assert.equal(page.sealedPeriodKeysFor("issuer_example", GROUP), undefined, label);
       assert.equal(page.sealedChainKeysFor("issuer_example", GROUP), undefined, label);
       assert.deepEqual(page.issuerNamesFor(GROUP), [], label);
 
       assert.equal(page.hasIssuer("other_example"), true, `${label}: the sibling issuer stands`);
-      assert.equal(page.sealedContentKeyFor("other_example", "bodytext"), "other-blob", label);
+      assert.deepEqual(
+        page.sealedContentKeysFor("other_example", "bodytext"),
+        ["other-blob"],
+        label,
+      );
     }
   });
 
-  test("a route map that is not a non-array object carries no route of that kind", () => {
-    // Every `sealed.periodKeys[accessGroup]` is a non-array object mapping
-    // `t` to a sealed value. An array carries positions, so it is no route
-    // map, and the valid route map in the same block stays. The chain
-    // carrier's own family rules belong to the chain-key extension.
+  test("a sealed collection that is not an array carries no route of that kind", () => {
+    // A record that is not a non-array object, or a period record without a
+    // string `period`, supplies no candidate, and its valid siblings in the
+    // same collection stay. The chain carrier's own family rules belong to
+    // the chain-key extension.
+    const vault = { accessGroup: "vault", period: "251023T1500", key: "AQ" };
     const page = new DcaData({
       ...PAGE,
-      issuerData: {
+      issuerData: issuers({
         issuer_example: {
           keyId: "k1",
           unlockUrl: "https://issuer.example/unlock",
           sealed: {
-            contentKeys: { bodytext: "content-blob" },
-            periodKeys: { [GROUP]: ["251023T1500"], vault: { "251023T1500": "AQ" } },
+            contentKeys: [{ contentName: "bodytext", key: "content-blob" }],
+            periodKeys: [
+              { accessGroup: GROUP, key: "AQ" },
+              { accessGroup: GROUP, period: 7, key: "AQ" },
+              ["251023T1500"],
+              vault,
+            ],
           },
         },
-      },
+      }),
     });
 
     assert.equal(page.sealedPeriodKeysFor("issuer_example", GROUP), undefined);
-    assert.deepEqual(page.sealedPeriodKeysFor("issuer_example", "vault"), {
-      "251023T1500": "AQ",
-    });
-    assert.equal(page.sealedContentKeyFor("issuer_example", "bodytext"), "content-blob");
+    assert.deepEqual(page.sealedPeriodKeysFor("issuer_example", "vault"), [vault]);
+    assert.deepEqual(page.sealedContentKeysFor("issuer_example", "bodytext"), ["content-blob"]);
 
-    // A container that is not a non-array object carries no route either.
-    for (const sealed of [{ periodKeys: [] }, { periodKeys: "a string" }, { contentKeys: [] }]) {
+    // A container that is not an array carries no route either.
+    for (const sealed of [
+      { periodKeys: { [GROUP]: { "251023T1500": "AQ" } } },
+      { periodKeys: "a string" },
+      { contentKeys: { bodytext: "content-blob" } },
+    ]) {
       const carrier = new DcaData({
         ...PAGE,
-        issuerData: {
+        issuerData: issuers({
           issuer_example: { keyId: "k1", unlockUrl: "https://issuer.example/unlock", sealed },
-        },
+        }),
       });
       assert.equal(carrier.sealedPeriodKeysFor("issuer_example", GROUP), undefined);
-      assert.equal(carrier.sealedContentKeyFor("issuer_example", "bodytext"), undefined);
+      assert.deepEqual(carrier.sealedContentKeysFor("issuer_example", "bodytext"), []);
     }
   });
 
-  test("a chain-key family that is not a non-array object carries no route", () => {
+  test("a chain-key collection that is not an array carries no route", () => {
     const page = new DcaData({
       ...PAGE,
-      issuerData: {
+      issuerData: issuers({
         issuer_example: {
           keyId: "k1",
           unlockUrl: "https://issuer.example/unlock",
-          sealed: { chainKeys: { [GROUP]: ["chain-blob"] } },
+          sealed: { chainKeys: { [GROUP]: { "251023T2300": "chain-blob" } } },
         },
-      },
+      }),
     });
 
     assert.equal(page.sealedChainKeysFor("issuer_example", GROUP), undefined);
   });
 
-  test("an array where the cached-wrap map belongs supplies no coordinates", () => {
-    // An array carries positions and not accessGroups, so the container is
-    // malformed and the item offers no cached route. This replaces the walk
-    // that read an array's indices as coordinates.
-    const page = new DcaData({
-      contentData: { bodytext: { keys: ["first", "second"] } },
-    });
+  test("an object where the cached-wrap collection belongs supplies no coordinates", () => {
+    // The old accessGroup-keyed map is no collection, so the container is
+    // malformed and the item offers no cached route. Array elements that are
+    // not records carry no coordinate either, and positions never become one.
+    for (const keys of [{ [GROUP]: [{ t: "251023T1500", key: "w" }] }, ["first", "second"]]) {
+      const page = new DcaData({ contentData: items({ bodytext: { keys } }) });
 
-    assert.deepEqual(page.accessGroupsFor("bodytext"), []);
-    assert.deepEqual(page.sealedEntriesFor("bodytext", "0"), []);
+      assert.deepEqual(page.accessGroupsFor("bodytext"), [], JSON.stringify(keys));
+      assert.deepEqual(page.sealedEntriesFor("bodytext", GROUP), []);
+      assert.deepEqual(page.sealedEntriesFor("bodytext", "0"), []);
+    }
+    const page = new DcaData({ contentData: items({ bodytext: { keys: ["first"] } }) });
 
     // The record itself is still malformed, so the item never opens: the
     // gate sits in the accessor the open path reads it through.
@@ -406,11 +463,19 @@ describe("The page data, and what reads it", () => {
     assert.equal(page.publisherOrigin, rendered.publisherOrigin);
     assert.equal(page.resourceJWT, parsed.resourceJWT);
 
+    const issuerBlock = parsed.issuerData.find(
+      (/** @type {any} */ block) => block.issuerName === ISSUER_NAME,
+    );
+    const itemRecord = parsed.contentData.find(
+      (/** @type {any} */ record) => record.contentName === CONTENT_NAME,
+    );
     assert.equal(page.hasIssuer(ISSUER_NAME), true);
     assert.equal(page.keyIdFor(ISSUER_NAME), KEY_ID);
-    assert.equal(
-      page.sealedContentKeyFor(ISSUER_NAME, CONTENT_NAME),
-      parsed.issuerData[ISSUER_NAME].sealed.contentKeys[CONTENT_NAME],
+    assert.deepEqual(
+      page.sealedContentKeysFor(ISSUER_NAME, CONTENT_NAME),
+      issuerBlock.sealed.contentKeys
+        .filter((/** @type {any} */ record) => record.contentName === CONTENT_NAME)
+        .map((/** @type {any} */ record) => record.key),
     );
 
     const groups = page.accessGroupsFor(CONTENT_NAME);
@@ -418,23 +483,27 @@ describe("The page data, and what reads it", () => {
     for (const group of groups) {
       assert.deepEqual(
         page.sealedPeriodKeysFor(ISSUER_NAME, group),
-        parsed.issuerData[ISSUER_NAME].sealed.periodKeys[group],
+        issuerBlock.sealed.periodKeys.filter(
+          (/** @type {any} */ record) => record.accessGroup === group,
+        ),
       );
       assert.deepEqual(
         page.sealedEntriesFor(CONTENT_NAME, group),
-        parsed.contentData[CONTENT_NAME].keys[group],
+        itemRecord.keys
+          .filter((/** @type {any} */ entry) => entry.accessGroup === group)
+          .map(({ period, key }) => ({ t: period, key })),
       );
       assert.deepEqual(page.issuerNamesFor(group), [ISSUER_NAME]);
     }
 
-    assert.deepEqual(page.contentDataFor(CONTENT_NAME), parsed.contentData[CONTENT_NAME]);
+    assert.equal(page.contentDataFor(CONTENT_NAME), itemRecord);
     assert.equal(page.toObject(), parsed, "the page is handed on unchanged");
   });
 });
 
 describe("The outer object, admitted before a request or a key", () => {
   // The format requires `version` "1", a string `resourceJWT`, a
-  // `contentData` object and a non-empty `issuerData` map, and makes
+  // `contentData` array and a non-empty `issuerData` array, and makes
   // `resource` an object when it is present. Failure of one of them is a
   // delivery-wide structural failure, so it lands before the delivery is
   // exposed to request construction.
@@ -442,10 +511,10 @@ describe("The outer object, admitted before a request or a key", () => {
   const SOUND = {
     version: "1",
     resourceJWT: PAGE.resourceJWT,
-    contentData: {},
-    issuerData: {
+    contentData: [],
+    issuerData: issuers({
       issuer_example: { keyId: "k1", unlockUrl: "https://issuer.example/unlock", sealed: {} },
-    },
+    }),
   };
 
   /** What a request is derived from, so the rule is read against every one. */
@@ -454,7 +523,7 @@ describe("The outer object, admitted before a request or a key", () => {
     () => page.resourceJWT,
     () => page.hasIssuer("issuer_example"),
     () => page.keyIdFor("issuer_example"),
-    () => page.sealedContentKeyFor("issuer_example", "bodytext"),
+    () => page.sealedContentKeysFor("issuer_example", "bodytext"),
     () => page.sealedPeriodKeysFor("issuer_example", GROUP),
   ];
 
@@ -465,10 +534,15 @@ describe("The outer object, admitted before a request or a key", () => {
       ["a numeric version", { ...SOUND, version: 1 }],
       ["a non-string resourceJWT", { ...SOUND, resourceJWT: 17 }],
       ["no contentData", { ...SOUND, contentData: undefined }],
-      ["an array contentData", { ...SOUND, contentData: [] }],
+      ["an object contentData", { ...SOUND, contentData: {} }],
+      ["a name-keyed contentData", { ...SOUND, contentData: { bodytext: BODY } }],
       ["no issuerData", { ...SOUND, issuerData: undefined }],
-      ["an empty issuerData", { ...SOUND, issuerData: {} }],
-      ["an array issuerData", { ...SOUND, issuerData: [] }],
+      ["an empty issuerData", { ...SOUND, issuerData: [] }],
+      ["an object issuerData", { ...SOUND, issuerData: {} }],
+      [
+        "a name-keyed issuerData",
+        { ...SOUND, issuerData: { issuer_example: SOUND.issuerData[0] } },
+      ],
       ["an array resource", { ...SOUND, resource: [] }],
     ]) {
       const page = new DcaData(/** @type {any} */ (delivery));
@@ -495,12 +569,15 @@ describe("The item inventory, and the rules a reader takes it under", () => {
   // record that declares no item, a malformed record that fails for itself,
   // and members no reader looks at.
 
+  /** The candidates RECORD offers, as the view hands them on. */
+  const ENTRIES = [{ t: "251023T1500", key: "live-wrapped" }];
+
   /** One complete record, so a rule is read against a page that is otherwise sound. */
   const RECORD = {
     contentType: "text/html",
     nonce: "live-nonce",
     aad: "123456|1|bodytext",
-    keys: { [GROUP]: [{ t: "251023T1500", nonce: "live-wrap-nonce", key: "live-wrapped" }] },
+    keys: wraps(GROUP, ENTRIES),
   };
 
   test("a page carrying the retired maps alone declares no items", () => {
@@ -521,7 +598,7 @@ describe("The item inventory, and the rules a reader takes it under", () => {
     // and one name is theirs alone, so a merge of either map is visible in
     // an answer below rather than only in the shape of the page.
     const page = new DcaData({
-      contentData: { [CONTENT_NAME]: RECORD },
+      contentData: items({ [CONTENT_NAME]: RECORD }),
       contentSealData: {
         [CONTENT_NAME]: {
           contentType: "application/json",
@@ -537,13 +614,13 @@ describe("The item inventory, and the rules a reader takes it under", () => {
     });
 
     assert.deepEqual(page.contentNames(), [CONTENT_NAME]);
-    assert.deepEqual(page.contentDataFor(CONTENT_NAME), RECORD);
+    assert.deepEqual(page.contentDataFor(CONTENT_NAME), { contentName: CONTENT_NAME, ...RECORD });
     assert.deepEqual(
       page.accessGroupsFor(CONTENT_NAME),
       [GROUP],
       "the retired group is not a group here",
     );
-    assert.deepEqual(page.sealedEntriesFor(CONTENT_NAME, GROUP), RECORD.keys[GROUP]);
+    assert.deepEqual(page.sealedEntriesFor(CONTENT_NAME, GROUP), ENTRIES);
     assert.deepEqual(page.sealedEntriesFor(CONTENT_NAME, "retired"), []);
     assert.equal(
       page.contentDataFor("retired-only"),
@@ -556,21 +633,21 @@ describe("The item inventory, and the rules a reader takes it under", () => {
   test("unknown top-level and record members are ignored while the known ones answer", () => {
     const page = new DcaData({
       ...PAGE,
-      contentData: { [CONTENT_NAME]: { ...RECORD, placement: "below-fold", nonce2: "n2" } },
+      contentData: items({ [CONTENT_NAME]: { ...RECORD, placement: "below-fold", nonce2: "n2" } }),
       renderedBy: "some-cms/9",
     });
 
     assert.deepEqual(page.contentNames(), [CONTENT_NAME]);
     assert.equal(/** @type {any} */ (page.contentDataFor(CONTENT_NAME)).nonce, "live-nonce");
     assert.deepEqual(page.accessGroupsFor(CONTENT_NAME), [GROUP]);
-    assert.deepEqual(page.sealedEntriesFor(CONTENT_NAME, GROUP), RECORD.keys[GROUP]);
+    assert.deepEqual(page.sealedEntriesFor(CONTENT_NAME, GROUP), ENTRIES);
     assert.equal(page.version, PAGE.version, "and the fixed fields beside them are unmoved");
   });
 
   test("ordered and repeated contentEncodings are carried, while malformed lists fail their item", () => {
     const layers = ["first", "second", "first"];
     const malformed = [null, "gzip", [], [""], ["gzip", 7], Array(1)];
-    const contentData = {
+    const contentData = items({
       [CONTENT_NAME]: { ...RECORD, contentEncodings: layers },
       ...Object.fromEntries(
         malformed.map((contentEncodings, index) => [
@@ -578,7 +655,7 @@ describe("The item inventory, and the rules a reader takes it under", () => {
           { ...RECORD, contentEncodings },
         ]),
       ),
-    };
+    });
     const page = new DcaData({ contentData });
 
     assert.deepEqual(/** @type {any} */ (page.contentDataFor(CONTENT_NAME)).contentEncodings, [
@@ -591,12 +668,10 @@ describe("The item inventory, and the rules a reader takes it under", () => {
     }
 
     const inherited = Object.create({ contentEncodings: ["inherited"] });
-    Object.assign(inherited, RECORD);
+    Object.assign(inherited, { contentName: "inherited", ...RECORD });
     assert.equal(
       Object.hasOwn(
-        /** @type {any} */ (
-          new DcaData({ contentData: { inherited } }).contentDataFor("inherited")
-        ),
+        /** @type {any} */ (new DcaData({ contentData: [inherited] }).contentDataFor("inherited")),
         "contentEncodings",
       ),
       false,
@@ -605,34 +680,36 @@ describe("The item inventory, and the rules a reader takes it under", () => {
   });
 
   test("a malformed keys container supplies no cached route and leaves the record usable", () => {
-    // The format holds the cached-wrap map to a non-empty object of
-    // accessGroup to a non-empty array. A container that is not one
-    // supplies no cached route for its item, and the record beside it stays
-    // readable so the issuer-mediated route for that item survives.
+    // The format holds the cached-wrap collection to a non-empty array of
+    // wrap records. A container that is not one supplies no cached route for
+    // its item, and the record beside it stays readable so the
+    // issuer-mediated route for that item survives.
     const page = new DcaData({
-      contentData: {
+      contentData: items({
         [CONTENT_NAME]: RECORD,
-        "empty-keys": { ...RECORD, keys: {} },
-        "empty-group": { ...RECORD, keys: { [GROUP]: [] } },
-        "group-not-array": { ...RECORD, keys: { [GROUP]: { t: "251023T1500" } } },
-        "array-keys": { ...RECORD, keys: ["first", "second"] },
-        "candidate-without-t": { ...RECORD, keys: { [GROUP]: [{ nonce: "n", key: "w" }] } },
+        "empty-keys": { ...RECORD, keys: [] },
+        "object-keys": { ...RECORD, keys: { [GROUP]: [{ t: "251023T1500", key: "w" }] } },
+        "scalar-keys": { ...RECORD, keys: "a string" },
+        "candidate-without-period": { ...RECORD, keys: [{ accessGroup: GROUP, key: "w" }] },
         "candidate-beside-valid": {
           ...RECORD,
-          keys: {
-            [GROUP]: [
-              { nonce: "n", key: "w" },
-              { t: "251023T1500", nonce: "wrap-nonce", key: "wrapped" },
-            ],
-          },
+          keys: [
+            { accessGroup: GROUP, key: "w" },
+            { accessGroup: GROUP, period: 7, key: "w" },
+            { accessGroup: GROUP, period: "251023T1500" },
+            "not a record",
+            null,
+            [GROUP, "251023T1500", "w"],
+            { accessGroup: GROUP, period: "251023T1500", key: "wrapped" },
+          ],
         },
-      },
+      }),
     });
 
-    for (const contentName of ["empty-keys", "empty-group", "group-not-array", "array-keys"]) {
-      assert.deepEqual(
+    for (const contentName of ["empty-keys", "object-keys", "scalar-keys"]) {
+      assert.equal(
         page.contentDataFor(contentName),
-        page.toObject().contentData[contentName],
+        recordOf(page, contentName),
         `${contentName}: the record still reads`,
       );
       assert.deepEqual(page.accessGroupsFor(contentName), [], `${contentName}: no cached group`);
@@ -643,84 +720,197 @@ describe("The item inventory, and the rules a reader takes it under", () => {
       );
     }
 
-    // Inside an admitted array, one malformed member supplies no candidate
-    // and the group it sits under remains the item's cached route.
-    assert.deepEqual(page.accessGroupsFor("candidate-without-t"), [GROUP]);
-    assert.deepEqual(page.sealedEntriesFor("candidate-without-t", GROUP), []);
+    // Inside an admitted collection, one malformed element supplies no
+    // candidate. A record still names its group, so the group stays listed.
+    assert.deepEqual(page.accessGroupsFor("candidate-without-period"), [GROUP]);
+    assert.deepEqual(page.sealedEntriesFor("candidate-without-period", GROUP), []);
 
-    // And the malformed member drops itself alone: a valid sibling in the
-    // same array is still a candidate, which tells a per-member filter
-    // apart from an all-or-nothing reject of the array.
+    // And the malformed element drops itself alone: a valid sibling in the
+    // same collection is still a candidate, which tells a per-element filter
+    // apart from an all-or-nothing reject of the collection.
     assert.deepEqual(page.accessGroupsFor("candidate-beside-valid"), [GROUP]);
     assert.deepEqual(page.sealedEntriesFor("candidate-beside-valid", GROUP), [
-      { t: "251023T1500", nonce: "wrap-nonce", key: "wrapped" },
+      { t: "251023T1500", key: "wrapped" },
     ]);
 
     // And the sound record beside all of them answers as it always did.
-    assert.deepEqual(page.contentDataFor(CONTENT_NAME), RECORD);
-    assert.deepEqual(page.sealedEntriesFor(CONTENT_NAME, GROUP), RECORD.keys[GROUP]);
+    assert.deepEqual(page.contentDataFor(CONTENT_NAME), { contentName: CONTENT_NAME, ...RECORD });
+    assert.deepEqual(page.sealedEntriesFor(CONTENT_NAME, GROUP), ENTRIES);
   });
 
-  test("a malformed cached-wrap group loses only that group", () => {
-    const candidate = [{ t: "251023T1500", nonce: "wrap-nonce", key: "wrapped" }];
-
-    for (const [label, malformed] of [
-      ["empty array", []],
-      ["wrong type", { t: "251023T1500" }],
-    ]) {
-      const page = new DcaData({
-        ...PAGE,
-        contentData: {
-          bodytext: { ...RECORD, keys: { broken: malformed, vault: candidate } },
+  test("a wrap record's period reaches a candidate source as t, and a carried nonce of any type changes nothing", () => {
+    // The wrap nonce is derived, so a record carries only its coordinate and
+    // key. An old `nonce` member is unknown: it neither makes nor breaks a
+    // candidate. The view hands the label on under the name the candidate
+    // sources use, and keeps the other members, such as a `bind` marker.
+    const entries = [
+      { t: "251023T1400", key: "wrapped" },
+      { t: "251023T1400", key: "bound", bind: "marker" },
+      ...["n", "", 12, null, [], { bytes: 1 }].map((nonce) => ({
+        t: "251023T1500",
+        nonce,
+        key: "wrapped",
+      })),
+    ];
+    const page = new DcaData({
+      ...PAGE,
+      contentData: items({
+        bodytext: { ...RECORD, keys: wraps(GROUP, entries) },
+        "nonce-without-key": {
+          ...RECORD,
+          keys: [{ accessGroup: GROUP, period: "251023T1500", nonce: "n" }],
         },
-      });
+      }),
+    });
+    assert.deepEqual(page.sealedEntriesFor("bodytext", GROUP), entries);
+    assert.deepEqual(page.sealedEntriesFor("nonce-without-key", GROUP), []);
+  });
 
-      assert.deepEqual(page.accessGroupsFor("bodytext"), ["vault"], label);
-      assert.deepEqual(page.sealedEntriesFor("bodytext", "broken"), [], label);
-      assert.deepEqual(page.sealedEntriesFor("bodytext", "vault"), candidate, label);
+  test("wrap records group by their accessGroup field, in first-seen order, and position grants nothing", () => {
+    const records = [
+      { accessGroup: "vault", period: "251023T1500", key: "v1" },
+      { accessGroup: GROUP, period: "251023T1500", key: "a1" },
+      { accessGroup: "vault", period: "251023T1600", key: "v2" },
+    ];
+    const forward = new DcaData({
+      ...PAGE,
+      contentData: items({ bodytext: { ...RECORD, keys: records } }),
+    });
+    const reversed = new DcaData({
+      ...PAGE,
+      contentData: items({ bodytext: { ...RECORD, keys: [...records].reverse() } }),
+    });
+
+    assert.deepEqual(forward.accessGroupsFor("bodytext"), ["vault", GROUP]);
+    assert.deepEqual(reversed.accessGroupsFor("bodytext"), ["vault", GROUP]);
+    assert.deepEqual(forward.sealedEntriesFor("bodytext", "vault"), [
+      { t: "251023T1500", key: "v1" },
+      { t: "251023T1600", key: "v2" },
+    ]);
+    assert.deepEqual(reversed.sealedEntriesFor("bodytext", "vault"), [
+      { t: "251023T1600", key: "v2" },
+      { t: "251023T1500", key: "v1" },
+    ]);
+    assert.deepEqual(forward.sealedEntriesFor("bodytext", GROUP), [
+      { t: "251023T1500", key: "a1" },
+    ]);
+    assert.deepEqual(forward.sealedEntriesFor("bodytext", "0"), []);
+  });
+
+  test("several wrap records at one coordinate are all candidates, none overwriting another", () => {
+    // Candidate alternatives: the view keeps every distinct record at one
+    // (accessGroup, period), in both orders, and a repeated identical record
+    // stays a raw record the trial budget counts.
+    const wrong = { accessGroup: GROUP, period: "251023T1500", key: "wrong" };
+    const right = { accessGroup: GROUP, period: "251023T1500", key: "right" };
+    for (const keys of [
+      [wrong, right],
+      [right, wrong],
+      [wrong, wrong, right],
+    ]) {
+      const page = new DcaData({ ...PAGE, contentData: items({ bodytext: { ...RECORD, keys } }) });
+      assert.deepEqual(
+        page.sealedEntriesFor("bodytext", GROUP),
+        keys.map(({ period, key }) => ({ t: period, key })),
+      );
     }
+  });
+
+  test("a handed-on entry is a copy, so a later page edit does not move it", () => {
+    const data = structuredClone({ ...PAGE, contentData: items({ bodytext: RECORD }) });
+    const page = new DcaData(data);
+    const [entry] = page.sealedEntriesFor("bodytext", GROUP);
+    data.contentData[0].keys[0].period = "251023T1600";
+    data.contentData[0].keys[0].key = "moved";
+    assert.deepEqual(entry, { t: "251023T1500", key: "live-wrapped" });
   });
 
   test("a missing record declares no item, and a malformed one is a bad page for itself", () => {
     const page = new DcaData({
       ...PAGE,
-      contentData: {
+      contentData: items({
         [CONTENT_NAME]: RECORD,
-        scalar: "not a record",
-        array: [],
         "no-nonce": { contentType: "text/html" },
         "numeric-type": { contentType: 7, nonce: "n" },
         "empty-encodings": { contentType: "text/html", nonce: "n", contentEncodings: [] },
-      },
+      }),
     });
 
     assert.equal(page.contentDataFor("no-such-item"), undefined, "a name the page never declared");
     assert.equal(page.contentItemFor("no-such-item"), null, "and captures no item for it");
-    for (const contentName of ["scalar", "array", "numeric-type", "empty-encodings"]) {
+    for (const contentName of ["numeric-type", "empty-encodings"]) {
       assert.throws(() => page.contentDataFor(contentName), badPage, contentName);
       assert.throws(() => page.contentItemFor(contentName), badPage, contentName);
     }
 
     // Each of those sits in the inventory beside a sound record, and the
     // sound one answers exactly as it does on a page with nothing wrong.
-    assert.deepEqual(page.contentDataFor(CONTENT_NAME), RECORD);
-    assert.deepEqual(page.sealedEntriesFor(CONTENT_NAME, GROUP), RECORD.keys[GROUP]);
+    assert.deepEqual(page.contentDataFor(CONTENT_NAME), { contentName: CONTENT_NAME, ...RECORD });
+    assert.deepEqual(page.sealedEntriesFor(CONTENT_NAME, GROUP), ENTRIES);
+  });
+
+  test("the last whole record for one contentName is the item, with nothing merged", () => {
+    // Replacement, not merging: the earlier record's keys and encodings do
+    // not survive beside the later record, and the order decides which one.
+    const first = {
+      contentName: CONTENT_NAME,
+      contentType: "text/html",
+      contentEncodings: ["gzip"],
+      keys: wraps(GROUP, ENTRIES),
+    };
+    const last = { contentName: CONTENT_NAME, contentType: "text/plain" };
+
+    const forward = new DcaData({ ...PAGE, contentData: [first, last] });
+    assert.equal(forward.contentDataFor(CONTENT_NAME), last);
+    assert.deepEqual(forward.contentNames(), [CONTENT_NAME]);
+    assert.deepEqual(forward.accessGroupsFor(CONTENT_NAME), []);
+    assert.deepEqual(forward.sealedEntriesFor(CONTENT_NAME, GROUP), []);
+    assert.deepEqual(forward.contentItemFor(CONTENT_NAME)?.contentEncodings, []);
+
+    const reversed = new DcaData({ ...PAGE, contentData: [last, first] });
+    assert.equal(reversed.contentDataFor(CONTENT_NAME), first);
+    assert.deepEqual(reversed.accessGroupsFor(CONTENT_NAME), [GROUP]);
+    assert.deepEqual(reversed.sealedEntriesFor(CONTENT_NAME, GROUP), ENTRIES);
+
+    // A malformed last record fails the item even when an earlier one is sound.
+    const broken = new DcaData({
+      ...PAGE,
+      contentData: [first, { contentName: CONTENT_NAME, contentType: 7 }],
+    });
+    assert.throws(() => broken.contentDataFor(CONTENT_NAME), badPage);
+  });
+
+  test("unique items resolve by name whatever their array order", () => {
+    const a = { contentName: "a", contentType: "text/html" };
+    const b = { contentName: "b", contentType: "text/plain" };
+    for (const contentData of [
+      [a, b],
+      [b, a],
+    ]) {
+      const page = new DcaData({ ...PAGE, contentData });
+      assert.equal(page.contentDataFor("a"), a);
+      assert.equal(page.contentDataFor("b"), b);
+      assert.deepEqual([...page.contentNames()].sort(), ["a", "b"]);
+    }
   });
 });
 
-describe("Identifier-keyed maps, admitted whole", () => {
-  // The format's identifier section: a consumer rejects a map keyed by
-  // contentName, accessGroup or issuerName when one member name violates the
-  // grammar, and it does not ignore the invalid name while accepting its
-  // siblings. What the rejection costs follows the map: `contentData` and
-  // `issuerData` are the delivery, a cached-wrap map is that item's cached
-  // route, and a sealed route map is that route.
+describe("Identifier-carrying collections, admitted whole", () => {
+  // The format's identifier section: a consumer rejects a collection whose
+  // records carry contentName, accessGroup or issuerName when one record's
+  // identifier is missing or violates the grammar, and it does not ignore the
+  // invalid record while accepting its siblings. What the rejection costs
+  // follows the collection: `contentData` and `issuerData` are the delivery,
+  // a cached-wrap collection is that item's cached route, and a sealed route
+  // map is that route.
+
+  const ENTRIES = [{ t: "251023T1500", key: "wrapped" }];
 
   const RECORD = {
     contentType: "text/html",
     nonce: "n",
     aad: "123456|1|bodytext",
-    keys: { [GROUP]: [{ t: "251023T1500", nonce: "wrap-nonce", key: "wrapped" }] },
+    keys: wraps(GROUP, ENTRIES),
   };
 
   /** One usable block, so a rule about a map is read beside a sound page. */
@@ -731,166 +921,308 @@ describe("Identifier-keyed maps, admitted whole", () => {
   });
 
   test("a contentData name outside the grammar rejects the inventory", () => {
-    for (const name of ["2bad", "bad|name", "__proto__", "", "a".repeat(65)]) {
-      const page = new DcaData({ ...PAGE, contentData: { [name]: RECORD, bodytext: RECORD } });
+    for (const name of ["2bad", "bad|name", "", "a".repeat(65), 7, null, undefined]) {
+      const page = new DcaData({
+        ...PAGE,
+        contentData: [
+          { ...RECORD, contentName: name },
+          { ...RECORD, contentName: "bodytext" },
+        ],
+      });
 
-      assert.throws(() => page.contentNames(), badPage, name);
+      assert.throws(() => page.contentNames(), badPage, String(name));
       assert.throws(
         () => page.contentDataFor("bodytext"),
         badPage,
-        `${name}: and its sound sibling`,
+        `${String(name)}: and its sound sibling`,
       );
-      assert.throws(() => page.accessGroupsFor("bodytext"), badPage, name);
-      assert.throws(() => page.sealedEntriesFor("bodytext", GROUP), badPage, name);
+      assert.throws(() => page.accessGroupsFor("bodytext"), badPage, String(name));
+      assert.throws(() => page.sealedEntriesFor("bodytext", GROUP), badPage, String(name));
+      assert.throws(() => page.version, badPage, String(name));
     }
   });
 
-  test("an issuerData name outside the grammar rejects the issuer map", () => {
-    for (const name of ["2bad", "bad|name", "__proto__"]) {
+  test("a contentData element that is not a record supplies no item, and its sibling opens", () => {
+    for (const element of ["not a record", null, 7, [], ["bodytext"]]) {
+      const label = JSON.stringify(element);
       const page = new DcaData({
         ...PAGE,
-        issuerData: {
-          [name]: block({}),
-          issuer_example: block({ contentKeys: { bodytext: "blob" } }),
-        },
+        contentData: [element, { ...RECORD, contentName: "bodytext" }, element],
       });
-
-      assert.throws(() => page.hasIssuer("issuer_example"), badPage, name);
-      assert.throws(() => page.keyIdFor("issuer_example"), badPage, name);
-      assert.throws(() => page.sealedContentKeyFor("issuer_example", "bodytext"), badPage, name);
-      assert.throws(() => page.issuerNamesFor(GROUP), badPage, name);
+      assert.deepEqual(page.contentNames(), ["bodytext"], label);
+      assert.deepEqual(page.contentDataFor("bodytext"), { ...RECORD, contentName: "bodytext" });
+      assert.deepEqual(page.sealedEntriesFor("bodytext", GROUP), ENTRIES, label);
+      assert.ok(page.contentItemFor("bodytext"), label);
+      assert.equal(page.version, "1", label);
     }
   });
 
-  test("a cached-wrap name outside the grammar supplies no cached route for that item", () => {
-    const candidate = [{ t: "251023T1500", nonce: "wrap-nonce", key: "wrapped" }];
-    const page = new DcaData({
-      ...PAGE,
-      contentData: {
-        bodytext: { ...RECORD, keys: { "2bad": candidate, [GROUP]: candidate } },
-        sidebar: RECORD,
-      },
-    });
-
-    assert.deepEqual(page.accessGroupsFor("bodytext"), [], "the map is rejected, not filtered");
-    assert.deepEqual(page.sealedEntriesFor("bodytext", GROUP), []);
-    assert.deepEqual(
-      page.contentDataFor("bodytext"),
-      page.toObject().contentData.bodytext,
-      "and the record still reads, so the issuer-mediated route stands",
-    );
-
-    // The sibling item's own cached route is untouched.
-    assert.deepEqual(page.accessGroupsFor("sidebar"), [GROUP]);
-    assert.deepEqual(page.sealedEntriesFor("sidebar", GROUP), RECORD.keys[GROUP]);
+  test("an inherited contentName is no identity", () => {
+    const inherited = Object.assign(Object.create({ contentName: "bodytext" }), RECORD);
+    const page = new DcaData({ ...PAGE, contentData: [inherited] });
+    assert.throws(() => page.contentNames(), badPage);
   });
 
-  test("a sealed route-map name outside the grammar supplies no route of that kind", () => {
+  test("an issuerData name outside the grammar rejects the issuer collection", () => {
+    for (const name of ["2bad", "bad|name", "__proto__", 7, undefined]) {
+      const page = new DcaData({
+        ...PAGE,
+        issuerData: [
+          { issuerName: name, ...block({}) },
+          {
+            issuerName: "issuer_example",
+            ...block({ contentKeys: [{ contentName: "bodytext", key: "blob" }] }),
+          },
+        ],
+      });
+
+      assert.throws(() => page.hasIssuer("issuer_example"), badPage, String(name));
+      assert.throws(() => page.keyIdFor("issuer_example"), badPage, String(name));
+      assert.throws(
+        () => page.sealedContentKeysFor("issuer_example", "bodytext"),
+        badPage,
+        String(name),
+      );
+      assert.throws(() => page.issuerNamesFor(GROUP), badPage, String(name));
+    }
+  });
+
+  test("an issuerData element that is not a record supplies no issuer, and its sibling stands", () => {
+    for (const element of [null, false, 0, "", [], "a string"]) {
+      const label = JSON.stringify(element);
+      const page = new DcaData({
+        ...PAGE,
+        issuerData: [element, { issuerName: "issuer_example", ...block({}) }],
+      });
+      assert.equal(page.hasIssuer("issuer_example"), true, label);
+      assert.equal(page.keyIdFor("issuer_example"), "k1", label);
+    }
+  });
+
+  test("the last whole issuer block is the issuer, and no field crosses from another block", () => {
+    // keyId and envelope select how the issuer opens the sealed material
+    // beside them, so they must come from the same block.
+    const first = {
+      issuerName: "issuer_example",
+      keyId: "k-first",
+      envelope: "first-envelope",
+      unlockUrl: "https://issuer.example/unlock",
+      sealed: { contentKeys: [{ contentName: "bodytext", key: "first-blob" }] },
+    };
+    const last = {
+      issuerName: "issuer_example",
+      keyId: "k-last",
+      unlockUrl: "https://issuer.example/unlock",
+      sealed: { periodKeys: [{ accessGroup: GROUP, period: "251023T1500", key: "last-period" }] },
+    };
+
+    const forward = new DcaData({ ...PAGE, issuerData: [first, last] });
+    assert.equal(forward.keyIdFor("issuer_example"), "k-last");
+    assert.equal(forward.envelopeFor("issuer_example"), undefined);
+    assert.deepEqual(forward.sealedContentKeysFor("issuer_example", "bodytext"), []);
+    assert.deepEqual(forward.issuerNamesFor(GROUP), ["issuer_example"]);
+
+    const reversed = new DcaData({ ...PAGE, issuerData: [last, first] });
+    assert.equal(reversed.keyIdFor("issuer_example"), "k-first");
+    assert.equal(reversed.envelopeFor("issuer_example"), "first-envelope");
+    assert.deepEqual(reversed.sealedContentKeysFor("issuer_example", "bodytext"), ["first-blob"]);
+    assert.deepEqual(reversed.issuerNamesFor(GROUP), []);
+
+    // An unusable last block leaves no issuer, even after a usable one.
+    const unusable = new DcaData({
+      ...PAGE,
+      issuerData: [first, { issuerName: "issuer_example", keyId: "k-last" }],
+    });
+    assert.equal(unusable.hasIssuer("issuer_example"), false);
+    assert.equal(unusable.keyIdFor("issuer_example"), undefined);
+  });
+
+  test("a replacement issuer's empty sealed block inherits no older material", () => {
+    const older = {
+      issuerName: "issuer_example",
+      keyId: "old-key",
+      envelope: "old-envelope",
+      sealed: {
+        contentKeys: [{ contentName: "bodytext", key: "old-content" }],
+        periodKeys: [{ accessGroup: GROUP, period: "251023T1500", key: "old-period" }],
+        chainKeys: [{ accessGroup: GROUP, cutoff: "251023T2300", key: "old-chain" }],
+      },
+    };
+    const replacement = { issuerName: "issuer_example", keyId: "new-key", sealed: {} };
+    const page = new DcaData({ ...PAGE, issuerData: [older, replacement] });
+    assert.equal(page.hasIssuer("issuer_example"), true);
+    assert.equal(page.keyIdFor("issuer_example"), "new-key");
+    assert.equal(page.envelopeFor("issuer_example"), undefined);
+    assert.deepEqual(page.sealedContentKeysFor("issuer_example", "bodytext"), []);
+    assert.equal(page.sealedPeriodKeysFor("issuer_example", GROUP), undefined);
+    assert.equal(page.sealedChainKeysFor("issuer_example", GROUP), undefined);
+
+    const reversed = new DcaData({ ...PAGE, issuerData: [replacement, older] });
+    assert.deepEqual(reversed.sealedContentKeysFor("issuer_example", "bodytext"), ["old-content"]);
+    assert.deepEqual(
+      reversed.sealedPeriodKeysFor("issuer_example", GROUP),
+      older.sealed.periodKeys,
+    );
+    assert.deepEqual(reversed.sealedChainKeysFor("issuer_example", GROUP), older.sealed.chainKeys);
+  });
+
+  test("issuer blocks resolve by name whatever their array order", () => {
+    const a = {
+      issuerName: "issuer_a",
+      ...block({ contentKeys: [{ contentName: "bodytext", key: "a-blob" }] }),
+    };
+    const b = {
+      issuerName: "issuer_b",
+      ...block({ contentKeys: [{ contentName: "bodytext", key: "b-blob" }] }),
+    };
+    for (const issuerData of [
+      [a, b],
+      [b, a],
+    ]) {
+      const page = new DcaData({ ...PAGE, issuerData });
+      assert.deepEqual(page.sealedContentKeysFor("issuer_a", "bodytext"), ["a-blob"]);
+      assert.deepEqual(page.sealedContentKeysFor("issuer_b", "bodytext"), ["b-blob"]);
+    }
+  });
+
+  test("a cached-wrap accessGroup outside the grammar supplies no cached route for that item", () => {
+    for (const accessGroup of ["2bad", "bad|group", 7, undefined]) {
+      const page = new DcaData({
+        ...PAGE,
+        contentData: items({
+          bodytext: {
+            ...RECORD,
+            keys: [{ accessGroup, period: "251023T1500", key: "wrapped" }, ...RECORD.keys],
+          },
+          sidebar: RECORD,
+        }),
+      });
+
+      assert.deepEqual(
+        page.accessGroupsFor("bodytext"),
+        [],
+        "the collection is rejected, not filtered",
+      );
+      assert.deepEqual(page.sealedEntriesFor("bodytext", GROUP), []);
+      assert.equal(
+        page.contentDataFor("bodytext"),
+        recordOf(page, "bodytext"),
+        "and the record still reads, so the issuer-mediated route stands",
+      );
+
+      // The sibling item's own cached route is untouched.
+      assert.deepEqual(page.accessGroupsFor("sidebar"), [GROUP]);
+      assert.deepEqual(page.sealedEntriesFor("sidebar", GROUP), ENTRIES);
+    }
+  });
+
+  test("a sealed record name outside the grammar supplies no route of that kind", () => {
     const page = new DcaData({
       ...PAGE,
-      issuerData: {
+      issuerData: issuers({
         issuer_example: block({
-          contentKeys: { "2bad": "blob", bodytext: "content-blob" },
-          periodKeys: {
-            "bad|group": { "251023T1500": "blob" },
-            [GROUP]: { "251023T1500": "period-blob" },
-          },
+          contentKeys: [
+            { contentName: "2bad", key: "blob" },
+            { contentName: "bodytext", key: "content-blob" },
+          ],
+          periodKeys: [
+            { accessGroup: "bad|group", period: "251023T1500", key: "blob" },
+            { accessGroup: GROUP, period: "251023T1500", key: "period-blob" },
+          ],
         }),
-        other_example: block({ contentKeys: { bodytext: "other-blob" } }),
-      },
+        other_example: block({ contentKeys: [{ contentName: "bodytext", key: "other-blob" }] }),
+      }),
     });
 
-    assert.equal(page.sealedContentKeyFor("issuer_example", "bodytext"), undefined);
+    assert.deepEqual(page.sealedContentKeysFor("issuer_example", "bodytext"), []);
     assert.equal(page.sealedPeriodKeysFor("issuer_example", GROUP), undefined);
     assert.equal(page.hasIssuer("issuer_example"), true, "the block itself is still usable");
-    assert.equal(
-      page.sealedContentKeyFor("other_example", "bodytext"),
-      "other-blob",
+    assert.deepEqual(
+      page.sealedContentKeysFor("other_example", "bodytext"),
+      ["other-blob"],
       "and the sibling issuer carries its own route",
     );
   });
 
-  test("a malformed sealed period family loses only that family before relay", () => {
-    const soundFamily = { "251023T1500": "AQ" };
+  test("a malformed sealed period record loses only itself before relay", () => {
+    const sound = { accessGroup: "vault", period: "251023T1500", key: "AQ" };
     const client = new Client({ publisherOrigin: PUBLISHER_ORIGIN });
 
     for (const [label, malformed] of [
-      ["empty map", {}],
-      ["wrong type", "not a map"],
+      ["no period", { accessGroup: "broken", key: "AQ" }],
+      ["wrong type", "not a record"],
     ]) {
       const data = {
         ...PAGE,
-        contentData: {
+        contentData: items({
           bodytext: {
-            ...PAGE.contentData.bodytext,
-            keys: {
-              broken: PAGE.contentData.bodytext.keys[GROUP],
-              vault: PAGE.contentData.bodytext.keys[GROUP],
-            },
+            contentType: BODY.contentType,
+            keys: [
+              { ...BODY.keys[0], accessGroup: "broken" },
+              { ...BODY.keys[0], accessGroup: "vault" },
+            ],
           },
-        },
-        issuerData: {
-          issuer_example: block({ periodKeys: { broken: malformed, vault: soundFamily } }),
-        },
+        }),
+        issuerData: issuers({
+          issuer_example: block({ periodKeys: [malformed, sound] }),
+        }),
       };
       const page = new DcaData(data);
 
       assert.deepEqual(page.accessGroupsFor("bodytext"), ["broken", "vault"], label);
       assert.equal(page.sealedPeriodKeysFor("issuer_example", "broken"), undefined, label);
-      assert.deepEqual(page.sealedPeriodKeysFor("issuer_example", "vault"), soundFamily, label);
+      assert.deepEqual(page.sealedPeriodKeysFor("issuer_example", "vault"), [sound], label);
       assert.deepEqual(page.issuerNamesFor("broken"), [], label);
       assert.deepEqual(page.issuerNamesFor("vault"), ["issuer_example"], label);
       assert.deepEqual(
         client.buildRequest(data, "issuer_example", ["bodytext"]).sealed.periodKeys,
-        {
-          vault: soundFamily,
-        },
+        [sound],
       );
     }
   });
 
   test("a chainKeys name outside the grammar supplies no chain route", () => {
-    // The chain carrier is keyed by accessGroup, so the same rule reaches it:
-    // a present `sealed.chainKeys` rejected under the identifier section
+    // The chain carrier names accessGroups, so the same rule reaches it: a
+    // present `sealed.chainKeys` rejected under the identifier section
     // supplies no chain route for that issuer block, and it leaves
     // `sealed.contentKeys`, `sealed.periodKeys` and the sibling issuer alone.
-    const family = { "251023T2300": "chain-blob" };
+    const record = { accessGroup: GROUP, cutoff: "251023T2300", key: "chain-blob" };
+    const bad = { ...record, accessGroup: "bad|group" };
+    const period = { accessGroup: GROUP, period: "251023T1500", key: "period-blob" };
     const page = new DcaData({
       ...PAGE,
-      issuerData: {
+      issuerData: issuers({
         issuer_example: block({
-          contentKeys: { bodytext: "content-blob" },
-          periodKeys: { [GROUP]: { "251023T1500": "period-blob" } },
-          chainKeys: { "bad|group": family, [GROUP]: family },
+          contentKeys: [{ contentName: "bodytext", key: "content-blob" }],
+          periodKeys: [period],
+          chainKeys: [bad, record],
         }),
         other_example: block({
-          chainKeys: { [GROUP]: family },
+          chainKeys: [record],
         }),
-      },
+      }),
     });
 
     assert.equal(page.sealedChainKeysFor("issuer_example", GROUP), undefined);
-    assert.equal(
-      page.sealedContentKeyFor("issuer_example", "bodytext"),
-      "content-blob",
+    assert.deepEqual(
+      page.sealedContentKeysFor("issuer_example", "bodytext"),
+      ["content-blob"],
       "and the other kinds in the same block stand",
     );
-    assert.deepEqual(page.sealedPeriodKeysFor("issuer_example", GROUP), {
-      "251023T1500": "period-blob",
-    });
+    assert.deepEqual(page.sealedPeriodKeysFor("issuer_example", GROUP), [period]);
     assert.deepEqual(
       page.issuerNamesFor(GROUP),
       ["issuer_example"],
       "only the issuer carrying sound periodKeys remains base-eligible",
     );
 
-    // An issuer whose only route is the rejected chain map carries no family.
+    // An issuer whose only route is the rejected chain collection carries no family.
     const chainOnly = new DcaData({
       ...PAGE,
-      issuerData: {
-        issuer_example: block({ chainKeys: { "bad|group": family, [GROUP]: family } }),
-        other_example: block({ chainKeys: { [GROUP]: family } }),
-      },
+      issuerData: issuers({
+        issuer_example: block({ chainKeys: [bad, record] }),
+        other_example: block({ chainKeys: [record] }),
+      }),
     });
 
     assert.equal(chainOnly.sealedChainKeysFor("issuer_example", GROUP), undefined);
@@ -899,13 +1231,13 @@ describe("Identifier-keyed maps, admitted whole", () => {
       [],
       "an optional chain route does not change base period-key eligibility",
     );
-    assert.deepEqual(chainOnly.sealedChainKeysFor("other_example", GROUP), family);
+    assert.deepEqual(chainOnly.sealedChainKeysFor("other_example", GROUP), [record]);
   });
 });
 
 test("item capture refuses an unpaired surrogate in contentType before an unlock can be built", () => {
   const page = structuredClone(PAGE);
-  /** @type {any} */ (page.contentData.bodytext).contentType = "text/\udfff";
+  /** @type {any} */ (page.contentData[0]).contentType = "text/\udfff";
   const view = new DcaData(page);
   assert.doesNotThrow(() => view.contentDataFor("bodytext"), "the record shape itself is sound");
   assert.throws(() => view.contentItemFor("bodytext"), { code: "bad_page" });
@@ -935,10 +1267,10 @@ test("carried aad and nonce of any type are ignored and select no transcript", (
     true,
   ]) {
     const page = structuredClone(PAGE);
-    /** @type {any} */ (page.contentData.bodytext).aad = aad;
-    /** @type {any} */ (page.contentData.bodytext).nonce = aad;
+    /** @type {any} */ (page.contentData[0]).aad = aad;
+    /** @type {any} */ (page.contentData[0]).nonce = aad;
     const view = new DcaData(page);
-    assert.equal(view.contentDataFor("bodytext"), page.contentData.bodytext, String(aad));
+    assert.equal(view.contentDataFor("bodytext"), page.contentData[0], String(aad));
     const item = view.contentItemFor("bodytext");
     assert.ok(item);
     assert.deepEqual(item.contentAad, expected.contentAad, `aad ${JSON.stringify(aad)}`);
@@ -948,7 +1280,7 @@ test("carried aad and nonce of any type are ignored and select no transcript", (
 
 test("a captured item is a frozen copy that later page edits do not reach", () => {
   const page = structuredClone(PAGE);
-  /** @type {any} */ (page.contentData.bodytext).contentEncodings = ["br"];
+  /** @type {any} */ (page.contentData[0]).contentEncodings = ["br"];
   const item = new DcaData(page).contentItemFor("bodytext");
   assert.ok(item);
   assert.deepEqual(Object.keys(item).sort(), [
@@ -959,8 +1291,8 @@ test("a captured item is a frozen copy that later page edits do not reach", () =
   ]);
   assert.ok(Object.isFrozen(item) && Object.isFrozen(item.contentEncodings));
   const before = Uint8Array.from(item.contentAad);
-  /** @type {any} */ (page.contentData.bodytext).contentEncodings.push("gzip");
-  /** @type {any} */ (page.contentData.bodytext).contentType = "text/plain";
+  /** @type {any} */ (page.contentData[0]).contentEncodings.push("gzip");
+  /** @type {any} */ (page.contentData[0]).contentType = "text/plain";
   page.resourceJWT = "eyJh.eyJi.c2ln";
   assert.deepEqual(item.contentEncodings, ["br"]);
   assert.equal(item.contentType, "text/html");
@@ -986,7 +1318,7 @@ test("item capture bounds the compact token before decoding its render coordinat
 
 test("handling limits and scalar admission remain independent of the content transcript", () => {
   const capture = (record) =>
-    new DcaData({ ...PAGE, contentData: { bodytext: record } }).contentItemFor("bodytext");
+    new DcaData({ ...PAGE, contentData: items({ bodytext: record }) }).contentItemFor("bodytext");
   const sound = { contentType: "text/plain" };
   for (const record of [
     { contentType: "t".repeat(65536) },

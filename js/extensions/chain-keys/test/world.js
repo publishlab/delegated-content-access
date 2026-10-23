@@ -20,6 +20,7 @@ import {
   keyDerivationSecret,
 } from "../../../demo/scenarios/fixtures.js";
 import { wholeRenderIssuerSupplyPlan } from "../../../core-publisher/issuerSupplyPlan.js";
+import { periodsOn } from "../../../test-lib/helpers/inspect.js";
 
 /** Two chains a day over fifteen-minute periods, the geometry these cases run on. */
 export const GEOMETRY = Object.freeze({ chainsPerDay: 2, periodMinutes: 15 });
@@ -155,11 +156,35 @@ export function chainPartition(chainCache, world, t) {
  * @returns {string[]}
  */
 export function coordinatesOf(page) {
-  return page
-    .asJson()
-    .contentData[CONTENT_NAME].keys[ACCESS_GROUP].map(
-      (/** @type {{ t: string }} */ entry) => entry.t,
-    );
+  return periodsOn(page.asJson(), CONTENT_NAME, ACCESS_GROUP);
+}
+
+/**
+ * A compact `{accessGroup: {cutoff: key}}` table spelled as the
+ * `{accessGroup, cutoff, key}` records `sealed.chainKeys` and `keys.chainKeys`
+ * carry, one record per cell in table order. A table cannot hold two records
+ * at one cutoff, so a case about rival records writes its records out.
+ *
+ * @param {Record<string, Record<string, unknown>>} table
+ * @returns {{ accessGroup: string, cutoff: string, key: unknown }[]}
+ */
+export function chainKeyRecords(table) {
+  return Object.entries(table).flatMap(([accessGroup, members]) =>
+    Object.entries(members).map(([cutoff, key]) => ({ accessGroup, cutoff, key })),
+  );
+}
+
+/**
+ * The cutoffs one family's chain records name, in wire order.
+ *
+ * @param {unknown} records - a `sealed.chainKeys` or `keys.chainKeys` collection
+ * @param {string} accessGroup
+ * @returns {string[]}
+ */
+export function cutoffsOf(records, accessGroup) {
+  return Array.isArray(records)
+    ? records.filter((record) => record?.accessGroup === accessGroup).map((record) => record.cutoff)
+    : [];
 }
 
 /** @param {Uint8Array} a @param {Uint8Array} b */

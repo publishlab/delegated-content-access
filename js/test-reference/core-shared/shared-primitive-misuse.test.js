@@ -220,27 +220,36 @@ portableCoreDynamicTest("bindValue refuses a binding that is not a record", asyn
   });
 });
 
-test("ECDH sealing requires the fixed curve and an explicit nonce source", async () => {
+test("ECDH sealing requires the fixed curve and needs no caller nonce source", async () => {
   const p256 = await issuerKeypair();
   const p384 = await generateEcdhKeyPair("P-384");
   const key = new Uint8Array(16).fill(0x2a);
   const random = { bytes: (/** @type {number} */ n) => new Uint8Array(n).fill(0x19) };
 
-  const blob = await seal(key, p256.publicKey, "ecdh-p256", { binding: BINDING, random });
+  const blob = await seal(key, p256.publicKey, "ecdh-p256", { binding: BINDING });
   assert.deepEqual(
     await open(blob, p256.privateKey, "ecdh-p256", { binding: BINDING }),
     key,
-    "the valid sibling seals and opens on P-256 with an explicit nonce source",
+    "the valid sibling seals and opens on P-256 without a caller nonce source",
   );
 
   await refuses(() => seal(key, p384.publicKey, "ecdh-p256", { binding: BINDING, random }), {
     code: "bad_config",
     message: /fixes ECDH to P-256/,
   });
-  await refuses(() => seal(key, p256.publicKey, "ecdh-p256", { binding: BINDING }), {
-    code: "missing_random",
-    message: /needs a Random for the blob nonce/,
+  const unusedRandom = {
+    bytes: () => {
+      throw new Error("envelope must not draw a nonce");
+    },
+  };
+  const withLegacyOption = await seal(key, p256.publicKey, "ecdh-p256", {
+    binding: BINDING,
+    random: unusedRandom,
   });
+  assert.deepEqual(
+    await open(withLegacyOption, p256.privateKey, "ecdh-p256", { binding: BINDING }),
+    key,
+  );
 });
 
 test("the period-key profile has one fixed width, and unknown names are refused", () => {

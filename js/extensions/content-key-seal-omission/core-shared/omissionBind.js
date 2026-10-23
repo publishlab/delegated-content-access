@@ -143,7 +143,7 @@ export function omissionBindAad(binding) {
 }
 
 /**
- * Whether one `contentData[name].keys[group][]` entry is a bound wrap. The
+ * Whether one entry in an item record's `keys` array is a bound wrap. The
  * marker keeps the two representations apart: a base reader sees an entry it
  * can describe but cannot open, and this extension refuses an entry
  * that does not carry it rather than trying it unbound.

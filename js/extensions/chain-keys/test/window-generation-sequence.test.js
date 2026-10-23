@@ -35,6 +35,7 @@ import { actorWorld } from "../../../demo/scenarios/world.js";
 import { rootFromPage } from "../../../demo/support/queryableRoot.js";
 import { ACCESS_GROUP, CONTENT_NAME, ISSUER_NAME } from "../../../demo/scenarios/fixtures.js";
 import { utf8Decode } from "../../../core-shared/codec.js";
+import { contentKeyMap, periodKeyMap } from "../../../test-reference/support/namedRecords.js";
 import {
   candidatesOffered,
   chainBrowser,
@@ -144,9 +145,11 @@ test("retained old capability survives a window edge, a generation rollover and 
   /** @param {any} exchange */
   const grantedIn = (exchange) => ({
     status: exchange.status,
-    contentKeys: Object.keys(exchange.body.keys?.contentKeys ?? {}),
-    periodKeys: Object.keys(exchange.body.keys?.periodKeys?.[ACCESS_GROUP] ?? {}),
-    chainCutoffs: Object.keys(exchange.body.keys?.chainKeys?.[ACCESS_GROUP] ?? {}),
+    contentKeys: Object.keys(contentKeyMap(exchange.body.keys?.contentKeys) ?? {}),
+    periodKeys: Object.keys(periodKeyMap(exchange.body.keys?.periodKeys)?.[ACCESS_GROUP] ?? {}),
+    chainCutoffs: Object.keys(
+      periodKeyMap(exchange.body.keys?.chainKeys, "cutoff")?.[ACCESS_GROUP] ?? {},
+    ),
   });
 
   const oldEdgePeriodKey = await oldGeneration.periodKey(ACCESS_GROUP, EDGE_T);

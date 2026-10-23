@@ -16,7 +16,9 @@
 // even so: ECDSA draws a random `k` per signature, so the resourceJWT's
 // signature segment differs every run. Its header and payload segments repeat,
 // and the recorded signature verifies against the recorded public JWK. The
-// replay test compares those segments and checks that signature.
+// replay test compares those segments and checks that signature. Ordinary
+// envelopes use the implicit zero nonce. Repeated pinned pairs are laboratory
+// replay controls, not conforming producer freshness.
 //
 // This file recovers a key at the coordinate it sits at. The publisher seals
 // each blob under the render and the coordinate it belongs to, so the two
@@ -450,16 +452,22 @@ function headerKid(rawBody) {
 export async function recoverContentKeys(input, dcaData) {
   const [issuer] = input.issuers;
   const privateKey = await importIssuerPrivateKey(issuer.privateKeyJwk);
-  const sealed = dcaData.issuerData[issuer.issuerName].sealed.contentKeys;
+  const sealed = dcaData.issuerData.find((entry) => entry.issuerName === issuer.issuerName).sealed
+    .contentKeys;
   const renderId = decodeCompactJwt(dcaData.resourceJWT).payload.renderId;
 
   /** @type {Record<string, string>} */
   const keys = {};
   for (const item of input.content) {
     keys[item.name] = base64urlEncode(
-      await open(sealed[item.name], privateKey, issuer.algorithm, {
-        binding: { renderId, contentName: item.name },
-      }),
+      await open(
+        sealed.find((entry) => entry.contentName === item.name).key,
+        privateKey,
+        issuer.algorithm,
+        {
+          binding: { renderId, contentName: item.name },
+        },
+      ),
     );
   }
   return keys;
@@ -478,24 +486,19 @@ export async function recoverContentKeys(input, dcaData) {
  */
 export function bindingValues(input, dcaData) {
   const [issuer] = input.issuers;
-  const sealed = dcaData.issuerData[issuer.issuerName].sealed;
+  const sealed = dcaData.issuerData.find((entry) => entry.issuerName === issuer.issuerName).sealed;
   const renderId = decodeCompactJwt(dcaData.resourceJWT).payload.renderId;
 
   /** @type {Record<string, string>} */
   const contentKeys = {};
-  for (const contentName of Object.keys(sealed.contentKeys)) {
+  for (const { contentName } of sealed.contentKeys) {
     contentKeys[contentName] = bindValue({ renderId, contentName });
   }
 
   /** @type {Record<string, Record<string, string>>} */
   const periodKeys = {};
-  for (const [accessGroup, periods] of Object.entries(sealed.periodKeys ?? {})) {
-    /** @type {Record<string, string>} */
-    const byPeriod = {};
-    for (const t of Object.keys(/** @type {Record<string, string>} */ (periods))) {
-      byPeriod[t] = bindValue({ renderId, accessGroup, t });
-    }
-    periodKeys[accessGroup] = byPeriod;
+  for (const { accessGroup, period: t } of sealed.periodKeys ?? []) {
+    (periodKeys[accessGroup] ??= {})[t] = bindValue({ renderId, accessGroup, t });
   }
 
   return { contentKeys, periodKeys };
@@ -503,7 +506,7 @@ export function bindingValues(input, dcaData) {
 
 /**
  * The periodKeys behind the sealed wire, recovered the way an issuer recovers
- * them: unseal `sealed.periodKeys[accessGroup][t]`.
+ * them: unseal each `{accessGroup, period, key}` record in `sealed.periodKeys`.
  *
  * Recording these separately from publisher-private `input.periodKeys` checks
  * that the sealed wire recovers the exact bytes it was given.
@@ -515,22 +518,17 @@ export function bindingValues(input, dcaData) {
 export async function recoverPeriodKeys(input, dcaData) {
   const [issuer] = input.issuers;
   const privateKey = await importIssuerPrivateKey(issuer.privateKeyJwk);
-  const sealed = dcaData.issuerData[issuer.issuerName].sealed.periodKeys ?? {};
+  const sealed =
+    dcaData.issuerData.find((entry) => entry.issuerName === issuer.issuerName).sealed.periodKeys ??
+    [];
   const renderId = decodeCompactJwt(dcaData.resourceJWT).payload.renderId;
 
   /** @type {Record<string, Record<string, string>>} */
   const keys = {};
-  for (const [accessGroup, periods] of Object.entries(sealed)) {
-    /** @type {Record<string, string>} */
-    const byPeriod = {};
-    for (const [t, blob] of Object.entries(/** @type {Record<string, string>} */ (periods))) {
-      byPeriod[t] = base64urlEncode(
-        await open(blob, privateKey, issuer.algorithm, {
-          binding: { renderId, accessGroup, t },
-        }),
-      );
-    }
-    keys[accessGroup] = byPeriod;
+  for (const { accessGroup, period: t, key: blob } of sealed) {
+    (keys[accessGroup] ??= {})[t] = base64urlEncode(
+      await open(blob, privateKey, issuer.algorithm, { binding: { renderId, accessGroup, t } }),
+    );
   }
   return keys;
 }

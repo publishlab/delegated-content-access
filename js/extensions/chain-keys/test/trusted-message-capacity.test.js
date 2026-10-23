@@ -29,19 +29,15 @@ test("chain message capacity is finite trusted configuration with unchanged defa
 
 test("carrier bounds and memoized client admission stay local to each capacity", () => {
   const geometry = { chainsPerDay: 2, periodMinutes: 60 };
-  const sealed = Object.fromEntries(
-    Array.from({ length: 100 }, (_, n) => [
-      `g${n}`,
-      {
-        "261014T2300": "AA",
-        "261015T1100": "AA",
-      },
-    ]),
-  );
+  const groups = Array.from({ length: 100 }, (_, n) => `g${n}`);
+  const sealed = groups.flatMap((accessGroup) => [
+    { accessGroup, cutoff: "261014T2300", key: "AA" },
+    { accessGroup, cutoff: "261015T1100", key: "AA" },
+  ]);
   const request = { sealed: { chainKeys: sealed }, periodGeometry: geometry };
   const response = {
     keys: {
-      chainKeys: Object.fromEntries(Object.keys(sealed).map((g) => [g, { "261014T1800": "AA" }])),
+      chainKeys: groups.map((accessGroup) => ({ accessGroup, cutoff: "261014T1800", key: "AA" })),
     },
   };
   const ordinary = chainKeyClientProfileFor();

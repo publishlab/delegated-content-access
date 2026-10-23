@@ -566,7 +566,7 @@ block-beta
         culturePad["HKDF<br/>culture item pad"]:3 space
     space:20
 
-    %% client: each connector comes from this rendered bodytext item's connector map
+    %% client: each connector comes from this rendered bodytext item's connector records
     politicsXor["XOR with<br/>politics connector"]:3 space
         sportsXor["XOR with<br/>sports connector"]:3 space
         opinionsXor["XOR with<br/>opinions connector"]:3 space

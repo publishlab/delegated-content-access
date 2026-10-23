@@ -55,6 +55,12 @@ import { held } from "../test-lib/helpers/inspect.js";
 import { requestFor } from "../test-lib/harnesses/issuer-endpoint.js";
 import { unlockThroughAdmission } from "../test-lib/harnesses/unlockThroughAdmission.js";
 import { periodKey } from "../test-reference/support/keys.js";
+import {
+  contentKeyMap,
+  errorMap,
+  keyAt,
+  periodKeyMap,
+} from "../test-reference/support/namedRecords.js";
 
 /**
  * The publisher every render in this file names, folded the way the resolver
@@ -453,11 +459,11 @@ describe("A blob sealed for one issuer, presented to another", () => {
     // the partner's blobs opens under the subscription issuer's private key.
     const readdressed = await toStrict({ ...forWeak, issuerName: STRICT });
     assert.equal(readdressed.status, 200);
-    assert.deepEqual(readdressed.body.keys.contentKeys, {}, "nothing was handed over");
+    assert.deepEqual(readdressed.body.keys.contentKeys, [], "nothing was handed over");
     assert.equal(readdressed.body.keys.periodKeys, undefined);
     assert.deepEqual(
       Object.fromEntries(
-        Object.entries(readdressed.body.errors).map(([label, e]) => [
+        Object.entries(errorMap(readdressed.body.errors)).map(([label, e]) => [
           label,
           /** @type {any} */ (e).error,
         ]),
@@ -477,9 +483,9 @@ describe("A blob sealed for one issuer, presented to another", () => {
       sealed: { ...forStrict.sealed, contentKeys: forWeak.sealed.contentKeys },
     });
     assert.equal(swapped.status, 200);
-    assert.deepEqual(swapped.body.keys.contentKeys, {});
-    assert.deepEqual(Object.keys(swapped.body.keys.periodKeys), [ARTICLE_GROUP]);
-    assert.deepEqual(Object.keys(swapped.body.errors), [BODYTEXT]);
+    assert.deepEqual(swapped.body.keys.contentKeys, []);
+    assert.deepEqual(Object.keys(periodKeyMap(swapped.body.keys.periodKeys)), [ARTICLE_GROUP]);
+    assert.deepEqual(Object.keys(errorMap(swapped.body.errors)), [BODYTEXT]);
 
     // The sharpest form of the same swap, and the one that says what is doing
     // the work. This periodKey blob is moved to the coordinate it already sits
@@ -487,13 +493,20 @@ describe("A blob sealed for one issuer, presented to another", () => {
     // issuer rebuilds is byte-identical to the one the partner's blob was
     // sealed under, so the binding has nothing to disagree with - and the blob
     // still does not open, because it was sealed to the partner's public key.
-    const partnerArticle = forWeak.sealed.periodKeys[ARTICLE_GROUP];
-    const t = Object.keys(partnerArticle)[0];
+    const partnerRecord = forWeak.sealed.periodKeys.find(
+      (/** @type {any} */ record) => record.accessGroup === ARTICLE_GROUP,
+    );
+    const t = partnerRecord.period;
     const relabeled = await toStrict({
       ...forStrict,
       sealed: {
         ...forStrict.sealed,
-        periodKeys: { ...forStrict.sealed.periodKeys, [ARTICLE_GROUP]: { [t]: partnerArticle[t] } },
+        periodKeys: [
+          ...forStrict.sealed.periodKeys.filter(
+            (/** @type {any} */ record) => record.accessGroup !== ARTICLE_GROUP,
+          ),
+          { ...partnerRecord },
+        ],
       },
     });
     assert.equal(relabeled.status, 200);
@@ -502,9 +515,9 @@ describe("A blob sealed for one issuer, presented to another", () => {
       undefined,
       "the one period asked for did not open",
     );
-    assert.deepEqual(Object.keys(relabeled.body.errors), [`${ARTICLE_GROUP}|${t}`]);
+    assert.deepEqual(Object.keys(errorMap(relabeled.body.errors)), [`${ARTICLE_GROUP}|${t}`]);
     assert.deepEqual(
-      Object.keys(relabeled.body.keys.contentKeys),
+      Object.keys(contentKeyMap(relabeled.body.keys.contentKeys)),
       [BODYTEXT],
       "and the honest coordinate beside it did",
     );
@@ -514,13 +527,11 @@ describe("A blob sealed for one issuer, presented to another", () => {
     // blob opens and the partner's does not, which is the whole separation
     // between two issuers over one render.
     const binding = { renderId, contentName: BODYTEXT };
-    assert.equal(
-      (await open(forStrict.sealed.contentKeys[BODYTEXT], strictKey, ALGORITHM, { binding }))
-        .length,
-      16,
-    );
+    const ownBlob = keyAt(forStrict.sealed.contentKeys, { contentName: BODYTEXT });
+    const partnerBlob = keyAt(forWeak.sealed.contentKeys, { contentName: BODYTEXT });
+    assert.equal((await open(ownBlob, strictKey, ALGORITHM, { binding })).length, 16);
     await assert.rejects(
-      () => open(forWeak.sealed.contentKeys[BODYTEXT], strictKey, ALGORITHM, { binding }),
+      () => open(partnerBlob, strictKey, ALGORITHM, { binding }),
       (/** @type {any} */ err) => err.code === "unseal_failed",
     );
 
@@ -585,8 +596,8 @@ describe("A blob sealed for one issuer, presented to another", () => {
     );
 
     assert.equal(answer.status, 200);
-    assert.deepEqual(Object.keys(answer.body.keys.contentKeys), [BODYTEXT]);
-    assert.deepEqual(Object.keys(answer.body.keys.periodKeys), [ARTICLE_GROUP]);
+    assert.deepEqual(Object.keys(contentKeyMap(answer.body.keys.contentKeys)), [BODYTEXT]);
+    assert.deepEqual(Object.keys(periodKeyMap(answer.body.keys.periodKeys)), [ARTICLE_GROUP]);
     assert.equal(answer.body.errors, undefined);
   });
 });
@@ -628,8 +639,8 @@ describe("Per-issuer grants", () => {
     );
 
     assert.equal(answer.status, 200);
-    assert.deepEqual(Object.keys(answer.body.keys.contentKeys), [BODYTEXT]);
-    assert.deepEqual(Object.keys(answer.body.keys.periodKeys), [ARTICLE_GROUP]);
+    assert.deepEqual(Object.keys(contentKeyMap(answer.body.keys.contentKeys)), [BODYTEXT]);
+    assert.deepEqual(Object.keys(periodKeyMap(answer.body.keys.periodKeys)), [ARTICLE_GROUP]);
     assert.equal(answer.body.errors, undefined);
 
     // The strict issuer, same page, same items: what one issuer is granted says

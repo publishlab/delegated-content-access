@@ -21,7 +21,7 @@ import { own } from "../../core-shared/wire.js";
  * @property {(url: string, init: { method: string, headers: Record<string, string>, body: string, credentials: 'omit', redirect: 'error' }) => Promise<{ status: number, headers: { get: (name: string) => string|null }, json: () => Promise<any>, redirected?: boolean }>} fetch -
  *   browser Fetch, or a transport with the same HTTPS and redirect duties
  * @property {Record<string, (bytes: Uint8Array) => Promise<Uint8Array>|Uint8Array>} [contentDecoders]
- * @property {{ publicKey: JsonWebKey, openDeliveredKeys: Function }} [clientBoundKeyCapability]
+ * @property {NonNullable<import('../../integration-client/composeClient.js').ComposeClientOptions['clientBoundKeyCapability']>} [clientBoundKeyCapability]
  * @property {boolean} [acceptDirectFallback]
  * @property {boolean} [acceptDirectResponse]
  */
@@ -138,6 +138,7 @@ export function createRecipientGrantBrowserClient(config) {
         assertReaderContextReset: resolver.assertReaderContextReset.bind(resolver),
         clearReaderContext: resolver.clearReaderContext.bind(resolver),
         resolveDetailed: resolver.resolveDetailed.bind(resolver),
+        resolveAuthenticated: resolver.resolveAuthenticated.bind(resolver),
         resolve: resolver.resolve.bind(resolver),
         contentKeyFor: resolver.contentKeyFor.bind(resolver),
         contentKeyWithOriginFor: resolver.contentKeyWithOriginFor.bind(resolver),

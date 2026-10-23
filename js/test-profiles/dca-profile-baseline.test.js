@@ -51,6 +51,7 @@ import { JsonDeliveryReader } from "../adapter-client/JsonDeliveryReader.js";
 import { createDeliveryClient } from "../integration-client/createDeliveryClient.js";
 import { utf8Decode } from "../core-shared/codec.js";
 import { refuses } from "../test-lib/helpers/refuses.js";
+import { contentRecordOf } from "../test-lib/helpers/inspect.js";
 
 const ISSUER_NAME = "paywall_subscription_service";
 const KEY_ID = "2025-10";
@@ -185,8 +186,12 @@ test(
     const { bytes, unlock } = await world();
     const document = JSON.parse(utf8Decode(bytes));
     assert.ok(Object.hasOwn(document, "contentData"), "one enclosing object: the dca-data members");
-    assert.deepEqual(Object.keys(document.sealedContent), [CONTENT_NAME], "and sealedContent");
-    assert.equal(document.contentData[CONTENT_NAME].keys, undefined, "no period-key route");
+    assert.deepEqual(
+      document.sealedContent.map((/** @type {any} */ record) => record.contentName),
+      [CONTENT_NAME],
+      "and sealedContent",
+    );
+    assert.equal(contentRecordOf(document, CONTENT_NAME).keys, undefined, "no period-key route");
 
     const client = await clientOver(new Uint8Array(bytes), unlock);
 
@@ -239,7 +244,7 @@ test("the JSON entry opens a missing item and returns its content identity with 
     },
   });
   reader.publisherOrigin = "https://other.example";
-  reader.dcaData.contentData[CONTENT_NAME].contentType = "text/plain";
+  contentRecordOf(reader.dcaData, CONTENT_NAME).contentType = "text/plain";
   reader.extract = () => null;
   const first = await client.open(CONTENT_NAME);
   assert.equal(first.contentName, CONTENT_NAME);
@@ -334,7 +339,10 @@ test("an item-only operational retry still presents that item coordinate", async
     ],
   );
   assert.equal(sent.length, 2);
-  assert.deepEqual(Object.keys(sent[1].sealed.contentKeys), [CONTENT_NAME]);
+  assert.deepEqual(
+    sent[1].sealed.contentKeys.map((/** @type {any} */ record) => record.contentName),
+    [CONTENT_NAME],
+  );
   assert.deepEqual(result.missing, []);
   assert.equal(utf8Decode((await client.openLocal(CONTENT_NAME)).bytes), ARTICLE);
 });

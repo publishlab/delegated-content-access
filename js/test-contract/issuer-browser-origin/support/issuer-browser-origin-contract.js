@@ -82,7 +82,11 @@ async function provision(driver, vector) {
     issuerName: issuer.issuerName,
     keyId: issuer.keyId,
     resourceJWT: data.resourceJWT,
-    sealed: { contentKeys: data.issuerData[issuer.issuerName].sealed.contentKeys },
+    sealed: {
+      contentKeys: data.issuerData.find(
+        (/** @type {any} */ record) => record.issuerName === issuer.issuerName,
+      ).sealed.contentKeys,
+    },
   };
   return { issuer, signing, data, browser, events, registrations, request, hostContext };
 }
@@ -92,7 +96,7 @@ function assertNoKey(response) {
   for (const section of Object.values(response.body?.keys ?? {})) {
     assert.deepEqual(
       section,
-      {},
+      [],
       "refused or unavailable material supplies no key section entries",
     );
   }
@@ -131,7 +135,17 @@ export function registerBrowserIssuerContract(binding, target, vectors) {
         contentType: "application/json",
       });
       assert.equal(response.status, 200);
-      assert.deepEqual(response.body.keys.contentKeys, vector.expected.contentKeys);
+      assert.deepEqual(
+        [...response.body.keys.contentKeys].sort((a, b) =>
+          a.contentName.localeCompare(b.contentName),
+        ),
+        Object.entries(vector.expected.contentKeys)
+          .map(([contentName, key]) => ({
+            contentName,
+            key,
+          }))
+          .sort((a, b) => a.contentName.localeCompare(b.contentName)),
+      );
       assert.deepEqual(f.events, [
         `registration:${f.signing.kid}`,
         `caller:${f.signing.kid}`,
@@ -214,7 +228,17 @@ export function registerBrowserIssuerContract(binding, target, vectors) {
         contentType: "application/json",
       });
       assert.equal(positive.status, 200);
-      assert.deepEqual(positive.body.keys.contentKeys, vector.expected.contentKeys);
+      assert.deepEqual(
+        [...positive.body.keys.contentKeys].sort((a, b) =>
+          a.contentName.localeCompare(b.contentName),
+        ),
+        Object.entries(vector.expected.contentKeys)
+          .map(([contentName, key]) => ({
+            contentName,
+            key,
+          }))
+          .sort((a, b) => a.contentName.localeCompare(b.contentName)),
+      );
       assert.deepEqual(f.events, [
         `registration:${f.signing.kid}`,
         `caller:${f.signing.kid}`,

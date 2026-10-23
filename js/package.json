@@ -7,7 +7,13 @@
   "engines": {
     "node": ">=22.15 <23 || >=24.19 <25"
   },
-  "packageManager": "pnpm@10.23.0",
+  "devEngines": {
+    "packageManager": {
+      "name": "pnpm",
+      "version": "^10.0.0",
+      "onFail": "ignore"
+    }
+  },
   "scripts": {
     "lint": "eslint .",
     "mutate": "command -v ps >/dev/null || { echo \"stryker needs ps (procps) on PATH\" >&2; exit 1; } && stryker run",
@@ -21,6 +27,8 @@
     "test:single-process": "DCA_NODE_TEST_ISOLATION=none npm test",
     "test:all": "npm run test && npm run test:experiments",
     "check:types": "tsc -p jsconfig.json --pretty false",
+    "check:consumer-types": "tsc -p test-reference/tsconfig.types.json --pretty false",
+    "check:consumer-declarations": "node test-tools/check-consumer-declarations.mjs",
     "typecheck": "tsc -p jsconfig.json --pretty false",
     "check:boundaries": "node --experimental-test-isolation=\"${DCA_NODE_TEST_ISOLATION:-process}\" --test \"test-base/*.test.js\"",
     "test:reference:public": "node --experimental-test-isolation=\"${DCA_NODE_TEST_ISOLATION:-process}\" --test --test-reporter=tap \"test/**/*.test.js\" \"test-reference/**/*.test.js\" \"extensions/*/test/**/*.test.js\" \"test-extensions/*.test.js\" \"test-profiles/*.test.js\"",
@@ -34,6 +42,8 @@
     "test:reference:extension:content-description": "node --experimental-test-isolation=\"${DCA_NODE_TEST_ISOLATION:-process}\" --test \"extensions/content-description/test/**/*.test.js\"",
     "test:reference:extension:html-content-map": "node --experimental-test-isolation=\"${DCA_NODE_TEST_ISOLATION:-process}\" --test \"extensions/html-content-map/test/**/*.test.js\"",
     "test:reference:extension:compact-ecdh": "node --experimental-test-isolation=\"${DCA_NODE_TEST_ISOLATION:-process}\" --test \"extensions/compact-ecdh/test/**/*.test.js\"",
+    "test:reference:extension:nonce-free-envelope": "node --experimental-test-isolation=\"${DCA_NODE_TEST_ISOLATION:-process}\" --test \"extensions/nonce-free-envelope/test/**/*.test.js\"",
+    "test:reference:extension:nonce-free-response": "node --experimental-test-isolation=\"${DCA_NODE_TEST_ISOLATION:-process}\" --test \"extensions/nonce-free-response/test/**/*.test.js\"",
     "test:reference:compositions": "node --experimental-test-isolation=\"${DCA_NODE_TEST_ISOLATION:-process}\" --test \"test-extensions/*.test.js\"",
     "test:reference:profiles": "node --experimental-test-isolation=\"${DCA_NODE_TEST_ISOLATION:-process}\" --test \"test-profiles/*.test.js\"",
     "test:reference:vectors": "node --experimental-test-isolation=\"${DCA_NODE_TEST_ISOLATION:-process}\" --test \"test-vectors/*.test.js\"",
@@ -57,7 +67,7 @@
     "test:bridge": "node test-bridges/_shared/run.mjs",
     "test:reference:system": "node test-reference/run-reference-target.js system",
     "test:experiments": "node --test \"experiments/*/test/*.test.js\"",
-    "test:contract": "node --experimental-test-isolation=\"${DCA_NODE_TEST_ISOLATION:-process}\" --test --test-reporter=spec --test-reporter-destination=stdout --test-reporter=./test-tools/test-verdict-reporter.mjs --test-reporter-destination=stderr test-contract/contract-runner-validation.test.js && npm run test:contract:reference:base && npm run test:contract:fixture:issuer-endpoint && npm run test:contract:reference:issuer-browser-origin",
+    "test:contract": "node --experimental-test-isolation=\"${DCA_NODE_TEST_ISOLATION:-process}\" --test --test-reporter=spec --test-reporter-destination=stdout --test-reporter=./test-tools/test-verdict-reporter.mjs --test-reporter-destination=stderr test-contract/contract-runner-validation.test.js && npm run test:contract:reference:base && npm run test:contract:fixture:issuer-endpoint && npm run test:contract:reference:issuer-browser-origin && npm run test:contract:reference:html-writer",
     "test:contract:base": "node test-contract/run-contract-target.js",
     "test:contract:reference:base": "npm run test:contract:base -- test-contract/bindings/reference-base-binding.js",
     "test:contract:fixture:issuer-endpoint": "npm run test:contract:issuer-endpoint -- test-contract/issuer-endpoint/bindings/fixture-issuer-endpoint-binding.js",
@@ -65,7 +75,9 @@
     "test:contract:issuer-core": "node test-contract/run-contract-target.js",
     "test:contract:issuer-browser-origin": "node test-contract/run-contract-target.js",
     "test:contract:reference:issuer-browser-origin": "npm run test:contract:issuer-browser-origin -- test-contract/issuer-browser-origin/bindings/reference-issuer-browser-origin-binding.js",
-    "claim:evidence": "node test-tools/run-claim-index.js"
+    "claim:evidence": "node test-tools/run-claim-index.js",
+    "test:contract:html-writer": "node test-contract/run-contract-target.js",
+    "test:contract:reference:html-writer": "npm run test:contract:html-writer -- test-contract/html-writer/bindings/reference-html-writer-binding.js"
   },
   "devDependencies": {
     "@eslint/js": "10.0.1",

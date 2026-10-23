@@ -17,8 +17,10 @@ import { keyByIssuer, PeriodKeyCache } from "../../../adapter-client/PeriodKeyCa
 import { base64urlDecode, base64urlEncode, utf8Encode } from "../../../core-shared/codec.js";
 import { encrypt } from "../../../core-shared/aead.js";
 import { contentAadOctets } from "../../../test-reference/support/contentAadOctets.js";
+import { contentKeyWrapNonceOctets } from "../../../test-reference/support/contentKeyWrapNonceOctets.js";
 import { ChainKeyCache } from "../core-client/ChainKeyCache.js";
 import { explicitChainKeyClientProfile } from "../referenceProfile.js";
+import { contentRecordOf } from "../../../test-lib/helpers/inspect.js";
 
 const PUB = "https://publisher.example";
 const GROUP = "premium";
@@ -27,6 +29,9 @@ const PERIOD_KEY_ONLY = "period_key_only_example";
 const GEOMETRY = Object.freeze({ chainsPerDay: 2, periodMinutes: 15 });
 const TERMINAL_T = "251023T2345";
 const TARGET_T = "251023T1415";
+const RENDER_ID = "AAAAAAAAAAAAAAAAAAAAAA";
+// The render `periodOnly` stands for: a later publish of the same items.
+const LATER_RENDER_ID = "AQEBAQEBAQEBAQEBAQEBAQ";
 
 const VECTORS = JSON.parse(
   readFileSync(new URL("./fixtures/dca-profile-chain-keys.vectors.json", import.meta.url), "utf8"),
@@ -45,49 +50,56 @@ function compactJwt(payload) {
  * two issuers: one carrying only the chain route and one carrying only the
  * period-key route.
  *
- * @param {{ nonce: string, key: string }} wrap
+ * @param {{ key: string }} wrap
  */
 function page(wrap) {
   return {
     version: "1",
-    resource: { origin: PUB, resourceId: "123456", renderId: "AAAAAAAAAAAAAAAAAAAAAA" },
+    resource: { origin: PUB, resourceId: "123456", renderId: RENDER_ID },
     resourceJWT: compactJwt({
       origin: PUB,
       resourceId: "123456",
-      renderId: "AAAAAAAAAAAAAAAAAAAAAA",
+      renderId: RENDER_ID,
     }),
     periodGeometry: GEOMETRY,
-    issuerData: {
-      [CHAIN_ONLY]: {
+    issuerData: [
+      {
+        issuerName: CHAIN_ONLY,
         keyId: "k1",
         unlockUrl: "https://chain.example/unlock",
-        sealed: { chainKeys: { [GROUP]: { [TERMINAL_T]: "AAAA" } } },
+        sealed: { chainKeys: [{ accessGroup: GROUP, cutoff: TERMINAL_T, key: "AAAA" }] },
       },
-      [PERIOD_KEY_ONLY]: {
+      {
+        issuerName: PERIOD_KEY_ONLY,
         keyId: "k2",
         unlockUrl: "https://period-keys.example/unlock",
-        sealed: { periodKeys: { [GROUP]: { [TARGET_T]: "AAAA" } } },
+        sealed: { periodKeys: [{ accessGroup: GROUP, period: TARGET_T, key: "AAAA" }] },
       },
-    },
-    contentData: {
-      bodytext: {
+    ],
+    contentData: [
+      {
+        contentName: "bodytext",
         contentType: "text/html",
         nonce: "n",
-        keys: { [GROUP]: [{ t: TARGET_T, ...wrap }] },
+        keys: [{ accessGroup: GROUP, period: TARGET_T, ...wrap }],
       },
-    },
+    ],
   };
 }
 
 /** The content key this render's one cached wrap opens to, under the period key the chain derives. */
 async function wrappedUnderTheDerivedPeriodKey() {
   const contentKey = new Uint8Array(16).fill(7);
-  const nonce = new Uint8Array(12).fill(4);
+  const nonce = contentKeyWrapNonceOctets({
+    renderId: RENDER_ID,
+    contentName: "bodytext",
+    accessGroup: GROUP,
+    t: TARGET_T,
+  });
   const periodKey = base64urlDecode(C1.periodKey);
   return {
     contentKey,
     wrap: {
-      nonce: base64urlEncode(nonce),
       key: base64urlEncode(await encrypt(periodKey, nonce, contentKey)),
     },
   };
@@ -136,45 +148,56 @@ test("a chain-only issuer opens its own retained grant under an issuer-keyed cha
   );
 });
 
-test("the period-key route ignores an issuer whose only sealed map is the chain route", () => {
-  const data = new DcaData(page({ nonce: "AAAA", key: "AAAA" }), { publisherOrigin: PUB });
+test("the period-key route ignores an issuer whose only sealed collection is the chain route", () => {
+  const data = new DcaData(page({ key: "AAAA" }), { publisherOrigin: PUB });
   assert.deepEqual(data.issuerNamesFor(GROUP), [PERIOD_KEY_ONLY]);
   assert.deepEqual(data.chainIssuerNamesFor(GROUP), [CHAIN_ONLY]);
 });
 
 /** Real wraps and item keys for independently named items/coordinates. Each
  * render's publisher seals the content under its own token, so `assertOpens`
- * encrypts the item for the delivery it opens.
+ * encrypts the item for the delivery it opens. Wrap nonces bind the render ID,
+ * so the later render `periodOnly` builds carries its own wraps of the same keys.
  * @param {{name: string, t: string, periodKey: Uint8Array}[]} items
  */
 async function protectedItems(items) {
-  const delivery = page({ nonce: "AAAA", key: "AAAA" });
-  /** @type {Record<string, any>} */
-  const contentData = {};
+  const delivery = page({ key: "AAAA" });
   /** @type {Record<string, {key: Uint8Array, nonce: Uint8Array, plaintext: Uint8Array}>} */
   const expected = {};
-  for (const [index, item] of items.entries()) {
-    const key = new Uint8Array(16).fill(index + 20);
-    const nonce = new Uint8Array(12).fill(index + 1);
-    const wrapNonce = new Uint8Array(12).fill(index + 11);
-    const plaintext = utf8Encode(`content:${item.name}`);
-    contentData[item.name] = {
-      contentType: "text/plain",
-      nonce: base64urlEncode(nonce),
-      keys: {
-        [GROUP]: [
+  /** @param {string} renderId */
+  const contentDataFor = async (renderId) => {
+    /** @type {any[]} */
+    const contentData = [];
+    for (const [index, item] of items.entries()) {
+      const key = new Uint8Array(16).fill(index + 20);
+      const nonce = new Uint8Array(12).fill(index + 1);
+      const wrapNonce = contentKeyWrapNonceOctets({
+        renderId,
+        contentName: item.name,
+        accessGroup: GROUP,
+        t: item.t,
+      });
+      const plaintext = utf8Encode(`content:${item.name}`);
+      contentData.push({
+        contentName: item.name,
+        contentType: "text/plain",
+        nonce: base64urlEncode(nonce),
+        keys: [
           {
-            t: item.t,
-            nonce: base64urlEncode(wrapNonce),
+            accessGroup: GROUP,
+            period: item.t,
             key: base64urlEncode(await encrypt(item.periodKey, wrapNonce, key)),
           },
         ],
-      },
-    };
-    expected[item.name] = { key, nonce, plaintext };
-  }
-  delivery.contentData = /** @type {typeof delivery.contentData} */ (contentData);
-  return { delivery, expected };
+      });
+      expected[item.name] = { key, nonce, plaintext };
+    }
+    return contentData;
+  };
+  delivery.contentData = /** @type {typeof delivery.contentData} */ (
+    await contentDataFor(RENDER_ID)
+  );
+  return { delivery, expected, laterContentData: await contentDataFor(LATER_RENDER_ID) };
 }
 
 /** @param {ContentKeyResolver} resolver @param {DcaData} data @param {string[]} names
@@ -205,19 +228,21 @@ async function assertOpens(resolver, fixture, data, name, application) {
   assert.deepEqual(bytes, fixture.expected[name].plaintext);
 }
 
-/** @param {any} delivery @param {string} issuerName */
-function periodOnly(delivery, issuerName = CHAIN_ONLY) {
-  const result = structuredClone(delivery);
+/** @param {any} fixture @param {string} issuerName */
+function periodOnly(fixture, issuerName = CHAIN_ONLY) {
+  const result = structuredClone(fixture.delivery);
   delete result.periodGeometry;
-  result.resource.renderId = "AQEBAQEBAQEBAQEBAQEBAQ";
+  result.resource.renderId = LATER_RENDER_ID;
   result.resourceJWT = compactJwt({ ...result.resource });
-  result.issuerData = {
-    [issuerName]: {
+  result.contentData = structuredClone(fixture.laterContentData);
+  result.issuerData = [
+    {
+      issuerName,
       keyId: "k1",
       unlockUrl: "https://chain.example/unlock",
-      sealed: { periodKeys: { [GROUP]: { [TARGET_T]: "AAAA" } } },
+      sealed: { periodKeys: [{ accessGroup: GROUP, period: TARGET_T, key: "AAAA" }] },
     },
-  };
+  ];
   return result;
 }
 
@@ -237,7 +262,7 @@ for (const strategy of ["expand", "retain"]) {
     const data = new DcaData(fixture.delivery, { publisherOrigin: PUB });
     const application = await applyChainResponse(resolver, data, ["bodytext"], {
       periodGeometry: GEOMETRY,
-      keys: { chainKeys: { [GROUP]: { [TERMINAL_T]: C1.rootChainKey } } },
+      keys: { chainKeys: [{ accessGroup: GROUP, cutoff: TERMINAL_T, key: C1.rootChainKey }] },
     });
     await assertOpens(resolver, fixture, data, "bodytext", application);
     if (strategy === "retain") {
@@ -245,7 +270,7 @@ for (const strategy of ["expand", "retain"]) {
       // an ordinary period capability under the optional lazy strategy.
       await assertOpens(resolver, fixture, data, "bodytext");
     }
-    const later = new DcaData(periodOnly(fixture.delivery), { publisherOrigin: PUB });
+    const later = new DcaData(periodOnly(fixture), { publisherOrigin: PUB });
     const subtle = crypto.subtle;
     const derive = subtle.deriveBits;
     let derivations = 0;
@@ -261,7 +286,7 @@ for (const strategy of ["expand", "retain"]) {
     assert.equal(derivations, 0, "ordinary period use does not derive or request chain geometry");
     assert.equal(
       await resolver.contentKeyFor(
-        new DcaData(periodOnly(fixture.delivery, "unrelated"), { publisherOrigin: PUB }),
+        new DcaData(periodOnly(fixture, "unrelated"), { publisherOrigin: PUB }),
         "bodytext",
       ),
       null,
@@ -269,7 +294,7 @@ for (const strategy of ["expand", "retain"]) {
     );
     assert.equal(
       await resolver.contentKeyFor(
-        new DcaData(periodOnly(fixture.delivery), { publisherOrigin: "https://another.example" }),
+        new DcaData(periodOnly(fixture), { publisherOrigin: "https://another.example" }),
         "bodytext",
       ),
       null,
@@ -298,13 +323,13 @@ test("chain-only supplier projection opens through ordinary issuer-partitioned c
   });
   const data = new DcaData(fixture.delivery, { publisherOrigin: PUB });
   const application = await applyChainResponse(resolver, data, ["bodytext"], {
-    keys: { periodKeys: { [GROUP]: { [TARGET_T]: C1.periodKey } } },
+    keys: { periodKeys: [{ accessGroup: GROUP, period: TARGET_T, key: C1.periodKey }] },
   });
   assert.equal(application.accepted, 1);
   await assertOpens(resolver, fixture, data, "bodytext", application);
   assert.equal(
     await resolver.contentKeyFor(
-      new DcaData(periodOnly(fixture.delivery, "unrelated"), { publisherOrigin: PUB }),
+      new DcaData(periodOnly(fixture, "unrelated"), { publisherOrigin: PUB }),
       "bodytext",
     ),
     null,
@@ -315,11 +340,12 @@ test("chain-only supplier projection opens through ordinary issuer-partitioned c
     issuerName: "unrelated",
   });
   const withUnrelated = structuredClone(fixture.delivery);
-  withUnrelated.issuerData.unrelated = {
+  withUnrelated.issuerData.push({
+    issuerName: "unrelated",
     keyId: "other",
     unlockUrl: "https://unrelated.example/unlock",
-    sealed: { periodKeys: { other_group: { [TARGET_T]: "AAAA" } } },
-  };
+    sealed: { periodKeys: [{ accessGroup: "other_group", period: TARGET_T, key: "AAAA" }] },
+  });
   const isolatedResolver = new ContentKeyResolver({
     cache: isolated,
     chainCache: new ChainKeyCache({ keyBy: keyByIssuer }),
@@ -374,11 +400,13 @@ test("blocked chain promotion preserves all concurrent obtaining items even at p
   const application = await applyChainResponse(resolver, data, ["bodytext", "early"], {
     periodGeometry: GEOMETRY,
     keys: {
-      chainKeys: {
-        [GROUP]: {
-          [TERMINAL_T]: base64urlEncode((await generation.chainCapability(GROUP, TERMINAL_T)).key),
+      chainKeys: [
+        {
+          accessGroup: GROUP,
+          cutoff: TERMINAL_T,
+          key: base64urlEncode((await generation.chainCapability(GROUP, TERMINAL_T)).key),
         },
-      },
+      ],
     },
   });
   const first = assertOpens(resolver, fixture, data, "bodytext", application);
@@ -397,7 +425,7 @@ test("blocked chain promotion preserves all concurrent obtaining items even at p
   assert.equal(chainCache.entries().filter((entry) => entry.kind === "period-key").length, 1);
   assert.equal(
     await resolver.contentKeyFor(
-      new DcaData(periodOnly(fixture.delivery), { publisherOrigin: PUB }),
+      new DcaData(periodOnly(fixture), { publisherOrigin: PUB }),
       "early",
     ),
     null,
@@ -427,7 +455,7 @@ test("expanded generation rivals authenticate the matching period-only render", 
     chainCache,
     chainKeyProfile: explicitChainKeyClientProfile,
   });
-  const later = new DcaData(periodOnly(fixture.delivery), { publisherOrigin: PUB });
+  const later = new DcaData(periodOnly(fixture), { publisherOrigin: PUB });
   await assertOpens(resolver, fixture, later, "bodytext");
   assert.equal(
     (
@@ -445,10 +473,10 @@ test("ordinary and locally derived views share one finite trial budget", async (
   const fixture = await protectedItems([
     { name: "bodytext", t: TARGET_T, periodKey: base64urlDecode(C1.periodKey) },
   ]);
-  const record = fixture.delivery.contentData.bodytext;
-  const original = record.keys[GROUP][0];
+  const record = contentRecordOf(fixture.delivery, "bodytext");
+  const original = record.keys[0];
   // Every entry is structurally usable but deliberately cannot authenticate.
-  record.keys[GROUP] = Array.from({ length: 30 }, () => ({
+  record.keys = Array.from({ length: 30 }, () => ({
     ...original,
     key: base64urlEncode(new Uint8Array(32)),
   }));
@@ -512,7 +540,7 @@ test("retained chain cannot derive under an unrelated geometry or beyond its cut
     "a positioned chain cannot be walked as another geometry",
   );
   const beyond = structuredClone(fixture.delivery);
-  beyond.contentData.bodytext.keys[GROUP][0].t = "251024T0000";
+  contentRecordOf(beyond, "bodytext").keys[0].period = "251024T0000";
   assert.equal(
     await resolver.contentKeyFor(new DcaData(beyond, { publisherOrigin: PUB }), "bodytext"),
     null,
@@ -547,7 +575,7 @@ test("composed ordinary pool tries newly filed derived key ahead of four older b
     chainCache,
     chainKeyProfile: explicitChainKeyClientProfile,
   });
-  const data = new DcaData(periodOnly(fixture.delivery), { publisherOrigin: PUB });
+  const data = new DcaData(periodOnly(fixture), { publisherOrigin: PUB });
   const subtle = crypto.subtle;
   const decrypt = subtle.decrypt;
   let trials = 0;
@@ -580,7 +608,7 @@ test("composed ordinary pool tries newly filed derived key ahead of four older b
   assert.equal(trials, 2, "newest filing is compared across views, not fixed view order");
 
   const wrong = structuredClone(fixture.delivery);
-  wrong.contentData.bodytext.keys[GROUP][0].key = base64urlEncode(new Uint8Array(32));
+  contentRecordOf(wrong, "bodytext").keys[0].key = base64urlEncode(new Uint8Array(32));
   trials = 0;
   subtle.decrypt = async (...args) => {
     trials++;
@@ -625,7 +653,7 @@ test("obtaining response's private period key leads newer retained derived rival
   });
   const data = new DcaData(fixture.delivery, { publisherOrigin: PUB });
   const application = await applyChainResponse(resolver, data, ["bodytext"], {
-    keys: { periodKeys: { [GROUP]: { [TARGET_T]: C1.periodKey } } },
+    keys: { periodKeys: [{ accessGroup: GROUP, period: TARGET_T, key: C1.periodKey }] },
   });
   const subtle = crypto.subtle;
   const decrypt = subtle.decrypt;
@@ -658,7 +686,7 @@ test("legacy ordinary cache works alone; two views require metadata before any r
       return [base64urlDecode(C1.periodKey)];
     },
   };
-  const data = new DcaData(periodOnly(fixture.delivery), { publisherOrigin: PUB });
+  const data = new DcaData(periodOnly(fixture), { publisherOrigin: PUB });
   await assertOpens(new ContentKeyResolver({ cache: legacy }), fixture, data, "bodytext");
   reads = 0;
   const chainCache = new ChainKeyCache({ strategy: "expand" });

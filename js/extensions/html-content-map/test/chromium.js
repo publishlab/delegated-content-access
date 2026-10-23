@@ -316,9 +316,13 @@ export async function openOracle({ transport } = {}) {
             globalThis.document.querySelectorAll("iframe")[index]
           );
           const locked = /** @type {Document} */ (frame.contentDocument);
-          const contentData = JSON.parse(
-            locked.querySelector(".dca-data")?.textContent ?? "{}",
-          ).contentData;
+          // The item records, by the contentName each carries; the last
+          // record under a name wins, as a reader resolves it.
+          const contentData = Object.fromEntries(
+            (
+              JSON.parse(locked.querySelector(".dca-data")?.textContent ?? "{}").contentData ?? []
+            ).map((/** @type {any} */ record) => [record.contentName, record]),
+          );
           const targets = contentMap.rules.map((/** @type {any} */ rule) =>
             Array.from(locked.querySelectorAll(rule.target)),
           );
@@ -472,7 +476,7 @@ export async function openOracle({ transport } = {}) {
             reader: { extract: () => "QUJD" },
             resolver: {
               resolveDetailed: async () => ({ missing: [] }),
-              contentKeyWithOriginFor: async () => ({ key: new Uint8Array(16) }),
+              resolveAuthenticated: async () => ({ covered: [], missing: [], origins: [] }),
             },
             opener: {
               open: async () =>

@@ -131,7 +131,8 @@ A reader can open ciphertext only when it is still available and falls within
 the key's coordinate authority. Cache eviction can reduce what remains
 conveniently obtainable; it does not narrow the cryptographic capability.
 
-Random 96-bit nonces make repeat wrapping under one period key safe only within
+Derived 96-bit wrap nonces, built from a fresh render ID and the wrap's
+coordinate, make repeat wrapping under one period key safe only within
 the selected profile's aggregate invocation bound. The count spans all
 publishers, nodes, restarts, replacements, and backfill jobs that reuse those
 key bytes. A key supplier must coordinate that bound or rotate the family

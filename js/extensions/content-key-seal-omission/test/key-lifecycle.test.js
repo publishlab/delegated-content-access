@@ -58,6 +58,19 @@ async function activeRender(options = {}) {
 }
 
 /**
+ * The record a result names for one coordinate: a content key by
+ * `contentName`, an error by `coordinate`.
+ *
+ * @param {any[]} records
+ * @param {string} member
+ * @param {string} name
+ * @returns {any}
+ */
+function recordAt(records, member, name) {
+  return records.find((record) => record[member] === name);
+}
+
+/**
  * The same registration, over a key store that answers one fixed way for this
  * issuer's keyId. `undefined` is a keyId never held; `{ retired: true }` is one
  * held and let go.
@@ -175,8 +188,8 @@ test("an authorized bound request reaches each guarded decision and key stage on
 
   const result = await engine.unlock(request, observedRegistration);
 
-  assert.equal(typeof result.contentKeys.bodytext, "string");
-  assert.deepEqual(result.errors, {});
+  assert.equal(typeof recordAt(result.contentKeys, "contentName", "bodytext")?.key, "string");
+  assert.deepEqual(result.errors, []);
   assert.deepEqual(calls, { policy: 1, openingStore: 1, periodKeyView: 1, periodKeyMaterial: 1 });
 });
 
@@ -205,7 +218,12 @@ test("one selected period key is asked once when two granted items share a coord
 
   const result = await engine.unlock(request, registration);
 
-  assert.deepEqual(Object.keys(result.contentKeys), ["bodytext", "note"]);
+  // One content key per item: record order carries no meaning, so the names
+  // are compared sorted.
+  assert.deepEqual(
+    result.contentKeys.map((/** @type {any} */ record) => record.contentName).sort(),
+    ["bodytext", "note"],
+  );
   assert.deepEqual(
     selected,
     [registration],
@@ -242,13 +260,14 @@ test("a retired keyId answers the bound item as one per-item failure beside a 20
   // Every granted coordinate answers the rollover, and it answers it in one
   // wording: the key this render was sealed to is gone, which is what the
   // client's next render will fix.
-  assert.deepEqual(result.contentKeys, {});
-  assert.deepEqual(result.errors, {
-    bodytext: {
+  assert.deepEqual(result.contentKeys, []);
+  assert.deepEqual(result.errors, [
+    {
+      coordinate: "bodytext",
       error: "key_retired",
       message: 'keyId "2025-10" is retired and this issuer no longer holds it',
     },
-  });
+  ]);
 });
 
 test("a retired keyId asks no injected period-key source for material", async () => {
@@ -276,8 +295,8 @@ test("a retired keyId asks no injected period-key source for material", async ()
   // item. A retired keyId ends this issuer's reach into the render, so the
   // view is never asked for one.
   assert.deepEqual(asked, []);
-  assert.deepEqual(result.contentKeys, {});
-  assert.equal(result.errors.bodytext.error, "key_retired");
+  assert.deepEqual(result.contentKeys, []);
+  assert.equal(recordAt(result.errors, "coordinate", "bodytext")?.error, "key_retired");
 });
 
 test("a retired keyId selects neither a source scope nor source material", async () => {
@@ -293,7 +312,7 @@ test("a retired keyId selects neither a source scope nor source material", async
 
   const result = await engine.unlock(request, observedRegistration);
 
-  assert.deepEqual(result.contentKeys, {});
-  assert.equal(result.errors.bodytext.error, "key_retired");
+  assert.deepEqual(result.contentKeys, []);
+  assert.equal(recordAt(result.errors, "coordinate", "bodytext")?.error, "key_retired");
   assert.deepEqual(calls, { policy: 1, openingStore: 1, periodKeyView: 0, periodKeyMaterial: 0 });
 });

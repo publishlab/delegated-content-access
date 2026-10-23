@@ -1,7 +1,7 @@
 import { isAccessGroup, isContentName } from "../../../core-shared/names.js";
 import { binaryStringBytes } from "../../../core-shared/binaryStrings.js";
 import { dcaError } from "../../../core-shared/errors.js";
-import { own } from "../../../core-shared/wire.js";
+import { own, setOwn } from "../../../core-shared/wire.js";
 import { CONTRACT, record, settleLimits } from "../core-shared/construction.js";
 
 // Content-name request members.
@@ -18,11 +18,11 @@ export const NARROWING = Object.freeze([
 export const REQUEST_MEMBERS = Object.freeze([
   WIRE.requestedContentGroups,
   WIRE.requestedContentKeys,
-  "requestedChainCutoffs",
+  WIRE.requestedChainCutoffs,
   "renderPeriod",
   "periodGeometry",
 ]);
-/** The `sealed` member this extension adds beside the base route maps. */
+/** The `sealed` member this extension adds beside the base sealed collections. */
 export const SEALED_MEMBERS = Object.freeze([WIRE.sealedSeeds]);
 
 /** @param {string} why @returns {never} */
@@ -106,12 +106,54 @@ function overBound(why) {
 /**
  * @typedef {object} ContentGroupRequestView
  * @property {Readonly<Record<string, {groups: readonly string[], windows: readonly string[]}>>} contentGroups
- * @property {Readonly<Record<string, {group: string, connector: string}>>} contentKeys
- * @property {Readonly<Record<string, string>>|undefined} cutoffs
- * @property {Readonly<Record<string, Readonly<Record<string, string>>>>} seeds
+ *   - per content name, the union of its requested groups and its seeded windows
+ * @property {Readonly<Record<string, readonly {group: string, connector: string}[]>>} contentKeys
+ *   - per content name, every distinct item-route alternative
+ * @property {Readonly<Record<string, readonly string[]>>|undefined} cutoffs - per window start,
+ *   every distinct requested cutoff label; the caller admits all of them, then takes the lowest
+ * @property {Readonly<Record<string, Readonly<Record<string, readonly string[]>>>>} seeds - per
+ *   content name and window start, every distinct seed envelope
  * @property {string} renderPeriod
  * @property {unknown} periodGeometry
  */
+
+/**
+ * Whether `value` is a record with exactly the named members.
+ * @param {unknown} value @param {readonly string[]} members
+ * @returns {value is Record<string, unknown>}
+ */
+function exactly(value, members) {
+  return (
+    record(value) &&
+    Object.keys(value).length === members.length &&
+    members.every((name) => Object.hasOwn(value, name))
+  );
+}
+
+/**
+ * Extensible request records still carry every required member as an own field.
+ * @param {unknown} value @param {readonly string[]} members
+ * @returns {value is Record<string, unknown>}
+ */
+function requiredOwn(value, members) {
+  return record(value) && members.every((name) => Object.hasOwn(value, name));
+}
+
+/**
+ * Count raw records per content name, before any record is checked or merged.
+ * A record without a string `contentName` counts under no name; the shape
+ * check refuses it later.
+ * @param {readonly unknown[]} records @param {(record: unknown) => number} weight
+ */
+function rawPerName(records, weight = () => 1) {
+  /** @type {Map<string, number>} */
+  const counts = new Map();
+  for (const entry of records) {
+    const name = own(entry, "contentName");
+    if (typeof name === "string") counts.set(name, (counts.get(name) ?? 0) + weight(entry));
+  }
+  return counts;
+}
 
 /**
  * Read one request's content-group members, raw and bounded, the same way on
@@ -121,6 +163,13 @@ function overBound(why) {
  * admit with its chain port; this reader settles only shapes and names.
  * Settled refusals: an empty requested group list, a group or item without a
  * seed, a seed for a name nothing requests, and a request selecting nothing.
+ *
+ * Each member is an array of records. Raw records count against the bounds
+ * before they merge: repeated `requestedContentGroups` records of one name
+ * union their groups; `requestedContentKeys` records are item-route
+ * alternatives, each `{group, connector}` pair kept; seed records at one
+ * window are candidates; every cutoff label of a window is kept, and the
+ * caller admits each before it takes the lowest. Identical copies merge.
  * @param {unknown} request
  * @param {Record<string, number>} [inputLimits]
  * @returns {Readonly<ContentGroupRequestView>|null}
@@ -131,78 +180,109 @@ export function readContentGroupRequest(request, inputLimits) {
   const keysIn = own(request, WIRE.requestedContentKeys);
   const seedsIn = own(own(request, "sealed"), WIRE.sealedSeeds);
   if (groupsIn === undefined && keysIn === undefined && seedsIn === undefined) return null;
-  for (const [label, map] of /** @type {const} */ ([
-    ["requestedContentGroups", groupsIn ?? {}],
-    ["requestedContentKeys", keysIn ?? {}],
-    ["contentWindowSeeds", seedsIn],
+  const cutoffsIn = own(request, WIRE.requestedChainCutoffs);
+  for (const [label, list, max] of /** @type {const} */ ([
+    [WIRE.requestedContentGroups, groupsIn === undefined ? [] : groupsIn, limits.maxItems],
+    [WIRE.requestedContentKeys, keysIn === undefined ? [] : keysIn, limits.maxItems],
+    [WIRE.sealedSeeds, seedsIn, limits.maxItems * limits.maxSeedWindows],
+    [
+      WIRE.requestedChainCutoffs,
+      cutoffsIn === undefined ? [] : cutoffsIn,
+      limits.maxSeedWindows * limits.maxItems,
+    ],
   ])) {
-    if (!record(map)) malformed(`${label} is a map`);
-    if (Object.keys(map).length > limits.maxItems) overBound(`${label} names over maxItems`);
+    if (!Array.isArray(list)) malformed(`${label} is an array of records`);
+    if (list.length > max) overBound(`${label} carries over its bound of records`);
   }
-  const groupsMap = /** @type {Record<string, unknown>} */ (groupsIn ?? {});
-  const keysMap = /** @type {Record<string, unknown>} */ (keysIn ?? {});
-  const seedsMap = /** @type {Record<string, unknown>} */ (seedsIn);
-  for (const list of Object.values(groupsMap))
-    if (Array.isArray(list) && list.length > limits.maxGroups)
-      overBound("group list over maxGroups");
-  for (const windows of Object.values(seedsMap))
-    if (record(windows) && Object.keys(windows).length > limits.maxSeedWindows)
-      overBound("seed windows over maxSeedWindows");
-  const cutoffsIn = own(request, "requestedChainCutoffs");
-  if (cutoffsIn !== undefined) {
-    if (!record(cutoffsIn)) malformed("requestedChainCutoffs is a map");
-    if (Object.keys(cutoffsIn).length > limits.maxSeedWindows * limits.maxItems)
-      overBound("requestedChainCutoffs over its bound");
-  }
+  const groupRecords = /** @type {unknown[]} */ (groupsIn === undefined ? [] : groupsIn);
+  const keyRecords = /** @type {unknown[]} */ (keysIn === undefined ? [] : keysIn);
+  const seedRecords = /** @type {unknown[]} */ (seedsIn);
+  const cutoffRecords = /** @type {unknown[]|undefined} */ (cutoffsIn);
+  for (const count of rawPerName(groupRecords, (entry) => {
+    const list = own(entry, "groups");
+    return Array.isArray(list) ? list.length : 0;
+  }).values())
+    if (count > limits.maxGroups) overBound("requested groups over maxGroups");
+  const seedCounts = rawPerName(seedRecords);
+  if (seedCounts.size > limits.maxItems) overBound("seeded content names over maxItems");
+  for (const count of seedCounts.values())
+    if (count > limits.maxSeedWindows) overBound("seed records over maxSeedWindows");
 
-  /** @type {Record<string, {groups: readonly string[], windows: readonly string[]}>} */
-  const contentGroups = {};
-  /** @type {Record<string, {group: string, connector: string}>} */
-  const contentKeys = {};
-  /** @type {Record<string, Readonly<Record<string, string>>>} */
+  /** @type {Record<string, Record<string, string[]>>} */
   const seeds = {};
-  for (const [name, windows] of Object.entries(seedsMap)) {
-    if (!isContentName(name) || !record(windows) || Object.keys(windows).length === 0)
-      malformed("each seeded content name carries at least one window");
-    for (const [label, envelope] of Object.entries(windows))
-      if (label.length === 0 || typeof envelope !== "string") malformed("seed envelope");
-    seeds[name] = Object.freeze({ .../** @type {Record<string, string>} */ (windows) });
+  for (const entry of seedRecords) {
+    if (
+      !requiredOwn(entry, ["contentName", "windowStart", "key"]) ||
+      !isContentName(entry.contentName) ||
+      typeof entry.windowStart !== "string" ||
+      entry.windowStart.length === 0 ||
+      typeof entry.key !== "string"
+    )
+      malformed("a seed is {contentName, windowStart, key}");
+    const name = /** @type {string} */ (entry.contentName);
+    if (!Object.hasOwn(seeds, name)) setOwn(seeds, name, {});
+    const windows = own(seeds, name);
+    if (!Object.hasOwn(windows, entry.windowStart)) setOwn(windows, entry.windowStart, []);
+    const envelopes = own(windows, entry.windowStart);
+    if (!envelopes.includes(entry.key)) envelopes.push(entry.key);
   }
   /** @param {string} name */
   const windowsOf = (name) => {
     if (!Object.hasOwn(seeds, name)) malformed(`${name} is requested without a seed`);
-    return Object.freeze(Object.keys(seeds[name]));
+    return Object.freeze(Object.keys(own(seeds, name)));
   };
-  for (const [name, list] of Object.entries(groupsMap)) {
+
+  /** @type {Record<string, string[]>} */
+  const groupSets = {};
+  for (const entry of groupRecords) {
     if (
-      !isContentName(name) ||
-      !Array.isArray(list) ||
-      list.length === 0 ||
-      new Set(list).size !== list.length ||
-      !list.every((group) => typeof group === "string" && isAccessGroup(group))
+      !requiredOwn(entry, ["contentName", "groups"]) ||
+      !isContentName(entry.contentName) ||
+      !Array.isArray(entry.groups) ||
+      entry.groups.length === 0 ||
+      new Set(entry.groups).size !== entry.groups.length ||
+      !entry.groups.every((group) => typeof group === "string" && isAccessGroup(group))
     )
-      malformed("requested groups are a nonempty list of unique group names");
-    contentGroups[name] = Object.freeze({
-      groups: Object.freeze([.../** @type {string[]} */ (list)]),
-      windows: windowsOf(name),
-    });
+      malformed("requested groups are {contentName, groups} with a nonempty list of unique names");
+    const name = /** @type {string} */ (entry.contentName);
+    if (!Object.hasOwn(groupSets, name)) setOwn(groupSets, name, []);
+    const union = own(groupSets, name);
+    for (const group of entry.groups) if (!union.includes(group)) union.push(group);
   }
-  for (const [name, entry] of Object.entries(keysMap)) {
+  /** @type {Record<string, {groups: readonly string[], windows: readonly string[]}>} */
+  const contentGroups = {};
+  for (const [name, groups] of Object.entries(groupSets))
+    setOwn(
+      contentGroups,
+      name,
+      Object.freeze({ groups: Object.freeze(groups), windows: windowsOf(name) }),
+    );
+
+  /** @type {Record<string, {group: string, connector: string}[]>} */
+  const contentKeys = {};
+  for (const entry of keyRecords) {
     if (
-      !isContentName(name) ||
-      !record(entry) ||
-      Object.keys(entry).sort().join(",") !== "connector,group" ||
+      !exactly(entry, ["contentName", "group", "connector"]) ||
+      !isContentName(entry.contentName) ||
       typeof entry.group !== "string" ||
       !isAccessGroup(entry.group) ||
       binaryStringBytes(entry.connector)?.length !== 16
     )
-      malformed("a requested content key is {group, connector16}");
+      malformed("a requested content key is {contentName, group, connector16}");
+    const name = /** @type {string} */ (entry.contentName);
     windowsOf(name);
-    contentKeys[name] = Object.freeze({
-      group: /** @type {string} */ (entry.group),
-      connector: /** @type {string} */ (entry.connector),
-    });
+    if (!Object.hasOwn(contentKeys, name)) setOwn(contentKeys, name, []);
+    const routes = own(contentKeys, name);
+    const route = { group: entry.group, connector: /** @type {string} */ (entry.connector) };
+    if (
+      !routes.some(
+        (/** @type {any} */ r) => r.group === route.group && r.connector === route.connector,
+      )
+    )
+      routes.push(Object.freeze(route));
   }
+  for (const routes of Object.values(contentKeys)) Object.freeze(routes);
+
   for (const name of Object.keys(seeds))
     if (!Object.hasOwn(contentGroups, name) && !Object.hasOwn(contentKeys, name))
       malformed(`${name} carries a seed nothing requests`);
@@ -212,18 +292,36 @@ export function readContentGroupRequest(request, inputLimits) {
   const periodGeometry = own(request, "periodGeometry");
   if (typeof renderPeriod !== "string" || !record(periodGeometry))
     malformed("renderPeriod and periodGeometry are required");
-  /** @type {Record<string, string>|undefined} */
+  /** @type {Record<string, string[]>|undefined} */
   let cutoffs;
-  if (cutoffsIn !== undefined) {
-    const entries = Object.entries(/** @type {Record<string, unknown>} */ (cutoffsIn));
-    if (entries.some(([, label]) => typeof label !== "string"))
-      malformed("requestedChainCutoffs maps a window start to one cutoff label");
-    cutoffs = Object.freeze(/** @type {Record<string, string>} */ (Object.fromEntries(entries)));
+  const suppliedWindows = new Set(Object.values(seeds).flatMap((windows) => Object.keys(windows)));
+  if (cutoffRecords !== undefined) {
+    cutoffs = {};
+    for (const entry of cutoffRecords) {
+      if (
+        !requiredOwn(entry, ["windowStart", "cutoff"]) ||
+        typeof entry.windowStart !== "string" ||
+        typeof entry.cutoff !== "string"
+      )
+        malformed("a requested chain cutoff is {windowStart, cutoff}");
+      if (!suppliedWindows.has(entry.windowStart))
+        malformed("a requested chain cutoff names no supplied seed window");
+      const held = /** @type {Record<string, string[]>} */ (cutoffs);
+      if (!Object.hasOwn(held, entry.windowStart)) setOwn(held, entry.windowStart, []);
+      const labels = own(held, entry.windowStart);
+      if (!labels.includes(entry.cutoff)) labels.push(entry.cutoff);
+    }
+    for (const labels of Object.values(/** @type {Record<string, string[]>} */ (cutoffs)))
+      Object.freeze(labels);
+  }
+  for (const windows of Object.values(seeds)) {
+    for (const envelopes of Object.values(windows)) Object.freeze(envelopes);
+    Object.freeze(windows);
   }
   return Object.freeze({
     contentGroups: Object.freeze(contentGroups),
     contentKeys: Object.freeze(contentKeys),
-    cutoffs,
+    cutoffs: cutoffs === undefined ? undefined : Object.freeze(cutoffs),
     seeds: Object.freeze(seeds),
     renderPeriod,
     periodGeometry,
@@ -231,31 +329,71 @@ export function readContentGroupRequest(request, inputLimits) {
 }
 
 /**
+ * Wire records. Each record names its coordinates; array position carries
+ * none. The type parameter is the transported key value: a string for direct
+ * delivery, or the selected transport's protected value. These declarations
+ * describe structure; they do not validate incoming JSON or distinguish
+ * content names, groups and labels that are all represented as strings.
+ * A section holds the records the issuer returned, not every requested
+ * coordinate: a lookup can find nothing.
+ *
+ * @template Key
+ * @typedef {{ contentName: string, group: string, cutoff: string, key: Key }} ContentGroupChainKey
+ */
+/** @template Key @typedef {{ contentName: string, group: string, period: string, key: Key }} ContentGroupPeriodKey */
+/** @template Key @typedef {{ contentName: string, key: Key }} ContentGroupContentKey */
+/** @template Key @typedef {ContentGroupChainKey<Key>[]} ContentGroupChainKeys */
+/** @template Key @typedef {ContentGroupPeriodKey<Key>[]} ContentGroupPeriodKeys */
+/** @template Key @typedef {ContentGroupContentKey<Key>[]} ContentGroupContentKeys */
+/** @typedef {{ error: 'key_retired' }} ContentGroupRetirement */
+/**
+ * Error records carry their key kind's coordinate fields and the fixed
+ * retirement error, never a `key`.
+ *
+ * @typedef {object} ContentGroupResponseErrors
+ * @property {({ contentName: string, group: string, cutoff: string, key?: never } & ContentGroupRetirement)[]} [chainKeys]
+ * @property {({ contentName: string, group: string, period: string, key?: never } & ContentGroupRetirement)[]} [periodKeys]
+ * @property {({ contentName: string, key?: never } & ContentGroupRetirement)[]} [contentKeys]
+ */
+/**
+ * The `contentGroupKeys` member, excluding the ordinary sibling `keys`.
+ * Absent subsections are omitted. Use only after the appropriate admission
+ * checks when reading untrusted input; a type annotation is not admission.
+ *
+ * @template Key
+ * @typedef {object} ContentGroupResponse
+ * @property {ContentGroupChainKeys<Key>} [chainKeys]
+ * @property {ContentGroupPeriodKeys<Key>} [periodKeys]
+ * @property {ContentGroupContentKeys<Key>} [contentKeys]
+ * @property {ContentGroupResponseErrors} [errors]
+ */
+
+/**
  * The three response sections of the content-groups answer, as trusted
  * composition hands them to the response walk and to client-bound wrapping:
- * `contentGroups.chainKeys.<name>.<group>.<cutoff> = key`,
- * `contentGroups.periodKeys.<name>.<group>.<period> = key` and
- * `contentGroups.contentKeys.<name> = key`. Recovered item keys keep the
- * ordinary `contentKey` kind and its AES handle. Each section reports a
- * retired opening key at the same coordinate under `contentGroups.errors`,
- * with the fixed leaf `{error: "key_retired"}`.
+ * `contentGroupKeys.chainKeys = [{contentName, group, cutoff, key}]`,
+ * `contentGroupKeys.periodKeys = [{contentName, group, period, key}]` and
+ * `contentGroupKeys.contentKeys = [{contentName, key}]`. Recovered item keys
+ * keep the ordinary `contentKey` kind and its AES handle. Each section
+ * reports a retired opening key under `contentGroupKeys.errors` with a record of
+ * the same coordinate fields and `error: "key_retired"`.
  */
 export const RESPONSE_SECTIONS = Object.freeze([
   Object.freeze({
     path: Object.freeze([WIRE.response, WIRE.chainKeys]),
-    depth: 3,
+    fields: Object.freeze(["contentName", "group", "cutoff"]),
     keyKind: CONTRACT.keyKinds.chainKey,
     errorPath: Object.freeze([WIRE.response, WIRE.errors, WIRE.chainKeys]),
   }),
   Object.freeze({
     path: Object.freeze([WIRE.response, WIRE.periodKeys]),
-    depth: 3,
+    fields: Object.freeze(["contentName", "group", "period"]),
     keyKind: CONTRACT.keyKinds.periodKey,
     errorPath: Object.freeze([WIRE.response, WIRE.errors, WIRE.periodKeys]),
   }),
   Object.freeze({
     path: Object.freeze([WIRE.response, WIRE.contentKeys]),
-    depth: 1,
+    fields: Object.freeze(["contentName"]),
     keyKind: "contentKey",
     errorPath: Object.freeze([WIRE.response, WIRE.errors, WIRE.contentKeys]),
   }),

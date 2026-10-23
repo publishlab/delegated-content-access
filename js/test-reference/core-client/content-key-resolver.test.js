@@ -30,6 +30,16 @@ import { base64urlEncode, utf8Decode, utf8Encode } from "../../core-shared/codec
 import { decodeCompactJwt } from "../../core-shared/compactJwt.js";
 import { dcaError } from "../../core-shared/errors.js";
 import { Client } from "../../test-lib/harnesses/client.js";
+import { contentRecordOf, issuerBlockOf } from "../../test-lib/helpers/inspect.js";
+import { contentKeyWrapNonceOctets } from "../support/contentKeyWrapNonceOctets.js";
+
+/** The derived wrap nonce at pageData()'s render, bodytext, premium and 251023T1500. */
+const PAGE_WRAP_NONCE = contentKeyWrapNonceOctets({
+  renderId: "AAAAAAAAAAAAAAAAAAAAAA",
+  contentName: "bodytext",
+  accessGroup: "premium",
+  t: "251023T1500",
+});
 
 function compactJwt(payload) {
   const encode = (value) => Buffer.from(JSON.stringify(value)).toString("base64url");
@@ -63,10 +73,15 @@ function pageData() {
       resourceId: "123456",
       renderId: "AAAAAAAAAAAAAAAAAAAAAA",
     }),
-    issuerData: {
-      issuer_example: { keyId: "k1", unlockUrl: "https://issuer.example/unlock", sealed: {} },
-    },
-    contentData: { bodytext: { contentType: "text/html", nonce: "n" } },
+    issuerData: [
+      {
+        issuerName: "issuer_example",
+        keyId: "k1",
+        unlockUrl: "https://issuer.example/unlock",
+        sealed: {},
+      },
+    ],
+    contentData: [{ contentName: "bodytext", contentType: "text/html", nonce: "n" }],
   };
 }
 
@@ -74,7 +89,7 @@ function pageData() {
 function applyResponse(resolver, page, issuerName, response) {
   if (!(page instanceof DcaData)) return resolver.applyResponse(page, issuerName, response);
   const keys = response?.keys;
-  const sealed = { contentKeys: {} };
+  const sealed = { contentKeys: [] };
   if (keys !== null && typeof keys === "object" && !Array.isArray(keys)) {
     for (const section of ["contentKeys", "periodKeys", "chainKeys"]) {
       const value = keys[section];
@@ -136,14 +151,13 @@ describe("one content-key wrap attempt", () => {
   test("ordinary bytes and an opaque period-key handle open the same wrap in their native forms", async () => {
     const periodKey = new Uint8Array(16).fill(3);
     const contentKey = new Uint8Array(16).fill(7);
-    const nonce = new Uint8Array(12).fill(4);
+    const nonce = PAGE_WRAP_NONCE;
     const entry = {
       t: "251023T1500",
-      nonce: base64urlEncode(nonce),
       key: base64urlEncode(await encrypt(periodKey, nonce, contentKey)),
     };
 
-    assert.deepEqual(await attemptContentKeyWrap(entry, periodKey), contentKey);
+    assert.deepEqual(await attemptContentKeyWrap(entry, periodKey, nonce), contentKey);
 
     const periodHandle = await globalThis.crypto.subtle.importKey(
       "raw",
@@ -152,7 +166,7 @@ describe("one content-key wrap attempt", () => {
       false,
       ["unwrapKey"],
     );
-    const opened = await attemptContentKeyWrap(entry, periodHandle);
+    const opened = await attemptContentKeyWrap(entry, periodHandle, nonce);
     assert.ok(
       opened instanceof globalThis.CryptoKey,
       "the opaque path returns a handle, not bytes",
@@ -173,40 +187,32 @@ describe("one content-key wrap attempt", () => {
 
   test("decode and authentication failures miss, while configuration faults stay faults", async () => {
     const periodKey = new Uint8Array(16).fill(3);
-    const nonce = new Uint8Array(12).fill(4);
+    const nonce = PAGE_WRAP_NONCE;
     const wrapped = await encrypt(periodKey, nonce, new Uint8Array(16).fill(7));
     const entry = { nonce: base64urlEncode(nonce), key: base64urlEncode(wrapped) };
 
-    assert.equal(await attemptContentKeyWrap({ ...entry, key: "!!!!" }, periodKey), null);
+    assert.equal(await attemptContentKeyWrap({ ...entry, key: "!!!!" }, periodKey, nonce), null);
     assert.equal(
-      await attemptContentKeyWrap(entry, periodKey, new Uint8Array([1])),
+      await attemptContentKeyWrap(entry, periodKey, nonce, new Uint8Array([1])),
       null,
       "the wrong AAD is an authentication miss",
-    );
-    assert.equal(
-      await attemptContentKeyWrap(
-        { ...entry, nonce: base64urlEncode(new Uint8Array(11)) },
-        periodKey,
-      ),
-      null,
-      "a malformed entry nonce is a pre-crypto miss",
     );
     // A byte candidate of another width is not a key this profile's wrap
     // takes, so it is refused rather than tried and missed: a miss there
     // would read as the wrong key rather than as the wrong profile.
     await assert.rejects(
-      () => attemptContentKeyWrap(entry, new Uint8Array(31)),
+      () => attemptContentKeyWrap(entry, new Uint8Array(31), nonce),
       (/** @type {any} */ error) => error.code === "bad_key",
     );
     await assert.rejects(
-      () => attemptContentKeyWrap(entry, /** @type {any} */ ({})),
+      () => attemptContentKeyWrap(entry, /** @type {any} */ ({}), nonce),
       (/** @type {any} */ error) => error.code === "bad_config",
     );
   });
 
   test("authenticated non-16-byte content-key carriers miss for bytes and handles", async () => {
     const periodKey = new Uint8Array(16).fill(3);
-    const nonce = new Uint8Array(12).fill(4);
+    const nonce = PAGE_WRAP_NONCE;
     const periodHandle = await globalThis.crypto.subtle.importKey(
       "raw",
       periodKey,
@@ -217,16 +223,15 @@ describe("one content-key wrap attempt", () => {
 
     for (const width of [15, 17, 24, 32]) {
       const entry = {
-        nonce: base64urlEncode(nonce),
         key: base64urlEncode(await encrypt(periodKey, nonce, new Uint8Array(width).fill(7))),
       };
       assert.equal(
-        await attemptContentKeyWrap(entry, periodKey),
+        await attemptContentKeyWrap(entry, periodKey, nonce),
         null,
         `${width}-byte authenticated plaintext is not a v1 content key under period-key bytes`,
       );
       assert.equal(
-        await attemptContentKeyWrap(entry, periodHandle),
+        await attemptContentKeyWrap(entry, periodHandle, nonce),
         null,
         `${width}-byte authenticated plaintext is not a client-bound v1 content key`,
       );
@@ -236,24 +241,22 @@ describe("one content-key wrap attempt", () => {
   test("an authenticated wrong-width first wrap does not suppress a later valid wrap", async () => {
     const periodKey = new Uint8Array(16).fill(3);
     const contentKey = new Uint8Array(16).fill(7);
-    const nonce = new Uint8Array(12).fill(4);
+    const nonce = PAGE_WRAP_NONCE;
 
     for (const width of [15, 17, 24, 32]) {
       const raw = pageData();
-      raw.contentData.bodytext.keys = {
-        premium: [
-          {
-            t: "251023T1500",
-            nonce: base64urlEncode(nonce),
-            key: base64urlEncode(await encrypt(periodKey, nonce, new Uint8Array(width).fill(9))),
-          },
-          {
-            t: "251023T1500",
-            nonce: base64urlEncode(nonce),
-            key: base64urlEncode(await encrypt(periodKey, nonce, contentKey)),
-          },
-        ],
-      };
+      contentRecordOf(raw, "bodytext").keys = [
+        {
+          accessGroup: "premium",
+          period: "251023T1500",
+          key: base64urlEncode(await encrypt(periodKey, nonce, new Uint8Array(width).fill(9))),
+        },
+        {
+          accessGroup: "premium",
+          period: "251023T1500",
+          key: base64urlEncode(await encrypt(periodKey, nonce, contentKey)),
+        },
+      ];
       const resolver = new ContentKeyResolver({
         cache: { put() {}, candidatesAt: () => [periodKey], attempted() {} },
       });
@@ -268,18 +271,16 @@ describe("one content-key wrap attempt", () => {
   test("malformed entries and cached byte candidates stay provisional until a later candidate opens", async () => {
     const periodKey = new Uint8Array(16).fill(3);
     const contentKey = new Uint8Array(16).fill(7);
-    const nonce = new Uint8Array(12).fill(4);
+    const nonce = PAGE_WRAP_NONCE;
     const raw = pageData();
-    raw.contentData.bodytext.keys = {
-      premium: [
-        { t: "251023T1500", nonce: base64urlEncode(new Uint8Array(11)), key: "AAAA" },
-        {
-          t: "251023T1500",
-          nonce: base64urlEncode(nonce),
-          key: base64urlEncode(await encrypt(periodKey, nonce, contentKey)),
-        },
-      ],
-    };
+    contentRecordOf(raw, "bodytext").keys = [
+      { accessGroup: "premium", period: "251023T1500", key: "AAAA" },
+      {
+        accessGroup: "premium",
+        period: "251023T1500",
+        key: base64urlEncode(await encrypt(periodKey, nonce, contentKey)),
+      },
+    ];
     // A rival key of this profile's width that opens nothing, ahead of the
     // one that opens: both are keys the wrap takes, so the first is a miss
     // and the walk goes on. A candidate of another width is a refusal
@@ -308,29 +309,33 @@ describe("one content-key wrap attempt", () => {
 
   test("a wrap entry respelled in the standard alphabet is a miss, not the key it would decode to", async () => {
     const periodKey = new Uint8Array(16).fill(3);
-    const contentKey = new Uint8Array(16).fill(7);
-    const nonce = new Uint8Array(12).fill(0xfb);
-    const entry = {
-      t: "251023T1500",
-      nonce: base64urlEncode(nonce),
-      key: base64urlEncode(await encrypt(periodKey, nonce, contentKey)),
-    };
+    const nonce = PAGE_WRAP_NONCE;
+    // The nonce is fixed by the coordinate, so pick the first content key whose
+    // wrapped spelling has a character the standard alphabet spells otherwise.
+    let contentKey = new Uint8Array(16);
+    let entry = { t: "251023T1500", key: "" };
+    for (let fill = 7; !/[-_]/.test(entry.key); fill += 1) {
+      contentKey = new Uint8Array(16).fill(fill);
+      entry = {
+        t: "251023T1500",
+        key: base64urlEncode(await encrypt(periodKey, nonce, contentKey)),
+      };
+    }
 
-    assert.deepEqual(await attemptContentKeyWrap(entry, periodKey), contentKey, "the control");
-    assert.equal(
-      await attemptContentKeyWrap({ ...entry, nonce: standardAlphabet(entry.nonce) }, periodKey),
-      null,
-      "a nonce in the standard alphabet supplies no nonce bytes",
+    assert.deepEqual(
+      await attemptContentKeyWrap(entry, periodKey, nonce),
+      contentKey,
+      "the control",
     );
     assert.equal(
-      await attemptContentKeyWrap({ ...entry, key: standardAlphabet(entry.key) }, periodKey),
+      await attemptContentKeyWrap({ ...entry, key: standardAlphabet(entry.key) }, periodKey, nonce),
       null,
       "a wrapped key in the standard alphabet supplies no carrier bytes",
     );
     assert.equal(
-      await attemptContentKeyWrap({ ...entry, nonce: `${entry.nonce}=` }, periodKey),
+      await attemptContentKeyWrap({ ...entry, key: `${entry.key}=` }, periodKey, nonce),
       null,
-      "and a padded nonce is the same miss",
+      "and a padded wrapped key is the same miss",
     );
   });
 
@@ -342,17 +347,18 @@ describe("one content-key wrap attempt", () => {
     const periodKey = new Uint8Array(16).fill(3);
     const refused = new Uint8Array(16).fill(1);
     const sibling = new Uint8Array(16).fill(2);
-    const nonce = new Uint8Array(12).fill(0xfb);
+    const nonce = PAGE_WRAP_NONCE;
     const raw = pageData();
     const sealedEntry = async (/** @type {Uint8Array} */ contentKey) => ({
-      t: "251023T1500",
-      nonce: base64urlEncode(nonce),
+      accessGroup: "premium",
+      period: "251023T1500",
       key: base64urlEncode(await encrypt(periodKey, nonce, contentKey)),
     });
     const first = await sealedEntry(refused);
-    raw.contentData.bodytext.keys = {
-      premium: [{ ...first, key: standardAlphabet(first.key) }, await sealedEntry(sibling)],
-    };
+    contentRecordOf(raw, "bodytext").keys = [
+      { ...first, key: standardAlphabet(first.key) },
+      await sealedEntry(sibling),
+    ];
     const resolver = new ContentKeyResolver({
       cache: { put() {}, candidatesAt: () => [periodKey], attempted() {} },
     });
@@ -367,15 +373,15 @@ describe("one content-key wrap attempt", () => {
   test("base declines an unknown binding marker instead of guessing ordinary no-AAD", async () => {
     const periodKey = new Uint8Array(16).fill(3);
     const contentKey = new Uint8Array(16).fill(7);
-    const nonce = new Uint8Array(12).fill(4);
+    const nonce = PAGE_WRAP_NONCE;
     const entry = {
-      t: "251023T1500",
-      nonce: base64urlEncode(nonce),
+      accessGroup: "premium",
+      period: "251023T1500",
       key: base64urlEncode(await encrypt(periodKey, nonce, contentKey)),
       bind: "unknown-binding",
     };
     const raw = pageData();
-    raw.contentData.bodytext.keys = { premium: [entry] };
+    contentRecordOf(raw, "bodytext").keys = [entry];
     const resolver = new ContentKeyResolver({
       cache: { put() {}, candidatesAt: () => [periodKey], attempted() {} },
     });
@@ -496,12 +502,12 @@ test("the period-key source bounds rivals per wrap and total key/wrap trials", a
 
 test("each access group receives its own finite period-key/wrap budget", async () => {
   const raw = pageData();
-  raw.contentData.bodytext.keys = Object.fromEntries(
-    Array.from({ length: 17 }, (_, i) => [
-      `group-${i}`,
-      [{ t: "251023T1400", nonce: "AAAA", key: "AAAA" }],
-    ]),
-  );
+  contentRecordOf(raw, "bodytext").keys = Array.from({ length: 17 }, (_, i) => ({
+    accessGroup: `group-${i}`,
+    period: "251023T1400",
+    nonce: "AAAA",
+    key: "AAAA",
+  }));
   const asked = [];
   const resolver = new ContentKeyResolver({
     cache: {
@@ -562,24 +568,26 @@ test("all selected sources miss in one access group before the next group is tri
   const contentKey = new Uint8Array(16).fill(9);
   const firstPeriodKey = new Uint8Array(16).fill(1);
   const secondPeriodKey = new Uint8Array(16).fill(2);
-  const nonce = new Uint8Array(12).fill(4);
+  const nonceAt = (/** @type {string} */ accessGroup) =>
+    contentKeyWrapNonceOctets({
+      renderId: "AAAAAAAAAAAAAAAAAAAAAA",
+      contentName: "bodytext",
+      accessGroup,
+      t: "251023T1400",
+    });
   const raw = pageData();
-  raw.contentData.bodytext.keys = {
-    first: [
-      {
-        t: "251023T1400",
-        nonce: base64urlEncode(nonce),
-        key: base64urlEncode(await encrypt(firstPeriodKey, nonce, contentKey)),
-      },
-    ],
-    second: [
-      {
-        t: "251023T1400",
-        nonce: base64urlEncode(nonce),
-        key: base64urlEncode(await encrypt(secondPeriodKey, nonce, contentKey)),
-      },
-    ],
-  };
+  contentRecordOf(raw, "bodytext").keys = [
+    {
+      accessGroup: "first",
+      period: "251023T1400",
+      key: base64urlEncode(await encrypt(firstPeriodKey, nonceAt("first"), contentKey)),
+    },
+    {
+      accessGroup: "second",
+      period: "251023T1400",
+      key: base64urlEncode(await encrypt(secondPeriodKey, nonceAt("second"), contentKey)),
+    },
+  ];
   const reads = [];
   const resolver = new ContentKeyResolver({
     cache: {
@@ -615,9 +623,9 @@ test("the resolver requires one synchronous entry interpretation shape", async (
   );
 
   const raw = pageData();
-  raw.contentData.bodytext.keys = {
-    premium: [{ t: "251023T1500", nonce: "AAAA", key: "AAAA" }],
-  };
+  contentRecordOf(raw, "bodytext").keys = [
+    { accessGroup: "premium", period: "251023T1500", nonce: "AAAA", key: "AAAA" },
+  ];
   const resolver = new ContentKeyResolver({
     cache: { put() {}, candidatesAt: () => [new Uint8Array(16)], attempted() {} },
     entryInterpretation: () => /** @type {any} */ (undefined),
@@ -723,14 +731,19 @@ describe("a malformed key value is skipped, not fatal", () => {
       const page = new DcaData(pageData());
       const good = new Uint8Array(16).fill(7);
       const association = associationFor(page, "issuer_example", {
-        contentKeys: { bodytext: "sealed-content" },
-        periodKeys: { premium: { "251023T1500": "sealed-period" } },
+        contentKeys: [{ contentName: "bodytext", key: "sealed-content" }],
+        periodKeys: [{ accessGroup: "premium", period: "251023T1500", key: "sealed-period" }],
       });
       assert.deepEqual(
         await resolver.applyResponse(
           page,
           "issuer_example",
-          { keys: { contentKeys: { bodytext: base64urlEncode(good) }, periodKeys } },
+          {
+            keys: {
+              contentKeys: [{ contentName: "bodytext", key: base64urlEncode(good) }],
+              periodKeys,
+            },
+          },
           association,
         ),
         {
@@ -751,7 +764,14 @@ describe("a malformed key value is skipped, not fatal", () => {
       const page = new DcaData(pageData());
       const good = new Uint8Array(16).fill(7);
 
-      const response = { keys: { contentKeys: { good: base64urlEncode(good), bad: "!!!!" } } };
+      const response = {
+        keys: {
+          contentKeys: [
+            { contentName: "good", key: base64urlEncode(good) },
+            { contentName: "bad", key: "!!!!" },
+          ],
+        },
+      };
       assert.deepEqual(await applyResponse(resolver, page, "issuer_example", response), {
         accepted: 1,
         errors: [],
@@ -784,7 +804,14 @@ describe("a noncanonical key value in direct representation is skipped, not fata
       // wrong with the respelled key entry is how it is spelled.
       const respelled = standardAlphabet(base64urlEncode(new Uint8Array(16).fill(0xfb)));
 
-      const response = { keys: { contentKeys: { good: base64urlEncode(good), bad: respelled } } };
+      const response = {
+        keys: {
+          contentKeys: [
+            { contentName: "good", key: base64urlEncode(good) },
+            { contentName: "bad", key: respelled },
+          ],
+        },
+      };
       assert.deepEqual(await applyResponse(resolver, page, "issuer.example", response), {
         accepted: 1,
         errors: [],
@@ -810,7 +837,13 @@ test(
     const short = new Uint8Array(15).fill(8);
     const wide = new Uint8Array(17).fill(9);
     const contentKey = new Uint8Array(16).fill(3);
-    const nonce = new Uint8Array(12).fill(4);
+    const nonceAt = (/** @type {number} */ i) =>
+      contentKeyWrapNonceOctets({
+        renderId: "AAAAAAAAAAAAAAAAAAAAAA",
+        contentName: names[i],
+        accessGroup: "premium",
+        t: labels[i],
+      });
     const raw = pageData();
     const names = ["good", "short", "wide"];
     const wrappingKeys = [good, new Uint8Array([...short, 0]), wide.slice(0, 16)];
@@ -818,16 +851,19 @@ test(
     for (let i = 0; i < names.length; i++) {
       const wrap = {
         t: labels[i],
-        nonce: base64urlEncode(nonce),
-        key: base64urlEncode(await encrypt(wrappingKeys[i], nonce, contentKey)),
+        key: base64urlEncode(await encrypt(wrappingKeys[i], nonceAt(i), contentKey)),
       };
       wraps.push(wrap);
-      raw.contentData[names[i]] = {
-        ...raw.contentData.bodytext,
-        keys: { premium: [wrap] },
-      };
+      raw.contentData.push({
+        ...contentRecordOf(raw, "bodytext"),
+        contentName: names[i],
+        keys: [{ accessGroup: "premium", period: wrap.t, key: wrap.key }],
+      });
     }
-    assert.deepEqual(await attemptContentKeyWrap(wraps[2], wide.slice(0, 16)), contentKey);
+    assert.deepEqual(
+      await attemptContentKeyWrap(wraps[2], wide.slice(0, 16), nonceAt(2)),
+      contentKey,
+    );
     const filed = [];
     const resolver = new ContentKeyResolver({
       cache: {
@@ -844,19 +880,23 @@ test(
     });
     const page = new DcaData(raw, { publisherOrigin: "https://publisher.example" });
     const association = associationFor(page, "issuer_example", {
-      contentKeys: {},
-      periodKeys: { premium: Object.fromEntries(labels.map((t) => [t, "presented-envelope"])) },
+      contentKeys: [],
+      periodKeys: labels.map((period) => ({
+        accessGroup: "premium",
+        period,
+        key: "presented-envelope",
+      })),
     });
     const report = await resolver.applyResponse(
       page,
       "issuer_example",
       {
         keys: {
-          periodKeys: {
-            premium: Object.fromEntries(
-              labels.map((t, i) => [t, base64urlEncode([good, short, wide][i])]),
-            ),
-          },
+          periodKeys: labels.map((period, i) => ({
+            accessGroup: "premium",
+            period,
+            key: base64urlEncode([good, short, wide][i]),
+          })),
         },
       },
       association,
@@ -919,7 +959,12 @@ describe("a key value of another width in direct representation is skipped, not 
       assert.equal(await opened(wideKey.slice(0, 16), wide), "<p>Must stay locked.</p>");
 
       const report = await applyResponse(resolver, page, "issuer_example", {
-        keys: { contentKeys: { good: base64urlEncode(goodKey), wide: wideContentKey } },
+        keys: {
+          contentKeys: [
+            { contentName: "good", key: base64urlEncode(goodKey) },
+            { contentName: "wide", key: wideContentKey },
+          ],
+        },
       });
 
       assert.equal(
@@ -957,8 +1002,8 @@ describe("response application reports consumer decisions", () => {
       assert.deepEqual(
         await applyResponse(resolver, page, "issuer_example", {
           keys: {
-            contentKeys: { bodytext: key(1) },
-            chainKeys: { premium: { "251023T1500": key(2) } },
+            contentKeys: [{ contentName: "bodytext", key: key(1) }],
+            chainKeys: [{ accessGroup: "premium", cutoff: "251023T1500", key: key(2) }],
           },
         }),
         {
@@ -985,7 +1030,7 @@ describe("response application reports consumer decisions", () => {
 
     assert.deepEqual(
       await applyResponse(resolver, deliveredPage(), "issuer_example", {
-        keys: { periodKeys: { premium: { bad: key(9) } } },
+        keys: { periodKeys: [{ accessGroup: "premium", period: "bad", key: key(9) }] },
       }),
       {
         accepted: 0,
@@ -1035,9 +1080,11 @@ describe("response application reports consumer decisions", () => {
       await applyResponse(resolver, page, "issuer.example", {
         transport: { method: "ECDH-P256" },
         keys: {
-          periodKeys: { premium: { "251023T1500": { key: "wrapped-period" } } },
-          chainKeys: { premium: { "251023T1500": key(9) } },
-          contentKeys: { bodytext: { key: "wrapped-content" } },
+          periodKeys: [
+            { accessGroup: "premium", period: "251023T1500", key: { key: "wrapped-period" } },
+          ],
+          chainKeys: [{ accessGroup: "premium", cutoff: "251023T1500", key: key(9) }],
+          contentKeys: [{ contentName: "bodytext", key: { key: "wrapped-content" } }],
         },
       }),
       {
@@ -1097,8 +1144,8 @@ describe("response application reports consumer decisions", () => {
       await applyResponse(resolver, page, "issuer.example", {
         transport: { method: "ECDH-P256" },
         keys: {
-          periodKeys: { premium: { "251023T1500": { key: "period" } } },
-          contentKeys: { bodytext: { key: "content" } },
+          periodKeys: [{ accessGroup: "premium", period: "251023T1500", key: { key: "period" } }],
+          contentKeys: [{ contentName: "bodytext", key: { key: "content" } }],
         },
       }),
       { accepted: 2, errors: [], issues: [] },
@@ -1140,8 +1187,10 @@ describe("response application reports consumer decisions", () => {
       await applyResponse(resolver, page, "issuer.example", {
         transport: { method: "ECDH-P256" },
         keys: {
-          periodKeys: { premium: { "251023T1500": { key: "wrapped-period" } } },
-          contentKeys: { bodytext: { key: "wrapped-content" } },
+          periodKeys: [
+            { accessGroup: "premium", period: "251023T1500", key: { key: "wrapped-period" } },
+          ],
+          contentKeys: [{ contentName: "bodytext", key: { key: "wrapped-content" } }],
         },
       }),
       {
@@ -1193,7 +1242,9 @@ describe("response application reports consumer decisions", () => {
     assert.deepEqual(
       await applyResponse(resolver, deliveredPage(), "issuer.example", {
         transport: { method: "ECDH-P256" },
-        keys: { chainKeys: { premium: { "251023T1500": { key: "chain" } } } },
+        keys: {
+          chainKeys: [{ accessGroup: "premium", cutoff: "251023T1500", key: { key: "chain" } }],
+        },
       }),
       {
         accepted: 0,
@@ -1242,7 +1293,9 @@ describe("response application reports consumer decisions", () => {
     assert.deepEqual(
       await applyResponse(resolver, deliveredPage(), "issuer.example", {
         transport: { method: "ECDH-P256" },
-        keys: { chainKeys: { premium: { "251023T1500": { key: "chain" } } } },
+        keys: {
+          chainKeys: [{ accessGroup: "premium", cutoff: "251023T1500", key: { key: "chain" } }],
+        },
       }),
       {
         accepted: 1,
@@ -1294,10 +1347,10 @@ describe("response application reports consumer decisions", () => {
     const result = await applyResponse(resolver, deliveredPage(), "issuer.example", {
       transport: { method: "ECDH-P256" },
       keys: {
-        chainKeys: {
-          premium: { "251023T1500": { key: "tampered" } },
-          archive: { "251023T1500": { key: "valid" } },
-        },
+        chainKeys: [
+          { accessGroup: "premium", cutoff: "251023T1500", key: { key: "tampered" } },
+          { accessGroup: "archive", cutoff: "251023T1500", key: { key: "valid" } },
+        ],
       },
     });
     assert.deepEqual(result, {
@@ -1357,9 +1410,9 @@ describe("response application reports consumer decisions", () => {
     });
     const response = {
       keys: {
-        contentKeys: { bodytext: key(4) },
-        periodKeys: { premium: { "251023T1500": key(5) } },
-        chainKeys: { premium: { "251023T1500": key(6) } },
+        contentKeys: [{ contentName: "bodytext", key: key(4) }],
+        periodKeys: [{ accessGroup: "premium", period: "251023T1500", key: key(5) }],
+        chainKeys: [{ accessGroup: "premium", cutoff: "251023T1500", key: key(6) }],
       },
     };
 
@@ -1408,7 +1461,7 @@ describe("response application reports consumer decisions", () => {
     await assert.rejects(
       () =>
         applyResponse(storageResolver, deliveredPage(), "issuer_example", {
-          keys: { periodKeys: { premium: { "251023T1500": key(6) } } },
+          keys: { periodKeys: [{ accessGroup: "premium", period: "251023T1500", key: key(6) }] },
         }),
       (error) => error === storeFault,
     );
@@ -1427,7 +1480,7 @@ describe("response application reports consumer decisions", () => {
       () =>
         applyResponse(openingResolver, deliveredPage(), "issuer_example", {
           transport: { method: "ECDH-P256" },
-          keys: { contentKeys: { bodytext: { key: "wrapped" } } },
+          keys: { contentKeys: [{ contentName: "bodytext", key: { key: "wrapped" } }] },
         }),
       (error) => error === openerFault,
     );
@@ -1444,7 +1497,7 @@ describe("response application reports consumer decisions", () => {
       () =>
         applyResponse(transportResolver, deliveredPage(), "issuer_example", {
           transport: { method: "ECDH-P256" },
-          keys: { contentKeys: { bodytext: { key: "wrapped" } } },
+          keys: { contentKeys: [{ contentName: "bodytext", key: { key: "wrapped" } }] },
         }),
       (error) => error === transportConfigFault,
     );
@@ -1463,7 +1516,7 @@ describe("response application reports consumer decisions", () => {
       () =>
         applyResponse(typedOpeningResolver, deliveredPage(), "issuer_example", {
           transport: { method: "ECDH-P256" },
-          keys: { contentKeys: { bodytext: { key: "wrapped" } } },
+          keys: { contentKeys: [{ contentName: "bodytext", key: { key: "wrapped" } }] },
         }),
       (error) => error === openerConfigFault,
     );
@@ -1489,7 +1542,9 @@ describe("response association admission", () => {
         },
       });
       const page = deliveredPage();
-      const response = { keys: { contentKeys: { bodytext: { key: "wrapped" } } } };
+      const response = {
+        keys: { contentKeys: [{ contentName: "bodytext", key: { key: "wrapped" } }] },
+      };
 
       await assert.rejects(
         () => resolver.applyResponse(page, "issuer_example", response),
@@ -1515,7 +1570,7 @@ describe("response association admission", () => {
         (/** @type {any} */ error) => error.code === "bad_config",
       );
       const association = associationFor(page, "issuer_example", {
-        contentKeys: { bodytext: "sealed" },
+        contentKeys: [{ contentName: "bodytext", key: "sealed" }],
       });
       const equalClone = new DcaData(structuredClone(page.toObject()), {
         publisherOrigin: "https://publisher.example",
@@ -1542,7 +1597,7 @@ describe("response association admission", () => {
         await resolver.applyResponse(
           anotherView,
           "issuer_example",
-          { keys: { contentKeys: {} } },
+          { keys: { contentKeys: [] } },
           association,
         ),
         { accepted: 0, errors: [], issues: [] },
@@ -1582,7 +1637,7 @@ describe("response association admission", () => {
         [
           "keyId",
           (delivery) => {
-            delivery.issuerData.issuer_example.keyId = "k2";
+            issuerBlockOf(delivery, "issuer_example").keyId = "k2";
           },
         ],
         [
@@ -1598,14 +1653,14 @@ describe("response association admission", () => {
       for (const [coordinate, mutate] of mutations) {
         const delivery = pageData();
         const page = new DcaData(delivery, { publisherOrigin: "https://publisher.example" });
-        const association = associationFor(page, "issuer_example", { contentKeys: {} });
+        const association = associationFor(page, "issuer_example", { contentKeys: [] });
         mutate(delivery, page);
         await assert.rejects(
           () =>
             new ContentKeyResolver().applyResponse(
               page,
               "issuer_example",
-              { keys: { contentKeys: {} } },
+              { keys: { contentKeys: [] } },
               association,
             ),
           (/** @type {any} */ error) => error.code === "bad_config",
@@ -1631,19 +1686,23 @@ describe("response association admission", () => {
       });
       const page = deliveredPage();
       const association = associationFor(page, "issuer_example", {
-        contentKeys: { bodytext: "sealed-content" },
-        periodKeys: { premium: { "251023T1500": "sealed-period" } },
+        contentKeys: [{ contentName: "bodytext", key: "sealed-content" }],
+        periodKeys: [{ accessGroup: "premium", period: "251023T1500", key: "sealed-period" }],
       });
       const application = await resolver.applyResponse(
         page,
         "issuer_example",
         {
           keys: {
-            contentKeys: { bodytext: key(1), surprise: key(2) },
-            periodKeys: {
-              premium: { "251023T1500": key(3), "251023T1600": key(4) },
-              other: { "251023T1500": key(5) },
-            },
+            contentKeys: [
+              { contentName: "bodytext", key: key(1) },
+              { contentName: "surprise", key: key(2) },
+            ],
+            periodKeys: [
+              { accessGroup: "premium", period: "251023T1500", key: key(3) },
+              { accessGroup: "premium", period: "251023T1600", key: key(4) },
+              { accessGroup: "other", period: "251023T1500", key: key(5) },
+            ],
           },
         },
         association,
@@ -1691,7 +1750,7 @@ describe("response association admission", () => {
       page,
       "issuer_example",
       {
-        contentKeys: { bodytext: "sealed-content" },
+        contentKeys: [{ contentName: "bodytext", key: "sealed-content" }],
       },
       { clientPublicKey: { kty: "EC", crv: "P-256", x: "request-x", y: "request-y" } },
     );
@@ -1702,10 +1761,10 @@ describe("response association admission", () => {
       {
         transport: { method: "ECDH-P256" },
         keys: {
-          contentKeys: {
-            bodytext: { key: "requested" },
-            surprise: { key: "unsolicited" },
-          },
+          contentKeys: [
+            { contentName: "bodytext", key: { key: "requested" } },
+            { contentName: "surprise", key: { key: "unsolicited" } },
+          ],
         },
       },
       association,
@@ -1731,10 +1790,10 @@ describe("response association admission", () => {
       },
     });
     const page = deliveredPage();
-    const sealed = { contentKeys: { bodytext: "sealed-content" } };
+    const sealed = { contentKeys: [{ contentName: "bodytext", key: "sealed-content" }] };
     const response = (transport) => ({
       transport,
-      keys: { contentKeys: { bodytext: { key: "wrapped" } } },
+      keys: { contentKeys: [{ contentName: "bodytext", key: { key: "wrapped" } }] },
     });
     const mutableOffer = { kty: "RSA", n: "request-n", e: "AQAB" };
     const snapshottedMismatch = associationFor(page, "issuer_example", sealed, {
@@ -1808,8 +1867,11 @@ describe("response association admission", () => {
       page,
       "issuer_example",
       {
-        contentKeys: { bodytext: "sealed-one", sibling: "sealed-two" },
-        periodKeys: { premium: { "251023T1500": "sealed-period" } },
+        contentKeys: [
+          { contentName: "bodytext", key: "sealed-one" },
+          { contentName: "sibling", key: "sealed-two" },
+        ],
+        periodKeys: [{ accessGroup: "premium", period: "251023T1500", key: "sealed-period" }],
       },
       { clientPublicKey: { kty: "EC", crv: "P-256", x: "request-x", y: "request-y" } },
     );
@@ -1821,8 +1883,13 @@ describe("response association admission", () => {
         {
           transport: { method: "ECDH-P256" },
           keys: {
-            contentKeys: { bodytext: { key: "wrapped" }, sibling: key(4) },
-            periodKeys: { premium: { "251023T1500": { key: "wrapped-period" } } },
+            contentKeys: [
+              { contentName: "bodytext", key: { key: "wrapped" } },
+              { contentName: "sibling", key: key(4) },
+            ],
+            periodKeys: [
+              { accessGroup: "premium", period: "251023T1500", key: { key: "wrapped-period" } },
+            ],
           },
         },
         association,
@@ -1857,7 +1924,10 @@ describe("response association admission", () => {
       page,
       "issuer_example",
       {
-        contentKeys: { bodytext: "sealed-one", sibling: "sealed-two" },
+        contentKeys: [
+          { contentName: "bodytext", key: "sealed-one" },
+          { contentName: "sibling", key: "sealed-two" },
+        ],
       },
       { clientPublicKey: { kty: "EC", crv: "P-256", x: "request-x", y: "request-y" } },
     );
@@ -1869,10 +1939,10 @@ describe("response association admission", () => {
         {
           transport: { method: "ECDH-P256" },
           keys: {
-            contentKeys: {
-              bodytext: { key: "bad" },
-              sibling: { key: "good" },
-            },
+            contentKeys: [
+              { contentName: "bodytext", key: { key: "bad" } },
+              { contentName: "sibling", key: { key: "good" } },
+            ],
           },
         },
         association,
@@ -1910,11 +1980,11 @@ describe("response association admission", () => {
       });
       const page = deliveredPage();
       const association = associationFor(page, "issuer_example", {
-        contentKeys: { "bad name": "sealed" },
-        periodKeys: {
-          "bad group": { "251023T1500": "sealed" },
-          premium: { bad: "sealed" },
-        },
+        contentKeys: [{ contentName: "bad name", key: "sealed" }],
+        periodKeys: [
+          { accessGroup: "bad group", period: "251023T1500", key: "sealed" },
+          { accessGroup: "premium", period: "bad", key: "sealed" },
+        ],
       });
 
       assert.deepEqual(
@@ -1923,17 +1993,17 @@ describe("response association admission", () => {
           "issuer_example",
           {
             keys: {
-              contentKeys: { "bad name": key(1) },
-              periodKeys: {
-                "bad group": { "251023T1500": key(2) },
-                premium: { bad: key(3) },
-              },
+              contentKeys: [{ contentName: "bad name", key: key(1) }],
+              periodKeys: [
+                { accessGroup: "bad group", period: "251023T1500", key: key(2) },
+                { accessGroup: "premium", period: "bad", key: key(3) },
+              ],
             },
-            errors: {
-              "bad name": { error: "unseal_failed" },
-              "bad group|251023T1500": { error: "unseal_failed" },
-              "premium|bad": { error: "unseal_failed" },
-            },
+            errors: [
+              { coordinate: "bad name", error: "unseal_failed" },
+              { coordinate: "bad group|251023T1500", error: "unseal_failed" },
+              { coordinate: "premium|bad", error: "unseal_failed" },
+            ],
           },
           association,
         ),
@@ -1964,25 +2034,30 @@ describe("response association admission", () => {
     const resolver = new ContentKeyResolver();
     const page = deliveredPage();
     const association = associationFor(page, "issuer_example", {
-      contentKeys: {
-        bodytext: "sealed-key",
-        denied: "sealed-denied",
-        malformed: "sealed-malformed",
-      },
-      periodKeys: { premium: { "251023T1500": "sealed-period" } },
+      contentKeys: [
+        { contentName: "bodytext", key: "sealed-key" },
+        { contentName: "denied", key: "sealed-denied" },
+        { contentName: "malformed", key: "sealed-malformed" },
+      ],
+      periodKeys: [{ accessGroup: "premium", period: "251023T1500", key: "sealed-period" }],
     });
     const application = await resolver.applyResponse(
       page,
       "issuer_example",
       {
-        keys: { contentKeys: { bodytext: key(1) } },
-        errors: {
-          denied: { error: "withheld", message: "subscription required", ignored: true },
-          malformed: { error: "", message: 7 },
-          bodytext: { error: "unseal_failed" },
-          "premium|251023T1500": { error: "unseal_failed" },
-          surprise: { error: "withheld" },
-        },
+        keys: { contentKeys: [{ contentName: "bodytext", key: key(1) }] },
+        errors: [
+          {
+            coordinate: "denied",
+            error: "withheld",
+            message: "subscription required",
+            ignored: true,
+          },
+          { coordinate: "malformed", error: "", message: 7 },
+          { coordinate: "bodytext", error: "unseal_failed" },
+          { coordinate: "premium|251023T1500", error: "unseal_failed" },
+          { coordinate: "surprise", error: "withheld" },
+        ],
       },
       association,
     );
@@ -2014,25 +2089,28 @@ describe("response association admission", () => {
     const resolver = new ContentKeyResolver();
     const page = deliveredPage();
     const association = associationFor(page, "issuer_example", {
-      contentKeys: { denied: "sealed", "bad name": "sealed" },
-      periodKeys: {
-        "bad group": { "251023T1500": "sealed" },
-        premium: { bad: "sealed" },
-      },
+      contentKeys: [
+        { contentName: "denied", key: "sealed" },
+        { contentName: "bad name", key: "sealed" },
+      ],
+      periodKeys: [
+        { accessGroup: "bad group", period: "251023T1500", key: "sealed" },
+        { accessGroup: "premium", period: "bad", key: "sealed" },
+      ],
     });
     const application = await resolver.applyResponse(
       page,
       "issuer_example",
       {
-        keys: { contentKeys: {} },
-        errors: {
-          denied: { error: "withheld" },
-          "bad name": { error: "withheld" },
-          "bad group|251023T1500": { error: "withheld" },
-          "premium|bad": { error: "withheld" },
-          "premium|251023T1500|extra": { error: "withheld" },
-          validMissing: { error: "withheld" },
-        },
+        keys: { contentKeys: [] },
+        errors: [
+          { coordinate: "denied", error: "withheld" },
+          { coordinate: "bad name", error: "withheld" },
+          { coordinate: "bad group|251023T1500", error: "withheld" },
+          { coordinate: "premium|bad", error: "withheld" },
+          { coordinate: "premium|251023T1500|extra", error: "withheld" },
+          { coordinate: "validMissing", error: "withheld" },
+        ],
       },
       association,
     );
@@ -2051,28 +2129,32 @@ describe("response association admission", () => {
   });
 
   test(
-    "inherited and later-added request members never widen the snapshot",
+    "inherited and later-added request records never widen the snapshot",
     { tags: ["dca-profile-baseline/client/direct-admission"] },
     async () => {
-      const inherited = Object.create({ inherited: "sealed-inherited" });
-      inherited.bodytext = "sealed-body";
-      const sealed = { contentKeys: inherited };
+      // A record whose name is only inherited names nothing, and a record
+      // pushed after the association is not part of the request it captured.
+      const inherited = Object.create({ contentName: "inherited", key: "sealed-inherited" });
+      const contentKeys = [{ contentName: "bodytext", key: "sealed-body" }, inherited];
       const page = deliveredPage();
-      const association = associationFor(page, "issuer_example", sealed);
-      inherited.addedLater = "sealed-later";
+      const association = associationFor(page, "issuer_example", { contentKeys });
+      contentKeys.push({ contentName: "addedLater", key: "sealed-later" });
       assert.ok(Object.isFrozen(association.request));
 
-      const responseContent = Object.create({ inheritedResponse: key(5) });
-      responseContent.bodytext = key(1);
-      responseContent.inherited = key(2);
-      responseContent.addedLater = key(3);
       const resolver = new ContentKeyResolver();
       const application = await resolver.applyResponse(
         page,
         "issuer_example",
         {
-          keys: { contentKeys: responseContent },
-          errors: Object.create({ bodytext: { error: "withheld" } }),
+          keys: {
+            contentKeys: [
+              { contentName: "bodytext", key: key(1) },
+              { contentName: "inherited", key: key(2) },
+              { contentName: "addedLater", key: key(3) },
+              Object.create({ contentName: "inheritedResponse", key: key(5) }),
+            ],
+          },
+          errors: [Object.create({ coordinate: "bodytext", error: "withheld" })],
         },
         association,
       );
@@ -2083,7 +2165,8 @@ describe("response association admission", () => {
         issues: [
           { section: "contentKeys", code: "unsolicited_coordinate" },
           { section: "contentKeys", code: "unsolicited_coordinate" },
-          { code: "malformed_error" },
+          { section: "contentKeys", code: "malformed_key" },
+          { section: "errors", code: "malformed_error" },
         ],
       });
       assert.deepEqual(application.errors, []);
@@ -2107,7 +2190,7 @@ describe("response association admission", () => {
       issuerName: "issuer_example",
       resourceJWT: page.resourceJWT,
       keyId: page.keyIdFor("issuer_example"),
-      sealed: { contentKeys: {} },
+      sealed: { contentKeys: [] },
       probe: hostile,
     });
 
@@ -2116,15 +2199,15 @@ describe("response association admission", () => {
     assert.ok(Object.isFrozen(association.request.probe[1]));
   });
 
-  test("an empty error map is malformed and cannot drive control flow", async () => {
+  test("an empty errors array is malformed and cannot drive control flow", async () => {
     const resolver = new ContentKeyResolver();
     const page = deliveredPage();
-    const association = associationFor(page, "issuer_example", { contentKeys: {} });
+    const association = associationFor(page, "issuer_example", { contentKeys: [] });
     assert.deepEqual(
       await resolver.applyResponse(
         page,
         "issuer_example",
-        { keys: { contentKeys: {} }, errors: {} },
+        { keys: { contentKeys: [] }, errors: [] },
         association,
       ),
       {
@@ -2148,7 +2231,7 @@ describe("the harness implicit response association slot", () => {
     );
 
     assert.deepEqual(
-      await client.applyResponse(data, "issuer_example", { keys: { contentKeys: {} } }),
+      await client.applyResponse(data, "issuer_example", { keys: { contentKeys: [] } }),
       {
         accepted: 0,
         errors: [],
@@ -2156,7 +2239,7 @@ describe("the harness implicit response association slot", () => {
       },
     );
     await assert.rejects(
-      () => client.applyResponse(data, "issuer_example", { keys: { contentKeys: {} } }),
+      () => client.applyResponse(data, "issuer_example", { keys: { contentKeys: [] } }),
       (/** @type {any} */ error) => error.code === "bad_config",
     );
     assert.doesNotThrow(() => client.buildRequest(data, "issuer_example", ["bodytext"]));
@@ -2167,14 +2250,14 @@ describe("the harness implicit response association slot", () => {
     const data = pageData();
     const page = new DcaData(data, { publisherOrigin: "https://publisher.example" });
     const association = associationFor(page, "issuer_example", {
-      contentKeys: { bodytext: "sealed" },
+      contentKeys: [{ contentName: "bodytext", key: "sealed" }],
     });
 
     assert.deepEqual(
       await client.applyResponse(
         data,
         "issuer_example",
-        { keys: { contentKeys: {} } },
+        { keys: { contentKeys: [] } },
         association,
       ),
       { accepted: 0, errors: [], issues: [] },
@@ -2200,7 +2283,7 @@ describe("the publisher cache coordinate", () => {
     await assert.rejects(
       () =>
         applyResponse(resolver, page, "issuer_example", {
-          keys: { periodKeys: { premium: { "251023T1400": key } } },
+          keys: { periodKeys: [{ accessGroup: "premium", period: "251023T1400", key: key }] },
         }),
       (/** @type {any} */ e) => e.code === "bad_page",
     );
@@ -2218,7 +2301,7 @@ describe("key-resolution origins", () => {
       const key = new Uint8Array(16).fill(9);
 
       await applyResponse(resolver, page, "issuer_example", {
-        keys: { contentKeys: { bodytext: base64urlEncode(key) } },
+        keys: { contentKeys: [{ contentName: "bodytext", key: base64urlEncode(key) }] },
       });
 
       const resolved = await resolver.contentKeyWithOriginFor(page, "bodytext");
@@ -2263,7 +2346,7 @@ describe("key-resolution origins", () => {
       const key = (fill) => base64urlEncode(new Uint8Array(16).fill(fill));
 
       await applyResponse(resolver, pageA, "issuer_example", {
-        keys: { contentKeys: { bodytext: key(1) } },
+        keys: { contentKeys: [{ contentName: "bodytext", key: key(1) }] },
       });
       assert.deepEqual(await resolver.contentKeyFor(pageA, "bodytext"), new Uint8Array(16).fill(1));
       assert.equal(
@@ -2277,17 +2360,15 @@ describe("key-resolution origins", () => {
   test("held period-key-resolved content keys stay isolated by publisher", async () => {
     const periodKey = new Uint8Array(16).fill(2);
     const contentKey = new Uint8Array(16).fill(3);
-    const nonce = new Uint8Array(12).fill(4);
+    const nonce = PAGE_WRAP_NONCE;
     const rawA = pageData();
-    rawA.contentData.bodytext.keys = {
-      premium: [
-        {
-          t: "251023T1500",
-          nonce: base64urlEncode(nonce),
-          key: base64urlEncode(await encrypt(periodKey, nonce, contentKey)),
-        },
-      ],
-    };
+    contentRecordOf(rawA, "bodytext").keys = [
+      {
+        accessGroup: "premium",
+        period: "251023T1500",
+        key: base64urlEncode(await encrypt(periodKey, nonce, contentKey)),
+      },
+    ];
     const pageA = new DcaData(rawA, { publisherOrigin: "https://publisher-a.example" });
     const pageB = new DcaData(pageData(), { publisherOrigin: "https://publisher-b.example" });
     const resolver = new ContentKeyResolver({
@@ -2311,18 +2392,12 @@ describe("key-resolution origins", () => {
   test("the successful cached sealed entry reports its accessGroup and period", async () => {
     const periodKey = new Uint8Array(16).fill(3);
     const contentKey = new Uint8Array(16).fill(7);
-    const nonce = new Uint8Array(12).fill(4);
+    const nonce = PAGE_WRAP_NONCE;
     const wrapped = await encrypt(periodKey, nonce, contentKey);
     const raw = pageData();
-    raw.contentData.bodytext.keys = {
-      premium: [
-        {
-          t: "251023T1500",
-          nonce: base64urlEncode(nonce),
-          key: base64urlEncode(wrapped),
-        },
-      ],
-    };
+    contentRecordOf(raw, "bodytext").keys = [
+      { accessGroup: "premium", period: "251023T1500", key: base64urlEncode(wrapped) },
+    ];
     const resolver = new ContentKeyResolver({
       cache: {
         put: async () => undefined,
@@ -2396,7 +2471,7 @@ describe("the DcaData currency", () => {
     const page = new DcaData(raw);
     assert.deepEqual(page.contentNames(), ["bodytext"]);
 
-    raw.contentData.premium = { contentType: "text/html", nonce: "n2" };
+    raw.contentData.push({ contentName: "premium", contentType: "text/html", nonce: "n2" });
     // Same instance, re-read at call time: the accessor does not memoize.
     assert.deepEqual(page.contentNames(), ["bodytext", "premium"]);
   });
@@ -2418,9 +2493,12 @@ describe("not-delivered family reports", () => {
   /** A request presenting a content name, a period-key family and a chain family. */
   const presentingFamilies = (page) =>
     associationFor(page, "issuer_example", {
-      contentKeys: { bodytext: "sealed-body", summary: "sealed-summary" },
-      periodKeys: { premium: { "251023T1500": "sealed-period" } },
-      chainKeys: { archive: { "251023T1500": "sealed-chain" } },
+      contentKeys: [
+        { contentName: "bodytext", key: "sealed-body" },
+        { contentName: "summary", key: "sealed-summary" },
+      ],
+      periodKeys: [{ accessGroup: "premium", period: "251023T1500", key: "sealed-period" }],
+      chainKeys: [{ accessGroup: "archive", cutoff: "251023T1500", key: "sealed-chain" }],
     });
 
   test("an admitted report reaches the application as typed family outcomes", async () => {
@@ -2430,11 +2508,16 @@ describe("not-delivered family reports", () => {
       page,
       "issuer_example",
       {
-        keys: { contentKeys: { bodytext: key(1) } },
-        notDelivered: {
-          premium: { reason: "denied", message: "subscription required", ignored: true },
-          archive: { reason: "unavailable" },
-        },
+        keys: { contentKeys: [{ contentName: "bodytext", key: key(1) }] },
+        notDelivered: [
+          {
+            accessGroup: "premium",
+            reason: "denied",
+            message: "subscription required",
+            ignored: true,
+          },
+          { accessGroup: "archive", reason: "unavailable" },
+        ],
       },
       presentingFamilies(page),
     );
@@ -2460,9 +2543,9 @@ describe("not-delivered family reports", () => {
       page,
       "issuer_example",
       {
-        keys: { contentKeys: { bodytext: key(1) } },
-        errors: { summary: { error: "unseal_failed" } },
-        notDelivered: { premium: { reason: "denied" } },
+        keys: { contentKeys: [{ contentName: "bodytext", key: key(1) }] },
+        errors: [{ coordinate: "summary", error: "unseal_failed" }],
+        notDelivered: [{ accessGroup: "premium", reason: "denied" }],
       },
       presentingFamilies(page),
     );
@@ -2475,43 +2558,46 @@ describe("not-delivered family reports", () => {
   });
 
   for (const [name, members] of [
-    ["an empty member", { notDelivered: {} }],
+    ["an empty member", { notDelivered: [] }],
     ["an array member", { notDelivered: [] }],
     ["a string member", { notDelivered: "premium" }],
     ["a null member", { notDelivered: null }],
     ["an array entry", { notDelivered: { premium: [] } }],
     ["a string entry", { notDelivered: { premium: "denied" } }],
     ["a null entry", { notDelivered: { premium: null } }],
-    ["a missing reason", { notDelivered: { premium: { message: "no" } } }],
-    ["an unknown reason", { notDelivered: { premium: { reason: "withheld" } } }],
-    ["a non-string reason", { notDelivered: { premium: { reason: 7 } } }],
-    ["a non-string message", { notDelivered: { premium: { reason: "denied", message: 7 } } }],
-    ["an unsolicited family", { notDelivered: { standard: { reason: "denied" } } }],
+    ["a missing reason", { notDelivered: [{ accessGroup: "premium", message: "no" }] }],
+    ["an unknown reason", { notDelivered: [{ accessGroup: "premium", reason: "withheld" }] }],
+    ["a non-string reason", { notDelivered: [{ accessGroup: "premium", reason: 7 }] }],
+    [
+      "a non-string message",
+      { notDelivered: [{ accessGroup: "premium", reason: "denied", message: 7 }] },
+    ],
+    ["an unsolicited family", { notDelivered: [{ accessGroup: "standard", reason: "denied" }] }],
     [
       "a period key for the named family",
       {
         keys: {
-          contentKeys: { bodytext: key(1) },
-          periodKeys: { premium: { "251023T1500": key(2) } },
+          contentKeys: [{ contentName: "bodytext", key: key(1) }],
+          periodKeys: [{ accessGroup: "premium", period: "251023T1500", key: key(2) }],
         },
-        notDelivered: { premium: { reason: "unavailable" } },
+        notDelivered: [{ accessGroup: "premium", reason: "unavailable" }],
       },
     ],
     [
       "a chain key for the named family",
       {
         keys: {
-          contentKeys: { bodytext: key(1) },
-          chainKeys: { archive: { "251023T1500": key(2) } },
+          contentKeys: [{ contentName: "bodytext", key: key(1) }],
+          chainKeys: [{ accessGroup: "archive", cutoff: "251023T1500", key: key(2) }],
         },
-        notDelivered: { archive: { reason: "unavailable" } },
+        notDelivered: [{ accessGroup: "archive", reason: "unavailable" }],
       },
     ],
     [
       "a period-coordinate error in the named family",
       {
-        errors: { "premium|251023T1500": { error: "unseal_failed" } },
-        notDelivered: { premium: { reason: "denied" } },
+        errors: [{ coordinate: "premium|251023T1500", error: "unseal_failed" }],
+        notDelivered: [{ accessGroup: "premium", reason: "denied" }],
       },
     ],
   ]) {
@@ -2531,7 +2617,7 @@ describe("not-delivered family reports", () => {
       const application = await resolver.applyResponse(
         page,
         "issuer_example",
-        { keys: { contentKeys: { bodytext: key(1) } }, ...members },
+        { keys: { contentKeys: [{ contentName: "bodytext", key: key(1) }] }, ...members },
         presentingFamilies(page),
       );
       assert.deepEqual(application, {
@@ -2560,8 +2646,10 @@ describe("not-delivered family reports", () => {
         const application = await resolver.applyResponse(
           page,
           "issuer_example",
-          { keys: { contentKeys: { bodytext: key(1) } }, notDelivered },
-          associationFor(page, "issuer_example", { contentKeys: { bodytext: "sealed-body" } }),
+          { keys: { contentKeys: [{ contentName: "bodytext", key: key(1) }] }, notDelivered },
+          associationFor(page, "issuer_example", {
+            contentKeys: [{ contentName: "bodytext", key: "sealed-body" }],
+          }),
         );
         assert.deepEqual(application, { ...MALFORMED, accepted: 1 });
         assert.deepEqual(
@@ -2579,8 +2667,13 @@ describe("not-delivered family reports", () => {
       page,
       "issuer_example",
       {
-        keys: { contentKeys: { bodytext: "!!!!", surprise: key(3) } },
-        notDelivered: { premium: { reason: "denied" } },
+        keys: {
+          contentKeys: [
+            { contentName: "bodytext", key: "!!!!" },
+            { contentName: "surprise", key: key(3) },
+          ],
+        },
+        notDelivered: [{ accessGroup: "premium", reason: "denied" }],
       },
       presentingFamilies(page),
     );
@@ -2601,7 +2694,7 @@ describe("not-delivered family reports", () => {
     const application = await resolver.applyResponse(
       page,
       "issuer_example",
-      { keys: { contentKeys: { bodytext: key(1) } } },
+      { keys: { contentKeys: [{ contentName: "bodytext", key: key(1) }] } },
       presentingFamilies(page),
     );
     assert.deepEqual(application, { accepted: 1, errors: [], issues: [] });
@@ -2611,18 +2704,36 @@ describe("not-delivered family reports", () => {
 
 test("malformed period labels skip before cache reads; valid-label storage faults remain visible", async () => {
   const raw = pageData();
-  const nonce = new Uint8Array(12).fill(3);
+  const nonce = PAGE_WRAP_NONCE;
   const period = new Uint8Array(16).fill(11);
   const item = new Uint8Array(16).fill(12);
   const valid = {
-    t: "251023T1500",
-    nonce: base64urlEncode(nonce),
+    accessGroup: "premium",
+    period: "251023T1500",
     key: base64urlEncode(await encrypt(period, nonce, item)),
   };
-  raw.contentData.bodytext.keys = {
-    premium: [{ ...valid, t: "" }, { ...valid, t: "bogus" }, valid],
+  contentRecordOf(raw, "bodytext").keys = [
+    { ...valid, period: "" },
+    { ...valid, period: "bogus" },
+    valid,
+  ];
+  // The sibling's wrap nonce binds its own name, so it carries its own wrap.
+  const siblingNonce = contentKeyWrapNonceOctets({
+    renderId: "AAAAAAAAAAAAAAAAAAAAAA",
+    contentName: "sibling",
+    accessGroup: "premium",
+    t: valid.period,
+  });
+  const siblingWrap = {
+    accessGroup: "premium",
+    period: valid.period,
+    key: base64urlEncode(await encrypt(period, siblingNonce, item)),
   };
-  raw.contentData.sibling = { ...raw.contentData.bodytext };
+  raw.contentData.push({
+    ...contentRecordOf(raw, "bodytext"),
+    contentName: "sibling",
+    keys: [{ ...siblingWrap, period: "" }, { ...siblingWrap, period: "bogus" }, siblingWrap],
+  });
   const page = new DcaData(raw, { publisherOrigin: "https://publisher.example" });
   const reads = [];
   const cache = {
@@ -2638,7 +2749,7 @@ test("malformed period labels skip before cache reads; valid-label storage fault
     "sibling",
   ]);
   assert.deepEqual(result.covered, ["bodytext", "sibling"]);
-  assert.deepEqual(reads, [valid.t, valid.t]);
+  assert.deepEqual(reads, [valid.period, valid.period]);
   cache.candidatesAt = (_group, t) => {
     reads.push(t);
     throw dcaError("bad_storage", "corrupt");
@@ -2650,13 +2761,13 @@ test("malformed period labels skip before cache reads; valid-label storage fault
     reads.push(t);
     return [];
   };
-  raw.contentData.bodytext.keys.premium.reverse();
+  contentRecordOf(raw, "bodytext").keys.reverse();
   assert.deepEqual(
     (await new ContentKeyResolver({ cache }).resolveDetailed(page, ["bodytext"])).missing,
     ["bodytext"],
   );
   assert.equal(
-    reads.every((t) => t === valid.t),
+    reads.every((t) => t === valid.period),
     true,
   );
 });
@@ -2666,16 +2777,14 @@ test("authenticated resolution continues after a valid wrap yields the wrong ite
   const period = new Uint8Array(16).fill(17),
     wrong = new Uint8Array(16).fill(18),
     right = new Uint8Array(16).fill(19);
-  const nonce = new Uint8Array(12).fill(9);
-  raw.contentData.bodytext.keys = {
-    premium: await Promise.all(
-      [wrong, right].map(async (key) => ({
-        t: "251023T1500",
-        nonce: base64urlEncode(nonce),
-        key: base64urlEncode(await encrypt(period, nonce, key)),
-      })),
-    ),
-  };
+  const nonce = PAGE_WRAP_NONCE;
+  contentRecordOf(raw, "bodytext").keys = await Promise.all(
+    [wrong, right].map(async (key) => ({
+      accessGroup: "premium",
+      period: "251023T1500",
+      key: base64urlEncode(await encrypt(period, nonce, key)),
+    })),
+  );
   const page = new DcaData(raw, { publisherOrigin: "https://publisher.example" });
   const resolver = new ContentKeyResolver({
     cache: { put() {}, attempted() {}, candidatesAt: () => [period] },
@@ -2704,16 +2813,14 @@ test("storage-backed opaque response capability authenticates first use and clos
     const raw = pageData(),
       period = new Uint8Array(16).fill(29),
       item = new Uint8Array(16).fill(30),
-      nonce = new Uint8Array(12).fill(8);
-    raw.contentData.bodytext.keys = {
-      premium: [
-        {
-          t: "251023T1500",
-          nonce: base64urlEncode(nonce),
-          key: base64urlEncode(await encrypt(period, nonce, item)),
-        },
-      ],
-    };
+      nonce = PAGE_WRAP_NONCE;
+    contentRecordOf(raw, "bodytext").keys = [
+      {
+        accessGroup: "premium",
+        period: "251023T1500",
+        key: base64urlEncode(await encrypt(period, nonce, item)),
+      },
+    ];
     const page = new DcaData(raw, { publisherOrigin: "https://publisher.example" });
     const handle = await crypto.subtle.importKey("raw", period, "AES-GCM", false, ["unwrapKey"]);
     const cache = new PeriodKeyCache({ storage: new Storage() });
@@ -2724,7 +2831,7 @@ test("storage-backed opaque response capability authenticates first use and clos
     const association = associationFor(
       page,
       "issuer_example",
-      { periodKeys: { premium: { "251023T1500": "AA" } } },
+      { periodKeys: [{ accessGroup: "premium", period: "251023T1500", key: "AA" }] },
       { clientPublicKey: { kty: "EC", crv: "P-256", x: "request-x", y: "request-y" } },
     );
     const application = await resolver.applyResponse(
@@ -2732,7 +2839,9 @@ test("storage-backed opaque response capability authenticates first use and clos
       "issuer_example",
       {
         transport: { method: "ECDH-P256" },
-        keys: { periodKeys: { premium: { "251023T1500": { key: "wrapped" } } } },
+        keys: {
+          periodKeys: [{ accessGroup: "premium", period: "251023T1500", key: { key: "wrapped" } }],
+        },
       },
       association,
     );
@@ -2796,7 +2905,13 @@ test("wrapped opener refuses extractable handles and raw item bytes without supp
   const association = associationFor(
     page,
     "issuer_example",
-    { contentKeys: { bodytext: "AA", raw: "AA", sibling: "AA" } },
+    {
+      contentKeys: [
+        { contentName: "bodytext", key: "AA" },
+        { contentName: "raw", key: "AA" },
+        { contentName: "sibling", key: "AA" },
+      ],
+    },
     { clientPublicKey: { kty: "EC", crv: "P-256", x: "request-x", y: "request-y" } },
   );
   const result = await resolver.applyResponse(
@@ -2805,7 +2920,11 @@ test("wrapped opener refuses extractable handles and raw item bytes without supp
     {
       transport: { method: "ECDH-P256" },
       keys: {
-        contentKeys: { bodytext: { key: "bad" }, raw: { key: "raw" }, sibling: { key: "good" } },
+        contentKeys: [
+          { contentName: "bodytext", key: { key: "bad" } },
+          { contentName: "raw", key: { key: "raw" } },
+          { contentName: "sibling", key: { key: "good" } },
+        ],
       },
     },
     association,
@@ -2834,15 +2953,23 @@ test("base-presented period coordinate survives extension false; unsolicited coo
     "issuer_example",
     {
       keys: {
-        periodKeys: {
-          premium: {
-            "251023T1500": base64urlEncode(new Uint8Array(16)),
-            "251023T1600": base64urlEncode(new Uint8Array(16)),
+        periodKeys: [
+          {
+            accessGroup: "premium",
+            period: "251023T1500",
+            key: base64urlEncode(new Uint8Array(16)),
           },
-        },
+          {
+            accessGroup: "premium",
+            period: "251023T1600",
+            key: base64urlEncode(new Uint8Array(16)),
+          },
+        ],
       },
     },
-    associationFor(page, "issuer_example", { periodKeys: { premium: { "251023T1500": "AA" } } }),
+    associationFor(page, "issuer_example", {
+      periodKeys: [{ accessGroup: "premium", period: "251023T1500", key: "AA" }],
+    }),
   );
   assert.equal(result.accepted, 1);
   assert.equal(filed.length, 1);
@@ -2853,12 +2980,12 @@ test("base-presented period coordinate survives extension false; unsolicited coo
 test("empty optional response containers do not conflict with truthful family reports", async () => {
   const page = new DcaData(pageData(), { publisherOrigin: "https://publisher.example" });
   const association = associationFor(page, "issuer_example", {
-    periodKeys: { premium: { "251023T1500": "AA" } },
+    periodKeys: [{ accessGroup: "premium", period: "251023T1500", key: "AA" }],
   });
   for (const sections of [
     {},
-    { periodKeys: {} },
-    { chainKeys: {} },
+    { periodKeys: [] },
+    { chainKeys: [] },
     { periodKeys: { premium: {} } },
     { chainKeys: { premium: {} } },
   ]) {
@@ -2875,8 +3002,8 @@ test("empty optional response containers do not conflict with truthful family re
       page,
       "issuer_example",
       {
-        keys: { contentKeys: {}, ...sections },
-        notDelivered: { premium: { reason: "unavailable" } },
+        keys: { contentKeys: [], ...sections },
+        notDelivered: [{ accessGroup: "premium", reason: "unavailable" }],
       },
       association,
     );
@@ -2892,7 +3019,7 @@ test("empty optional response containers do not conflict with truthful family re
       await new ContentKeyResolver().applyResponse(
         page,
         "issuer_example",
-        { keys: { contentKeys: {} } },
+        { keys: { contentKeys: [] } },
         association,
       )
     ).accepted,
@@ -2903,8 +3030,8 @@ test("empty optional response containers do not conflict with truthful family re
 test("actual family leaf conflicts before reusable writes without discarding an independent item key", async () => {
   const page = new DcaData(pageData(), { publisherOrigin: "https://publisher.example" });
   const association = associationFor(page, "issuer_example", {
-    contentKeys: { bodytext: "AA" },
-    periodKeys: { premium: { "251023T1500": "AA" } },
+    contentKeys: [{ contentName: "bodytext", key: "AA" }],
+    periodKeys: [{ accessGroup: "premium", period: "251023T1500", key: "AA" }],
   });
   for (const section of ["periodKeys", "chainKeys"])
     for (const value of [null, base64urlEncode(new Uint8Array(16))]) {
@@ -2923,10 +3050,18 @@ test("actual family leaf conflicts before reusable writes without discarding an 
         "issuer_example",
         {
           keys: {
-            contentKeys: { bodytext: base64urlEncode(new Uint8Array(16).fill(6)) },
-            [section]: { premium: { "251023T1500": value } },
+            contentKeys: [
+              { contentName: "bodytext", key: base64urlEncode(new Uint8Array(16).fill(6)) },
+            ],
+            [section]: [
+              {
+                accessGroup: "premium",
+                [section === "periodKeys" ? "period" : "cutoff"]: "251023T1500",
+                key: value,
+              },
+            ],
           },
-          notDelivered: { premium: { reason: "unavailable" } },
+          notDelivered: [{ accessGroup: "premium", reason: "unavailable" }],
         },
         association,
       );
@@ -3004,7 +3139,12 @@ describe("representation classification by JSON type", () => {
       const delivered = page();
       assert.deepEqual(
         await applyResponse(resolver, delivered, "issuer_example", {
-          keys: { contentKeys: { bodytext: key(4), sibling: structuredClone(entry) } },
+          keys: {
+            contentKeys: [
+              { contentName: "bodytext", key: key(4) },
+              { contentName: "sibling", key: structuredClone(entry) },
+            ],
+          },
         }),
         { accepted: 0, errors: [], issues: [{ section: "response", code: "invalid_transport" }] },
       );
@@ -3015,8 +3155,14 @@ describe("representation classification by JSON type", () => {
 
   test("the classification spans supported content and period sections", async () => {
     for (const keys of [
-      { contentKeys: { bodytext: key(4) }, periodKeys: { premium: { [T]: {} } } },
-      { contentKeys: { bodytext: {} }, periodKeys: { premium: { [T]: key(5) } } },
+      {
+        contentKeys: [{ contentName: "bodytext", key: key(4) }],
+        periodKeys: [{ accessGroup: "premium", period: T, key: {} }],
+      },
+      {
+        contentKeys: [{ contentName: "bodytext", key: {} }],
+        periodKeys: [{ accessGroup: "premium", period: T, key: key(5) }],
+      },
     ]) {
       const { counts, resolver } = await instrumented();
       const delivered = page();
@@ -3050,7 +3196,10 @@ describe("representation classification by JSON type", () => {
     const delivered = page();
     assert.deepEqual(
       await applyResponse(resolver, delivered, "issuer_example", {
-        keys: { contentKeys: { bodytext: key(4) }, chainKeys: { premium: { [T]: {} } } },
+        keys: {
+          contentKeys: [{ contentName: "bodytext", key: key(4) }],
+          chainKeys: [{ accessGroup: "premium", cutoff: T, key: {} }],
+        },
       }),
       { accepted: 0, errors: [], issues: [{ section: "response", code: "invalid_transport" }] },
     );
@@ -3071,7 +3220,12 @@ describe("representation classification by JSON type", () => {
       const delivered = page();
       assert.deepEqual(
         await applyResponse(resolver, delivered, "issuer_example", {
-          keys: { contentKeys: { bodytext: key(4), sibling: structuredClone(entry) } },
+          keys: {
+            contentKeys: [
+              { contentName: "bodytext", key: key(4) },
+              { contentName: "sibling", key: structuredClone(entry) },
+            ],
+          },
         }),
         { accepted: 1, errors: [], issues: [{ section: "contentKeys", code: "malformed_key" }] },
       );
@@ -3088,7 +3242,10 @@ describe("representation classification by JSON type", () => {
     const delivered = page();
     assert.deepEqual(
       await applyResponse(resolver, delivered, "issuer_example", {
-        keys: { contentKeys: { bodytext: key(4) }, chainKeys: { premium: { [T]: {} } } },
+        keys: {
+          contentKeys: [{ contentName: "bodytext", key: key(4) }],
+          chainKeys: [{ accessGroup: "premium", cutoff: T, key: {} }],
+        },
       }),
       { accepted: 1, errors: [], issues: [{ section: "chainKeys", code: "unsupported_section" }] },
     );
@@ -3107,8 +3264,17 @@ describe("representation classification by JSON type", () => {
       await resolver.applyResponse(
         delivered,
         "issuer_example",
-        { keys: { contentKeys: { bodytext: key(4), unsolicited: {} } } },
-        associationFor(delivered, "issuer_example", { contentKeys: { bodytext: key(4) } }),
+        {
+          keys: {
+            contentKeys: [
+              { contentName: "bodytext", key: key(4) },
+              { contentName: "unsolicited", key: {} },
+            ],
+          },
+        },
+        associationFor(delivered, "issuer_example", {
+          contentKeys: [{ contentName: "bodytext", key: key(4) }],
+        }),
       ),
       {
         accepted: 0,
@@ -3128,9 +3294,14 @@ describe("representation classification by JSON type", () => {
         delivered,
         "issuer_example",
         {
-          keys: { contentKeys: { bodytext: key(4) }, periodKeys: { [family]: { [T]: {} } } },
+          keys: {
+            contentKeys: [{ contentName: "bodytext", key: key(4) }],
+            periodKeys: [{ accessGroup: family, period: T, key: {} }],
+          },
         },
-        associationFor(delivered, "issuer_example", { contentKeys: { bodytext: key(4) } }),
+        associationFor(delivered, "issuer_example", {
+          contentKeys: [{ contentName: "bodytext", key: key(4) }],
+        }),
       );
       assert.deepEqual(result, {
         accepted: 0,
@@ -3146,7 +3317,10 @@ describe("representation classification by JSON type", () => {
     for (const bodytext of [{ key: "wrapped" }, undefined]) {
       const { counts, resolver } = await instrumented();
       const delivered = page();
-      const contentKeys = { unsolicited: key(4), ...(bodytext ? { bodytext } : {}) };
+      const contentKeys = [
+        { contentName: "unsolicited", key: key(4) },
+        ...(bodytext ? [{ contentName: "bodytext", key: bodytext }] : []),
+      ];
       const result = await resolver.applyResponse(
         delivered,
         "issuer_example",
@@ -3157,7 +3331,7 @@ describe("representation classification by JSON type", () => {
         associationFor(
           delivered,
           "issuer_example",
-          { contentKeys: { bodytext: "sealed" } },
+          { contentKeys: [{ contentName: "bodytext", key: "sealed" }] },
           {
             clientPublicKey: { kty: "EC", crv: "P-256", x: "request-x", y: "request-y" },
           },
@@ -3197,11 +3371,13 @@ describe("representation classification by JSON type", () => {
         "issuer_example",
         {
           keys: {
-            ...(withDirect ? { contentKeys: { bodytext: key(4) } } : {}),
-            chainKeys: { premium: { [T]: { key: "wrapped" } } },
+            ...(withDirect ? { contentKeys: [{ contentName: "bodytext", key: key(4) }] } : {}),
+            chainKeys: [{ accessGroup: "premium", cutoff: T, key: { key: "wrapped" } }],
           },
         },
-        associationFor(delivered, "issuer_example", { contentKeys: { bodytext: "sealed" } }),
+        associationFor(delivered, "issuer_example", {
+          contentKeys: [{ contentName: "bodytext", key: "sealed" }],
+        }),
       );
       assert.equal(result.accepted, 0);
       assert.deepEqual(result.issues, [
@@ -3224,7 +3400,7 @@ describe("representation classification by JSON type", () => {
       const { counts, resolver } = await instrumented(cache === null ? { cache } : {});
       const delivered = page();
       const result = await applyResponse(resolver, delivered, "issuer_example", {
-        keys: { contentKeys: { bodytext: key(4) }, periodKeys },
+        keys: { contentKeys: [{ contentName: "bodytext", key: key(4) }], periodKeys },
       });
       assert.equal(result.accepted, 1);
       assert.equal(
@@ -3246,11 +3422,278 @@ describe("representation classification by JSON type", () => {
     assert.deepEqual(
       await applyResponse(resolver, delivered, "issuer_example", {
         transport: { method: "ECDH-P256" },
-        keys: { contentKeys: { bodytext: { key: "wrapped" }, sibling: {} } },
+        keys: {
+          contentKeys: [
+            { contentName: "bodytext", key: { key: "wrapped" } },
+            { contentName: "sibling", key: {} },
+          ],
+        },
       }),
       { accepted: 1, errors: [], issues: [{ section: "contentKeys", code: "malformed_key" }] },
     );
     assert.equal(counts.opens, 1, "only the well-formed object reaches the opener");
     assert.equal(await resolver.contentKeyFor(delivered, "bodytext"), await handle);
+  });
+});
+
+describe("derived period-wrap nonces", () => {
+  const RENDER_ID = "AAAAAAAAAAAAAAAAAAAAAA";
+  const T = "251023T1500";
+
+  /**
+   * One `{ period, key }` wrap wrapped under the nonce this file derives on its own.
+   * @param {Uint8Array} periodKey @param {Uint8Array} contentKey
+   * @param {{ renderId?: string, contentName?: string, accessGroup?: string, t?: string, aad?: Uint8Array }} [at]
+   */
+  async function wrapAt(periodKey, contentKey, at = {}) {
+    const coordinate = {
+      renderId: RENDER_ID,
+      contentName: "bodytext",
+      accessGroup: "premium",
+      t: T,
+      ...at,
+    };
+    const nonce = contentKeyWrapNonceOctets(coordinate);
+    return {
+      period: coordinate.t,
+      key: base64urlEncode(await encrypt(periodKey, nonce, contentKey, coordinate.aad)),
+    };
+  }
+
+  /**
+   * A page whose bodytext carries `wraps`, each under its accessGroup, as the
+   * `keys` records `{accessGroup, period, key, ...}`.
+   * @param {Record<string, any[]>} wraps @param {string} [renderId]
+   */
+  function pageWith(wraps, renderId = RENDER_ID) {
+    const raw = pageData();
+    raw.resource.renderId = renderId;
+    raw.resourceJWT = compactJwt({ ...raw.resource, renderId });
+    contentRecordOf(raw, "bodytext").keys = Object.entries(wraps).flatMap(([accessGroup, list]) =>
+      list.map((wrap) => ({ accessGroup, ...wrap })),
+    );
+    return new DcaData(raw);
+  }
+
+  /** @param {(group: string, t: string) => (Uint8Array|CryptoKey)[]} lookup */
+  function cacheOf(lookup) {
+    /** @type {string[]} */
+    const reads = [];
+    return {
+      reads,
+      cache: {
+        put: async () => undefined,
+        candidatesAt: async (/** @type {string} */ group, /** @type {string} */ t) => {
+          reads.push(`${group}|${t}`);
+          return lookup(group, t);
+        },
+        attempted() {},
+      },
+    };
+  }
+
+  const periodKey = new Uint8Array(16).fill(3);
+  const contentKey = new Uint8Array(16).fill(7);
+
+  test("a { period, key } wrap opens through raw and non-extractable cached period keys", async () => {
+    const handle = await globalThis.crypto.subtle.importKey("raw", periodKey, "AES-GCM", false, [
+      "unwrapKey",
+    ]);
+    const page = pageWith({ premium: [await wrapAt(periodKey, contentKey)] });
+    const raw = await new ContentKeyResolver({
+      cache: cacheOf(() => [periodKey]).cache,
+    }).contentKeyFor(page, "bodytext");
+    assert.deepEqual(raw, contentKey);
+    const opaque = await new ContentKeyResolver({
+      cache: cacheOf(() => [handle]).cache,
+    }).contentKeyFor(page, "bodytext");
+    assert.ok(opaque instanceof globalThis.CryptoKey && opaque.extractable === false);
+    const probe = await encrypt(contentKey, new Uint8Array(12), new Uint8Array([1, 2, 3]));
+    assert.deepEqual(await decrypt(opaque, new Uint8Array(12), probe), new Uint8Array([1, 2, 3]));
+  });
+
+  test("the nonce comes from the authored entry, never from the candidate's cache label", async () => {
+    // A chain-key candidate source reports its own label for where it found
+    // the key. A resolver deriving from that label would build another nonce.
+    const page = pageWith({ premium: [await wrapAt(periodKey, contentKey)] });
+    const origin = { kind: "cached-chain-key", accessGroup: "basic", t: "251023T1600" };
+    const resolver = new ContentKeyResolver({
+      chainCache: {
+        put() {},
+        candidates: async () => [],
+        attempted: async () => {},
+        clearReaderContext: async () => {},
+      },
+      chainKeyProfile: {
+        constructionProfile: { name: "test", constructionId: "test", chainKeyBytes: 16 },
+        parametersForResponse: () => ({}),
+        acceptsPeriodKeyResponseCoordinate: () => true,
+        acceptsResponseCoordinate: () => true,
+        candidateSourceFor: () => ({
+          async *attempts(/** @type {any} */ { entries }) {
+            for (const entry of entries) yield { entry, periodKey, origin };
+          },
+        }),
+      },
+    });
+    const resolved = await resolver.contentKeyWithOriginFor(page, "bodytext");
+    assert.deepEqual(resolved.key, contentKey);
+    assert.deepEqual(resolved.origin, origin);
+  });
+
+  test("a wrap relabelled to another period, group or render misses under the right key", async () => {
+    const valid = await wrapAt(periodKey, contentKey);
+    const relabelled = [
+      ["another period", pageWith({ premium: [{ ...valid, period: "251023T1600" }] })],
+      // The ordinary wrap has no AAD, so before the derived nonce this entry
+      // opened under a group whose key happened to share the bytes.
+      ["another group", pageWith({ basic: [valid] })],
+      ["another render", pageWith({ premium: [valid] }, "AQAAAAAAAAAAAAAAAAAAAA")],
+      [
+        "another item",
+        pageWith({ premium: [await wrapAt(periodKey, contentKey, { contentName: "sidebar" })] }),
+      ],
+    ];
+    for (const [label, page] of relabelled) {
+      const resolver = new ContentKeyResolver({ cache: cacheOf(() => [periodKey]).cache });
+      assert.equal(
+        await resolver.contentKeyFor(/** @type {DcaData} */ (page), "bodytext"),
+        null,
+        String(label),
+      );
+    }
+    const control = new ContentKeyResolver({ cache: cacheOf(() => [periodKey]).cache });
+    assert.deepEqual(
+      await control.contentKeyFor(pageWith({ premium: [valid] }), "bodytext"),
+      contentKey,
+    );
+  });
+
+  test("a render ID that is not 16 canonical octets offers no cached route", async () => {
+    const valid = await wrapAt(periodKey, contentKey);
+    for (const renderId of ["r-1", "AAAAAAAAAAAAAAAAAAAAAB", "AAAAAAAAAAAAAAAAAAAAAA=="]) {
+      const { cache, reads } = cacheOf(() => [periodKey]);
+      const resolver = new ContentKeyResolver({ cache });
+      assert.equal(
+        await resolver.contentKeyFor(pageWith({ premium: [valid] }, renderId), "bodytext"),
+        null,
+      );
+      assert.deepEqual(reads, [], `${renderId}: no cache read`);
+    }
+  });
+
+  test("a carried nonce member of any value or type supplies no IV and causes no miss", async () => {
+    const valid = await wrapAt(periodKey, contentKey);
+    const wrongNonce = base64urlEncode(new Uint8Array(12).fill(1));
+    for (const nonce of [wrongNonce, "AAAA=", "", 12, null, [], { iv: wrongNonce }]) {
+      const resolver = new ContentKeyResolver({ cache: cacheOf(() => [periodKey]).cache });
+      assert.deepEqual(
+        await resolver.contentKeyFor(pageWith({ premium: [{ ...valid, nonce }] }), "bodytext"),
+        contentKey,
+        JSON.stringify(nonce),
+      );
+    }
+    // A wrap made under the carried value instead of the derived one does not open.
+    const fixed = new Uint8Array(12).fill(4);
+    const legacy = {
+      period: T,
+      nonce: base64urlEncode(fixed),
+      key: base64urlEncode(await encrypt(periodKey, fixed, contentKey)),
+    };
+    const resolver = new ContentKeyResolver({ cache: cacheOf(() => [periodKey]).cache });
+    assert.equal(await resolver.contentKeyFor(pageWith({ premium: [legacy] }), "bodytext"), null);
+  });
+
+  test("the selected entry AAD enters the nonce transcript as well as GCM", async () => {
+    const aad = utf8Encode("selected-wrap-aad");
+    const interpreted = new ContentKeyResolver({
+      cache: cacheOf(() => [periodKey]).cache,
+      entryInterpretation: () => ({ aad }),
+    });
+    assert.deepEqual(
+      await interpreted.contentKeyFor(
+        pageWith({ premium: [await wrapAt(periodKey, contentKey, { aad })] }),
+        "bodytext",
+      ),
+      contentKey,
+    );
+    // GCM under the AAD but the nonce of the ordinary transcript: a resolver
+    // that left the AAD out of the nonce would open this.
+    const ordinaryNonce = contentKeyWrapNonceOctets({
+      renderId: RENDER_ID,
+      contentName: "bodytext",
+      accessGroup: "premium",
+      t: T,
+    });
+    const halfBound = {
+      period: T,
+      key: base64urlEncode(await encrypt(periodKey, ordinaryNonce, contentKey, aad)),
+    };
+    assert.equal(
+      await interpreted.contentKeyFor(pageWith({ premium: [halfBound] }), "bodytext"),
+      null,
+    );
+  });
+
+  test("rival period keys for one entry share one derived nonce within a resolve", async () => {
+    const page = pageWith({ premium: [await wrapAt(periodKey, contentKey)] });
+    const rivals = [new Uint8Array(16).fill(8), new Uint8Array(16).fill(9), periodKey];
+    const subtle = globalThis.crypto.subtle;
+    const digest = subtle.digest;
+    let digests = 0;
+    Object.defineProperty(subtle, "digest", {
+      configurable: true,
+      value: (/** @type {any[]} */ ...args) => {
+        digests += 1;
+        return digest.apply(subtle, /** @type {any} */ (args));
+      },
+    });
+    try {
+      const resolver = new ContentKeyResolver({ cache: cacheOf(() => rivals).cache });
+      assert.deepEqual(await resolver.contentKeyFor(page, "bodytext"), contentKey);
+      assert.equal(digests, 1, "three rivals, one entry, one digest");
+      assert.deepEqual(await resolver.contentKeyFor(page, "bodytext"), contentKey);
+    } finally {
+      delete (/** @type {any} */ (subtle).digest);
+    }
+  });
+
+  test("a reset while the nonce digest is pending publishes no key", async () => {
+    const page = pageWith({ premium: [await wrapAt(periodKey, contentKey)] });
+    /** @type {ContentKeyResolver} */
+    let resolver;
+    let clearing = Promise.resolve();
+    let interpretations = 0;
+    resolver = new ContentKeyResolver({
+      cache: { ...cacheOf(() => [periodKey]).cache, clearReaderContext: async () => {} },
+      entryInterpretation: () => {
+        interpretations += 1;
+        // The digest is awaited right after this synchronous call; the reset
+        // lands while it is pending.
+        if (interpretations === 1) queueMicrotask(() => (clearing = resolver.clearReaderContext()));
+        return { aad: undefined };
+      },
+    });
+    await assert.rejects(resolver.contentKeyWithOriginFor(page, "bodytext"), {
+      code: "context_retired",
+    });
+    await clearing;
+    assert.deepEqual(
+      await resolver.contentKeyFor(page, "bodytext"),
+      contentKey,
+      "the next reader opens",
+    );
+  });
+
+  test("a valid ordinary wrap beside a malformed sibling still opens", async () => {
+    const page = pageWith({
+      premium: [
+        { period: T, key: "!!!!" },
+        { period: "not-a-label", key: (await wrapAt(periodKey, contentKey)).key },
+        await wrapAt(periodKey, contentKey),
+      ],
+    });
+    const resolver = new ContentKeyResolver({ cache: cacheOf(() => [periodKey]).cache });
+    assert.deepEqual(await resolver.contentKeyFor(page, "bodytext"), contentKey);
   });
 });

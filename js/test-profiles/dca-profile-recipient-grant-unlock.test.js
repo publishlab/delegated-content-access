@@ -36,7 +36,7 @@ test("recipient browser presents one bearer to the trusted issuer and opens chan
     assert.equal(request.issuerName, SELECTION.issuerName);
     assert.deepEqual(Object.keys(request.sealed), ["contentKeys"]);
     assert.deepEqual(
-      Object.keys(request.sealed.contentKeys),
+      request.sealed.contentKeys.map((/** @type {any} */ record) => record.contentName),
       index === 0 ? ["body", "extra"] : ["body", "extra", "new_item"],
     );
     assert.equal(Object.hasOwn(request, "shareGrant"), false);

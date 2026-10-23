@@ -31,10 +31,14 @@ function page() {
     {
       version: "1",
       resourceJWT: compactJwt({ origin: "https://news.example", renderId: "r-1" }),
-      issuerData: { [ISSUER]: { keyId: "k1", sealed: {} } },
-      contentData: {
-        bodytext: { contentType: "text/html", nonce: base64urlEncode(new Uint8Array(12)) },
-      },
+      issuerData: [{ issuerName: ISSUER, keyId: "k1", sealed: {} }],
+      contentData: [
+        {
+          contentName: "bodytext",
+          contentType: "text/html",
+          nonce: base64urlEncode(new Uint8Array(12)),
+        },
+      ],
     },
     { publisherOrigin: "https://news.example" },
   );
@@ -50,7 +54,7 @@ function association(dcaData, endpoint) {
       issuerName: ISSUER,
       resourceJWT: dcaData.resourceJWT,
       keyId: "k1",
-      sealed: { contentKeys: { bodytext: "AA" } },
+      sealed: { contentKeys: [{ contentName: "bodytext", key: "AA" }] },
       requestedThings: { bodytext: ["politics"] },
     },
     endpoint,
@@ -185,7 +189,12 @@ test("a consumer that accepts nothing makes no lease; an absent section is not o
 test("base sections behave the same beside a consumer", async () => {
   const dcaData = page();
   const response = {
-    keys: { contentKeys: { bodytext: base64urlEncode(KEY), stray: base64urlEncode(KEY) } },
+    keys: {
+      contentKeys: [
+        { contentName: "bodytext", key: base64urlEncode(KEY) },
+        { contentName: "stray", key: base64urlEncode(KEY) },
+      ],
+    },
   };
   const plain = await new ContentKeyResolver().applyResponse(
     dcaData,
@@ -221,7 +230,7 @@ test("a consumer section counts toward the response representation and the stric
     dcaData,
     ISSUER,
     {
-      keys: { contentKeys: { bodytext: base64urlEncode(KEY) } },
+      keys: { contentKeys: [{ contentName: "bodytext", key: base64urlEncode(KEY) }] },
       things: { keys: { politics: { key: "AA" } } },
     },
     association(dcaData),
@@ -391,8 +400,8 @@ test("a consumer's key_retired records join the application errors beside the co
     dcaData,
     ISSUER,
     {
-      keys: { contentKeys: {} },
-      errors: { bodytext: { error: "key_retired", message: "retired" } },
+      keys: { contentKeys: [] },
+      errors: [{ coordinate: "bodytext", error: "key_retired", message: "retired" }],
       things: {},
     },
     association(dcaData),

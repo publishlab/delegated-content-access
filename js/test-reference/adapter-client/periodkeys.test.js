@@ -37,7 +37,15 @@ import {
 import { openEcdhEnvelope } from "../support/ecdhEnvelope.js";
 import { issuerKeypair, signingKeypair, TEST_ISSUER_PRIVATE_KEY_PKCS8 } from "../support/keys.js";
 import { sealerPeriodKeysRender, sealerPeriodKeysSetup } from "../support/sealerCases.js";
+import { contentKeyWrapNonceOctets } from "../support/contentKeyWrapNonceOctets.js";
 import { wholeRenderIssuerSupplyPlan } from "../../core-publisher/issuerSupplyPlan.js";
+import {
+  contentRecordOf,
+  issuerBlockOf,
+  issuerPeriodsOn,
+  recordNamed,
+  wrapsOf,
+} from "../../test-lib/helpers/inspect.js";
 
 const ISSUER_NAME = "paywall_subscription_service";
 const KEY_ID = "2025-10";
@@ -54,6 +62,20 @@ const COPY_ORIGIN = "https://copy.example";
 
 const ARTICLE_A = "<p>The council voted 7-2 to rezone the harbour.</p>";
 const ARTICLE_B = "<p>The harbour plan goes to a second reading.</p>";
+
+/**
+ * The periods a run of `{accessGroup, period, key}` records names for one
+ * accessGroup, in order.
+ *
+ * @param {any[]} records
+ * @param {string} accessGroup
+ * @returns {string[]}
+ */
+function periodsIn(records, accessGroup) {
+  return records
+    .filter((record) => record.accessGroup === accessGroup)
+    .map((record) => record.period);
+}
 
 /**
  * A publisher and an issuer that share nothing but the issuer's public key.
@@ -194,12 +216,12 @@ test("a Sealer given no supply seals no periodKeys - the content-key-only case",
 
   const { dcaData } = await sealer.seal();
   assert.equal(
-    Object.hasOwn(dcaData.contentData.bodytext, "keys"),
+    Object.hasOwn(contentRecordOf(dcaData, "bodytext"), "keys"),
     false,
     "no supply, no cached path, so no wrapped contentKeys on the wire",
   );
   assert.equal(
-    dcaData.issuerData[ISSUER_NAME].sealed.periodKeys,
+    issuerBlockOf(dcaData, ISSUER_NAME).sealed.periodKeys,
     undefined,
     "and the issuer is handed contentKeys only, no sealed periodKeys",
   );
@@ -413,30 +435,29 @@ test("the wire carries the wrapped contentKeys and the sealed periodKeys", async
   const { render } = await world();
   const page = await render("123456", ARTICLE_A);
 
-  const entries = page.contentData.bodytext.keys.premium;
+  const entries = wrapsOf(page, "bodytext", "premium");
   assert.ok(
-    Array.isArray(entries),
-    "the accessGroup value is the format's array of { t, nonce, key }",
+    Array.isArray(contentRecordOf(page, "bodytext").keys),
+    "the item's keys are the format's array of { accessGroup, period, key }",
   );
   assert.deepEqual(
-    entries.map((/** @type {any} */ e) => e.t),
+    entries.map((/** @type {any} */ e) => e.period),
     ["251023T1400", "251023T1500"],
   );
   for (const entry of entries) {
-    assert.deepEqual(Object.keys(entry).sort(), ["key", "nonce", "t"]);
+    assert.deepEqual(Object.keys(entry).sort(), ["accessGroup", "key", "period"]);
     assert.equal(entry.key.length, 43, "a 16-byte key plus a 16-byte tag, base64url");
-    assert.match(entry.nonce, /^[A-Za-z0-9_-]+$/);
   }
 
-  const sealed = page.issuerData[ISSUER_NAME].sealed;
+  const sealed = issuerBlockOf(page, ISSUER_NAME).sealed;
   assert.deepEqual(Object.keys(sealed).sort(), ["contentKeys", "periodKeys"]);
-  assert.deepEqual(Object.keys(sealed.periodKeys.premium), ["251023T1400", "251023T1500"]);
-  assert.equal(typeof sealed.periodKeys.premium["251023T1400"], "string");
+  assert.deepEqual(issuerPeriodsOn(page, ISSUER_NAME, "premium"), ["251023T1400", "251023T1500"]);
+  assert.equal(typeof sealed.periodKeys[0].key, "string");
 
-  // The client-facing entries and the issuer-facing map name the same periods.
+  // The client-facing entries and the issuer-facing records name the same periods.
   assert.deepEqual(
-    entries.map((/** @type {any} */ e) => e.t),
-    Object.keys(sealed.periodKeys.premium),
+    entries.map((/** @type {any} */ e) => e.period),
+    issuerPeriodsOn(page, ISSUER_NAME, "premium"),
   );
 
   assert.ok(!JSON.stringify(page).includes("periodSecret"));
@@ -448,9 +469,9 @@ portableSealerPeriodKeysTest(
     // One render through the factory, on plain setup a port builds its own
     // Sealer from: a fixed instant, one random stream, a fixed key for each of
     // the two periods and the known test keys. The reference reads the stream in
-    // this order: render id, content key, the wrap nonce of each
-    // period, the nonce that seals the content key to the issuer, and the nonce
-    // that seals each period key.
+    // this order: render id, content key. Ordinary ECDH envelopes draw no nonce.
+    // Each period wrap
+    // derives its nonce from the render id and its coordinate and draws nothing.
     const setup = sealerPeriodKeysSetup();
     const stream = setup.randomStream;
     const periodKeys = setup.fixedPeriodKeys.premium;
@@ -465,30 +486,29 @@ portableSealerPeriodKeysTest(
       JSON.stringify({ ...rendered.dcaData, sealedContent: rendered.sealedContent }),
     );
 
-    const entries = page.contentData.bodytext.keys.premium;
+    const entries = wrapsOf(page, "bodytext", "premium");
     assert.ok(
-      Array.isArray(entries),
-      "the accessGroup value is the format's array of { t, nonce, key }",
+      Array.isArray(contentRecordOf(page, "bodytext").keys),
+      "the item's keys are the format's array of { accessGroup, period, key }",
     );
     assert.deepEqual(
-      entries.map((/** @type {any} */ e) => e.t),
+      entries.map((/** @type {any} */ e) => e.period),
       ["251023T1400", "251023T1500"],
     );
     for (const entry of entries) {
-      assert.deepEqual(Object.keys(entry).sort(), ["key", "nonce", "t"]);
+      assert.deepEqual(Object.keys(entry).sort(), ["accessGroup", "key", "period"]);
       assert.equal(entry.key.length, 43, "a 16-byte key plus a 16-byte tag, base64url");
-      assert.match(entry.nonce, /^[A-Za-z0-9_-]+$/);
     }
 
-    const sealed = page.issuerData[ISSUER_NAME].sealed;
+    const sealed = issuerBlockOf(page, ISSUER_NAME).sealed;
     assert.deepEqual(Object.keys(sealed).sort(), ["contentKeys", "periodKeys"]);
-    assert.deepEqual(Object.keys(sealed.periodKeys.premium), ["251023T1400", "251023T1500"]);
-    assert.equal(typeof sealed.periodKeys.premium["251023T1400"], "string");
+    assert.deepEqual(issuerPeriodsOn(page, ISSUER_NAME, "premium"), ["251023T1400", "251023T1500"]);
+    assert.equal(typeof sealed.periodKeys[0].key, "string");
 
-    // The client-facing entries and the issuer-facing map name the same periods.
+    // The client-facing entries and the issuer-facing records name the same periods.
     assert.deepEqual(
-      entries.map((/** @type {any} */ e) => e.t),
-      Object.keys(sealed.periodKeys.premium),
+      entries.map((/** @type {any} */ e) => e.period),
+      issuerPeriodsOn(page, ISSUER_NAME, "premium"),
     );
 
     assert.ok(!JSON.stringify(page).includes("periodSecret"));
@@ -502,51 +522,52 @@ portableSealerPeriodKeysTest(
     /** @param {string} text */
     const bytesOf = (text) => new Uint8Array(Buffer.from(text, "base64url"));
     assert.equal(page.resource.renderId, drawn(0, 16));
-    assert.equal(Object.hasOwn(page.contentData.bodytext, "nonce"), false);
-    assert.deepEqual(
-      entries.map((/** @type {any} */ e) => e.nonce),
-      [drawn(32, 44), drawn(44, 56)],
-    );
+    assert.equal(Object.hasOwn(contentRecordOf(page, "bodytext"), "nonce"), false);
     for (const entry of entries) {
       const periodKey = await crypto.subtle.importKey(
         "raw",
-        periodKeys[/** @type {"251023T1400" | "251023T1500"} */ (entry.t)],
+        periodKeys[/** @type {"251023T1400" | "251023T1500"} */ (entry.period)],
         { name: "AES-GCM" },
         false,
         ["decrypt"],
       );
       const contentKey = await crypto.subtle.decrypt(
-        { name: "AES-GCM", iv: bytesOf(entry.nonce) },
+        {
+          name: "AES-GCM",
+          iv: contentKeyWrapNonceOctets({
+            renderId: page.resource.renderId,
+            contentName: "bodytext",
+            accessGroup: "premium",
+            t: entry.period,
+          }),
+        },
         periodKey,
         bytesOf(entry.key),
       );
       assert.equal(
         Buffer.from(contentKey).toString("base64url"),
         drawn(16, 32),
-        `the ${entry.t} wrap opens to the content key`,
+        `the ${entry.period} wrap opens to the content key`,
       );
     }
-    // An ECDH envelope carries its nonce after the 65-byte ephemeral point.
-    /** @param {string} envelope */
-    const envelopeNonce = (envelope) =>
-      Buffer.from(bytesOf(envelope).subarray(65, 77)).toString("base64url");
-    assert.equal(envelopeNonce(sealed.contentKeys.bodytext), drawn(56, 68));
-    assert.deepEqual(
-      Object.values(sealed.periodKeys.premium).map((envelope) =>
-        envelopeNonce(/** @type {string} */ (envelope)),
-      ),
-      [drawn(68, 80), drawn(80, 92)],
+    const contentEnvelope = recordNamed(sealed.contentKeys, "contentName", "bodytext").key;
+    const periodEnvelopes = sealed.periodKeys.filter(
+      (/** @type {any} */ record) => record.accessGroup === "premium",
     );
+    for (const envelope of [contentEnvelope, ...periodEnvelopes.map((record) => record.key)]) {
+      assert.equal(bytesOf(/** @type {string} */ (envelope)).length, 97);
+    }
+    assert.equal(stream.length, 32, "the render reads the stream to its last byte");
     // The issuer opens each envelope at its coordinate: the content-key one to the
     // drawn content key, and each period-key one to that period's fixed key.
     const renderId = page.resource.renderId;
     const openedContentKey = await openEcdhEnvelope(
-      sealed.contentKeys.bodytext,
+      contentEnvelope,
       `dca-bind-key-envelope|c|${renderId}|bodytext`,
       TEST_ISSUER_PRIVATE_KEY_PKCS8,
     );
     assert.equal(Buffer.from(openedContentKey).toString("base64url"), drawn(16, 32));
-    for (const [t, envelope] of Object.entries(sealed.periodKeys.premium)) {
+    for (const { period: t, key: envelope } of periodEnvelopes) {
       const opened = await openEcdhEnvelope(
         /** @type {string} */ (envelope),
         `dca-bind-key-envelope|p|${renderId}|premium|${t}`,
@@ -586,11 +607,11 @@ test("unlock once, cache the periodKeys, unwrap and decrypt", async () => {
   assert.deepEqual(missing, ["bodytext"], "an empty cache covers nothing");
 
   const request = unsealer.buildRequest(dcaData, ISSUER_NAME, missing);
-  assert.deepEqual(Object.keys(request.sealed.periodKeys.premium), ["251023T1400", "251023T1500"]);
+  assert.deepEqual(periodsIn(request.sealed.periodKeys, "premium"), ["251023T1400", "251023T1500"]);
 
   const { status, body } = await endpoint.unlock(JSON.stringify(request));
   assert.equal(status, 200);
-  assert.deepEqual(Object.keys(body.keys.periodKeys.premium), ["251023T1400", "251023T1500"]);
+  assert.deepEqual(periodsIn(body.keys.periodKeys, "premium"), ["251023T1400", "251023T1500"]);
   assert.equal(body.errors, undefined);
 
   await unsealer.applyResponse(dcaData, ISSUER_NAME, body);
@@ -638,7 +659,7 @@ test("a held content-key grant answers before cached period material, and the ca
   const heldGrant = new Uint8Array(16).fill(200);
   unsealer.buildRequest(dcaData, ISSUER_NAME, ["bodytext"]);
   await unsealer.applyResponse(dcaData, ISSUER_NAME, {
-    keys: { contentKeys: { bodytext: base64urlEncode(heldGrant) } },
+    keys: { contentKeys: [{ contentName: "bodytext", key: base64urlEncode(heldGrant) }] },
   });
 
   candidateCalls = 0;
@@ -766,7 +787,9 @@ test("a contentKey delivery never populates the cache, a periodKey delivery does
 
   unsealer.buildRequest(dcaData, ISSUER_NAME, ["bodytext"]);
   await unsealer.applyResponse(dcaData, ISSUER_NAME, {
-    keys: { contentKeys: { bodytext: base64urlEncode(new Uint8Array(16).fill(1)) } },
+    keys: {
+      contentKeys: [{ contentName: "bodytext", key: base64urlEncode(new Uint8Array(16).fill(1)) }],
+    },
   });
   assert.deepEqual(
     await cache.entries(),
@@ -777,7 +800,13 @@ test("a contentKey delivery never populates the cache, a periodKey delivery does
   unsealer.buildRequest(dcaData, ISSUER_NAME, ["bodytext"]);
   await unsealer.applyResponse(dcaData, ISSUER_NAME, {
     keys: {
-      periodKeys: { premium: { "251023T1400": base64urlEncode(new Uint8Array(16).fill(2)) } },
+      periodKeys: [
+        {
+          accessGroup: "premium",
+          period: "251023T1400",
+          key: base64urlEncode(new Uint8Array(16).fill(2)),
+        },
+      ],
     },
   });
   assert.equal((await cache.entries()).length, 1);
@@ -940,15 +969,22 @@ test("the newest eligible rival leads across issuer families before the trial li
       candidatesAt: reading.candidatesAt.bind(reading),
       attempted: () => {},
     });
-    const nonce = new Uint8Array(12).fill(7);
+    // The source itself opens nothing; this test calls the attempt with the
+    // nonce a resolver derives for this wrap's coordinate.
+    const nonce = contentKeyWrapNonceOctets({
+      renderId: "AAECAwQFBgcICQoLDA0ODw",
+      contentName: "bodytext",
+      accessGroup: "premium",
+      t,
+    });
     const contentKey = new Uint8Array(16).fill(42);
     const wrappingKey = await crypto.subtle.importKey("raw", newest, "AES-GCM", false, ["encrypt"]);
     const wrapped = new Uint8Array(
       await crypto.subtle.encrypt({ name: "AES-GCM", iv: nonce }, wrappingKey, contentKey),
     );
-    const entry = { t, nonce: base64urlEncode(nonce), key: base64urlEncode(wrapped) };
+    const entry = { t, key: base64urlEncode(wrapped) };
     assert.equal(
-      await attemptContentKeyWrap(entry, new Uint8Array(16).fill(4)),
+      await attemptContentKeyWrap(entry, new Uint8Array(16).fill(4), nonce),
       null,
       "the old generation does not authenticate the new wrap",
     );
@@ -961,7 +997,7 @@ test("the newest eligible rival leads across issuer families before the trial li
       issuerNames,
     })) {
       attempts.push(candidate.periodKey[0]);
-      opened ??= await attemptContentKeyWrap(entry, candidate.periodKey);
+      opened ??= await attemptContentKeyWrap(entry, candidate.periodKey, nonce);
     }
     assert.deepEqual(attempts, [9, 4, 3, 2], "the four-attempt slice includes the newest key");
     assert.deepEqual(opened, contentKey, "the retained newest key opens the wrap");

@@ -41,6 +41,7 @@ import { publisherRegistrationsOver } from "../demo/support/provisioning.js";
 import { utf8Decode } from "../core-shared/codec.js";
 import { ARTICLES, T_NEXT, T_NOW } from "../demo/scenarios/fixtures.js";
 import { contentAadOctets } from "../test-reference/support/contentAadOctets.js";
+import { wrapNonceOf } from "../test-reference/support/contentKeyWrapNonceOctets.js";
 
 const DIR = fileURLToPath(
   new URL(
@@ -72,6 +73,29 @@ const fromBase64url = (text) => new Uint8Array(Buffer.from(text, "base64url"));
 const sha256Hex = async (bytes) =>
   Buffer.from(await subtle.digest("SHA-256", bytes)).toString("hex");
 
+/**
+ * The period labels of one accessGroup's period-key records, in record order.
+ *
+ * @param {{ accessGroup: string, period: string }[]} records
+ * @param {string} accessGroup
+ */
+const periodsOf = (records, accessGroup) =>
+  records.filter((record) => record.accessGroup === accessGroup).map(({ period }) => period);
+
+/**
+ * The one record of a named collection whose `member` is `name`.
+ *
+ * @param {any[]} records
+ * @param {string} member
+ * @param {string} name
+ * @returns {any}
+ */
+function recordNamed(records, member, name) {
+  const found = records.filter((record) => record[member] === name);
+  assert.equal(found.length, 1, `one record with ${member} ${name}`);
+  return found[0];
+}
+
 /** @param {unknown} value */
 const hasChainGeometry = (value) => JSON.stringify(value).includes('"chainsPerDay"');
 
@@ -80,7 +104,7 @@ const hasChainGeometry = (value) => JSON.stringify(value).includes('"chainsPerDa
  * client's reader finds them.
  *
  * @param {any} render
- * @returns {{ root: any, dcaData: any, sealedContent: Record<string, string> }}
+ * @returns {{ root: any, dcaData: any, sealedContent: { contentName: string, content: string }[] }}
  */
 function delivered(render) {
   const root = domOver(render.markup, { publisherOrigin: render.publisherOrigin });
@@ -244,9 +268,16 @@ test(
       const { root, dcaData } = delivered(render);
       assert.equal(dcaData.resourceJWT, render.resourceJWT);
       // Period keys only: no sealed content key a client could open with instead.
-      const block = dcaData.issuerData[issuerName];
+      const block = recordNamed(dcaData.issuerData, "issuerName", issuerName);
       assert.equal(Object.hasOwn(block.sealed, "contentKeys"), false);
-      assert.deepEqual(Object.keys(block.sealed.periodKeys), [ACCESS_GROUP]);
+      assert.deepEqual(
+        [
+          ...new Set(
+            block.sealed.periodKeys.map((/** @type {any} */ record) => record.accessGroup),
+          ),
+        ],
+        [ACCESS_GROUP],
+      );
       assert.equal(hasChainGeometry(dcaData), false);
 
       const decisionsBefore = presented.length;
@@ -299,11 +330,14 @@ test(
     assert.deepEqual(renders[2].coordinates, { [ACCESS_GROUP]: [T_NEXT, T_AFTER_NEXT] });
 
     assert.equal(first.step, 1);
-    assert.deepEqual(first.request.sealed.contentKeys, {});
-    assert.deepEqual(Object.keys(first.request.sealed.periodKeys[ACCESS_GROUP]), [T_NOW, T_NEXT]);
+    assert.deepEqual(first.request.sealed.contentKeys, []);
+    assert.deepEqual(periodsOf(first.request.sealed.periodKeys, ACCESS_GROUP), [T_NOW, T_NEXT]);
     assert.equal(first.status, 200);
     assert.deepEqual(first.body, {
-      keys: { contentKeys: {}, periodKeys: { [ACCESS_GROUP]: { [T_NOW]: grantedKey } } },
+      keys: {
+        contentKeys: [],
+        periodKeys: [{ accessGroup: ACCESS_GROUP, period: T_NOW, key: grantedKey }],
+      },
     });
     assert.equal(fromBase64url(grantedKey).length, 16);
     assert.deepEqual(expected[0].presented, [
@@ -320,7 +354,7 @@ test(
     assert.equal(expected[1].browserUnlocks, 1, "the kept period key opened B");
 
     assert.equal(third.step, 3);
-    assert.deepEqual(Object.keys(third.request.sealed.periodKeys[ACCESS_GROUP]), [
+    assert.deepEqual(periodsOf(third.request.sealed.periodKeys, ACCESS_GROUP), [
       T_NEXT,
       T_AFTER_NEXT,
     ]);
@@ -364,22 +398,33 @@ test("stock WebCrypto confirms the recorded renders and what the granted period 
     );
   }
 
-  const grantedKey = fromBase64url(exchanges[0].body.keys.periodKeys[ACCESS_GROUP][T_NOW]);
+  const granted = exchanges[0].body.keys.periodKeys.filter(
+    (/** @type {any} */ record) => record.accessGroup === ACCESS_GROUP && record.period === T_NOW,
+  );
+  assert.equal(granted.length, 1, "one granted period-key record");
+  const grantedKey = fromBase64url(granted[0].key);
   const nextKey = fromBase64url(inputs.periodKeys[ACCESS_GROUP][T_NEXT]);
 
   /** @param {any} render */
   const itemOf = (render) => {
     const { dcaData, sealedContent } = delivered(render);
-    const item = dcaData.contentData.bodytext;
+    const item = recordNamed(dcaData.contentData, "contentName", "bodytext");
     assert.equal(Object.hasOwn(item, "aad"), false, "the item record carries no aad");
     // The hand-built transcript over this render's token and item, not the reference module.
     const aad = contentAadOctets(dcaData, "bodytext");
     /** @param {string} t */
-    const wrapAt = (t) => item.keys[ACCESS_GROUP].find((/** @type {any} */ wrap) => wrap.t === t);
-    return { item, aad, wrapAt, ciphertext: fromBase64url(sealedContent.bodytext) };
+    // The wrap nonce is not on the wire: it derives from this render's coordinate.
+    const wrapAt = (t) => ({
+      ...item.keys.find(
+        (/** @type {any} */ wrap) => wrap.accessGroup === ACCESS_GROUP && wrap.period === t,
+      ),
+      iv: wrapNonceOf(dcaData, "bodytext", ACCESS_GROUP, t),
+    });
+    const { content } = recordNamed(sealedContent, "contentName", "bodytext");
+    return { item, aad, wrapAt, ciphertext: fromBase64url(content) };
   };
   /** @param {Uint8Array} key @param {any} wrap */
-  const unwrap = (key, wrap) => openGcm(key, fromBase64url(wrap.nonce), fromBase64url(wrap.key));
+  const unwrap = (key, wrap) => openGcm(key, wrap.iv, fromBase64url(wrap.key));
 
   // Existing-key reach: the key granted for A opens B's wrap, and that content key opens B.
   const b = itemOf(renders[1]);

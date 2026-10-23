@@ -22,6 +22,10 @@ distinguishes a profile from an endpoint binding, response agreement and key kin
 
 The profile names in this document identify conformance claims. They are not
 wire values unless another specification explicitly carries them.
+While this specification is an unreleased draft, its provisional identifiers
+may evolve with an explicitly identified draft revision; a draft conformance
+claim must identify that revision. The following identity rule governs released
+profiles.
 Each identifier names the fixed duties and dependency contract this document
 assigns to it. Editorial clarification and use of an explicitly specified
 compatible extension point do not change that identity. A later DCA release
@@ -429,7 +433,10 @@ reference code; they add no composition rule to this catalogue and no conformanc
 
 - Recipient grant + content groups does not compose. A content-groups request carries `periodGeometry`, one of
   the members recipient-grant Section 3 forbids, so the table's period-or-chain row applies: the recipient-grant
-  issuer refuses the request and the recipient client refuses the result. The reference recipient-grant issuer
+  issuer refuses the request. The recipient client refuses the period-key, chain-key and geometry
+  sections named in recipient-grant Section 5, including empty sections. An unselected proposal
+  member such as `contentGroupKeys` is ignored and grants no usable capability; it does not select
+  content-group processing. Any future composition must define its result admission. The reference recipient-grant issuer
   also refuses the content-groups issuer contribution when it is built.
 - Content-group seeds use the ordinary `ecdh-p256` envelope, and the proposal defines no compact width or binding
   for a seed. The reference publisher refuses seeds in a compact-selected issuer block. An ordinary issuer block

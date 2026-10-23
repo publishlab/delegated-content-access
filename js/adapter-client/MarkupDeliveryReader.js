@@ -3,10 +3,10 @@
 // This module reads the markup delivery form back off the DOM. It collects
 // every element carrying a reserved class token in the parsed body, holds them to the format's
 // carrier rules, parses the one `.dca-data` block and the optional
-// `.dca-sealed-content` beside it, then returns each blob through an
-// own-property read of the sealed-content block. It mirrors
+// `.dca-sealed-content` beside it, then returns each blob by its record's
+// `contentName` in the sealed-content block. It mirrors
 // `demo/support/ObjectDeliveryReader.js`, which reads the same render out of the
-// object form and answers `extract` the same way off the same map.
+// object form and answers `extract` the same way off the same records.
 //
 // The caller passes the root in as an argument. Nothing here reads `document`,
 // so the same module runs in a browser over the real document and under
@@ -32,20 +32,21 @@
 // come from that one reading, and edits to the page after the read change
 // neither answer.
 //
-// The reader accepts a missing sealed block. Every item may be deferred, with
-// its keys in dca-data and a URL for its ciphertext, and `extract` then returns
-// the same miss for each item that it returns for an unknown name. The reader
-// refuses a present block that holds anything other than a JSON object, because
-// the publisher announced a carrier and shipped something else. The carrier is
-// keyed by contentName, so the reader admits it whole under the format's
-// identifier section: one member name outside the grammar makes the reader
-// refuse the whole page instead of only that blob.
+// The reader accepts a missing sealed block. Every item's ciphertext may be
+// deferred; its location and retrieval are outside this reader's contract.
+// `extract` then returns the same miss for each item as for an unknown name. The reader
+// refuses a present block that holds anything other than a JSON array, because
+// the publisher announced a carrier and shipped something else. The carrier's
+// records are named by contentName, so the reader admits it whole under the
+// format's identifier section: one record name outside the grammar makes the
+// reader refuse the whole page instead of only that blob.
 
 import { dcaError } from "../core-shared/errors.js";
 import { isContentName } from "../core-shared/names.js";
 import { normalizePublisherOrigin } from "../core-shared/publisherOrigin.js";
 import { own } from "../core-shared/wire.js";
 import { DATA_SELECTOR, SEALED_SELECTOR } from "../core-shared/markupPlacement.js";
+import { recordsByName } from "../core-shared--client-publisher/deliveryRecords.js";
 
 /** The one type a reserved carrier carries, per the format's markup delivery. */
 const JSON_TYPE = "application/json";
@@ -55,9 +56,10 @@ export class MarkupDeliveryReader {
   #dcaData;
 
   /**
-   * The parsed sealed-content carrier, or null when the page ships no block.
+   * The parsed sealed-content records by contentName, or null when the page
+   * ships no block.
    *
-   * @type {any}
+   * @type {Map<string, any>|null}
    */
   #sealedContent;
 
@@ -129,8 +131,8 @@ export class MarkupDeliveryReader {
       return;
     }
     const carrier = parseBlock(sealedCarriers[0], SEALED_SELECTOR);
-    if (carrier === null || typeof carrier !== "object" || Array.isArray(carrier)) {
-      throw dcaError("bad_page", `the ${SEALED_SELECTOR} block is not an object`);
+    if (!Array.isArray(carrier)) {
+      throw dcaError("bad_page", `the ${SEALED_SELECTOR} block is not an array`);
     }
     this.#sealedContent = admittedCarrier(carrier, SEALED_SELECTOR);
   }
@@ -153,11 +155,11 @@ export class MarkupDeliveryReader {
 
   /**
    * The sealed ciphertext for one item, or null when this page does not carry
-   * it. `ObjectDeliveryReader.extract` returns the same miss from the same
-   * own-property read, so a name that every object answers to finds nothing
-   * here either.
+   * it. The lookup is by the record's own `contentName`, so a name that every
+   * object answers to finds nothing here. When several records name the item,
+   * the last whole record answers.
    *
-   * A member that is present and not a string supplies no ciphertext. The
+   * A `content` that is absent or not a string supplies no ciphertext. The
    * decrypt decides what is usable as ciphertext bytes, and that check stays
    * there.
    *
@@ -167,7 +169,7 @@ export class MarkupDeliveryReader {
   extract(contentName) {
     if (!isContentName(contentName)) return null;
 
-    const value = own(this.#sealedContent, contentName);
+    const value = own(this.#sealedContent?.get(contentName), "content");
     return typeof value === "string" ? value : null;
   }
 }
@@ -199,23 +201,24 @@ function carriers(root, selector) {
 }
 
 /**
- * The sealed-content carrier is keyed by contentName, and the format rejects a
- * map carrying a member name outside that grammar rather than passing over the
- * member. One bad name therefore costs every blob on the page: the publisher
- * composed a carrier the format does not admit, and a reader that served the
- * siblings would be serving half a page the publisher did not describe.
+ * The sealed-content carrier is a collection of records named by contentName,
+ * and the format rejects such a collection when one record's name is missing
+ * or outside that grammar rather than passing over the record. One bad name
+ * therefore costs every blob on the page: the publisher composed a carrier the
+ * format does not admit, and a reader that served the siblings would be
+ * serving half a page the publisher did not describe. An element that is not
+ * a record names nothing and supplies nothing.
  *
- * @param {any} carrier - already known to be a non-array object
+ * @param {unknown[]} carrier - already known to be an array
  * @param {string} selector - which carrier, for the message
- * @returns {any} the same carrier
+ * @returns {Map<string, any>} the last whole record per contentName
  */
 function admittedCarrier(carrier, selector) {
-  for (const name of Object.keys(carrier)) {
-    if (!isContentName(name)) {
-      throw dcaError("bad_page", `the ${selector} block carries a name outside the grammar`);
-    }
+  const records = recordsByName(carrier, "contentName", isContentName);
+  if (records === null) {
+    throw dcaError("bad_page", `the ${selector} block carries a name outside the grammar`);
   }
-  return carrier;
+  return records;
 }
 
 /**

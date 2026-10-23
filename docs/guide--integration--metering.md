@@ -35,14 +35,12 @@ ciphertexts relayed by the client; their presence grants nothing.
   "resourceJWT": "<publisher-signed resource>",
   "keyId": "2026-09",
   "sealed": {
-    "contentKeys": {
-      "bodytext": "<content key sealed for this issuer>"
-    },
-    "periodKeys": {
-      "subscriber": {
-        "260921T1000": "<period key sealed for this issuer>"
-      }
-    }
+    "contentKeys": [
+      { "contentName": "bodytext", "key": "<content key sealed for this issuer>" }
+    ],
+    "periodKeys": [
+      { "accessGroup": "subscriber", "period": "260921T1000", "key": "<period key sealed for this issuer>" }
+    ]
   }
 }
 ```

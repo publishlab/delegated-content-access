@@ -137,8 +137,8 @@ describe("OmittingSealer content() forwards every base calling form", () => {
 describe("One owner for the render's content-key wrap", () => {
   const callerWrap = Object.freeze({
     aad: () => undefined,
-    /** @param {{ t: string, nonce: string, key: string }} wrap */
-    entry: ({ t, nonce, key }) => ({ t, nonce, key, caller: "selected" }),
+    /** @param {{ t: string, key: string }} wrap */
+    entry: ({ t, key }) => ({ t, key, caller: "selected" }),
   });
 
   test("an inactive composition keeps the caller's strategy and renders what base renders", async () => {
@@ -162,7 +162,13 @@ describe("One owner for the render's content-key wrap", () => {
     }
 
     const rendered = await wrapped.seal();
-    assert.equal(rendered.dcaData.contentData.bodytext.keys.premium[0].caller, "selected");
+    const bodytext = rendered.dcaData.contentData.find(
+      (/** @type {any} */ record) => record.contentName === "bodytext",
+    );
+    const premiumWraps = bodytext.keys.filter(
+      (/** @type {any} */ entry) => entry.accessGroup === "premium",
+    );
+    assert.equal(premiumWraps[0].caller, "selected");
     assert.deepEqual(wire(rendered), wire(await base.seal()));
   });
 

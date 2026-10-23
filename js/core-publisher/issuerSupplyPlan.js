@@ -38,8 +38,11 @@ const PLAN_MEMBERS = [
   "periodKeySourceTs",
 ];
 
-/** Reserved issuer-block members: base owns sealed/keyId; unlockUrl is forbidden on the wire. */
-const RESERVED_ISSUER_MEMBERS = ["sealed", "unlockUrl", "keyId"];
+/**
+ * Reserved issuer-block members: base owns issuerName, sealed and keyId;
+ * unlockUrl is forbidden on the wire.
+ */
+const RESERVED_ISSUER_MEMBERS = ["issuerName", "sealed", "unlockUrl", "keyId"];
 
 /**
  * What a planner declares. `contentKeyNames` and `suppliedAccessGroups` are

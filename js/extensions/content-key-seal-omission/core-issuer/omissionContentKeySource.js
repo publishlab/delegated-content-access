@@ -52,6 +52,11 @@
 // candidate is spent. Base holds that failure beside the content-key seal's own
 // and files one of them, or neither when something answered.
 
+import { dcaError } from "../../../core-shared/errors.js";
+
+/** Reference-local held-material bound, not a protocol ceiling. */
+export const MAX_HELD_PERIOD_KEY_CANDIDATES = 4;
+
 import { candidatesFor, presentedCoordinates } from "./omissionCandidates.js";
 
 /** What an item no candidate opened reports, in base's own wording. */
@@ -68,7 +73,7 @@ export function omissionContentKeySource() {
      * not see: the content names the forwarded candidates carry, and the
      * period families their labels name. A group presented only by a
      * candidate still opens no period key - the ordinary period route reads
-     * the sealed period map alone - but a policy that cannot see the group
+     * the sealed period records alone - but a policy that cannot see the group
      * cannot decide among them.
      *
      * @param {any} request
@@ -90,23 +95,29 @@ export function omissionContentKeySource() {
       const byContentName = candidatesFor({ request, decision, periodKeyFor });
 
       // One coordinate, one ask, however many items reach for it: neither
-      // this issuer's period key for a coordinate nor the value presented at one
-      // changes inside a single unlock.
-      /** @type {Map<string, Promise<Uint8Array|null>>} */
+      // this issuer's period key for a coordinate nor a value presented at one
+      // changes inside a single unlock. Rival sealed values at one coordinate
+      // are separate asks, so a wrong blob never answers for the right one.
+      /** @type {Map<string, Promise<Uint8Array[]>>} */
       const material = new Map();
+      /** @type {Map<unknown, number>} */
+      const sealedValues = new Map();
       /** @param {import('./omissionCandidates.js').OmissionCandidate} candidate */
       const materialFor = (candidate, contentName) => {
         const { accessGroup, t } = candidate.coordinate;
-        const at = `${candidate.periodKey !== undefined ? "held" : "sealed"} ${accessGroup}|${t}`;
+        if (!sealedValues.has(candidate.sealed))
+          sealedValues.set(candidate.sealed, sealedValues.size);
+        const at =
+          candidate.periodKey !== undefined
+            ? `held ${accessGroup}|${t}`
+            : `sealed ${accessGroup}|${t} ${sealedValues.get(candidate.sealed)}`;
         let pending = material.get(at);
         if (pending === undefined) {
           pending =
             candidate.periodKey !== undefined
-              ? Promise.resolve(candidate.periodKey()).then((held) =>
-                  held instanceof Uint8Array ? held : null,
-                )
+              ? Promise.resolve(candidate.periodKey()).then(snapshotHeldKeys)
               : open(candidate.sealed, candidate.coordinate, contentName).then((opened) =>
-                  "error" in opened ? null : opened.bytes,
+                  "error" in opened ? [] : [opened.bytes],
                 );
           material.set(at, pending);
         }
@@ -122,14 +133,15 @@ export function omissionContentKeySource() {
         if (forwarded === undefined) return { miss: true };
 
         for (const candidate of forwarded) {
-          const periodKey = await materialFor(candidate, contentName);
-          if (periodKey === null) continue;
-          try {
-            const bytes = await candidate.unwrap(periodKey, renderId);
-            if (bytes instanceof Uint8Array) return { bytes };
-          } catch {
-            // A candidate that will not unwrap was not the one; the
-            // next one is still allowed to answer this item.
+          const periodKeys = await materialFor(candidate, contentName);
+          for (const periodKey of periodKeys) {
+            try {
+              const bytes = await candidate.unwrap(periodKey, renderId);
+              if (bytes instanceof Uint8Array) return { bytes };
+            } catch {
+              // A candidate that will not unwrap was not the one; the
+              // next one is still allowed to answer this item.
+            }
           }
         }
 
@@ -140,4 +152,26 @@ export function omissionContentKeySource() {
       };
     },
   };
+}
+
+/** Copy trusted host material once per coordinate and unlock.
+ * @param {unknown} value
+ * @returns {Uint8Array[]}
+ */
+function snapshotHeldKeys(value) {
+  if (value === null) return [];
+  const offered = value instanceof Uint8Array ? [value] : value;
+  if (!Array.isArray(offered))
+    throw dcaError("internal_error", "invalid held period-key view result");
+  /** @type {Uint8Array[]} */
+  const keys = [];
+  for (const key of offered) {
+    if (!(key instanceof Uint8Array) || key.length !== 16)
+      throw dcaError("internal_error", "invalid held period key");
+    if (!keys.some((prior) => prior.every((byte, i) => byte === key[i])))
+      keys.push(new Uint8Array(key));
+    if (keys.length > MAX_HELD_PERIOD_KEY_CANDIDATES)
+      throw dcaError("internal_error", "too many held period-key candidates");
+  }
+  return keys;
 }

@@ -28,6 +28,21 @@ appends `gzip` to its ordered `contentEncodings`, and delegates the complete
 render to base `Sealer`. With `{ contentEncoding: 'identity' }` the
 adapter adds no gzip layer.
 
+The second constructor argument selects the publisher's supported complete
+encoding sequences: `{ supportedEncodingSequences: [[], ['gzip']] }` is the
+default. Each item's ordered list must match one configured sequence in full,
+including repeated layers. The adapter checks prepared descriptors and the
+prospective output of raw calls at `content()`, before codec work. Unsupported
+sequences fail with `unsupported_encoding`; they never fall back to identity.
+For a baseline publication, select `[[]]` and pass `contentEncoding: 'identity'`
+for raw calls; leaving the raw-call default at gzip then refuses the item.
+Configuration is copied at construction.
+
+A deployment may explicitly list wider prepared sequences. That admits their
+descriptors unchanged; it supplies no additional codec and validates neither
+those prepared payloads nor client support. Publisher and intended clients
+must separately implement the complete selected sequence.
+
 A representation descriptor carries bytes that already hold their layers. The
 adapter delegates such an item to base unchanged, appends no gzip layer to it,
 and refuses a fourth argument the way base does. Beside a descriptor the adapter

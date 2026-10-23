@@ -26,6 +26,11 @@ import {
 } from "../../../demo/support/PublisherRegistrations.js";
 import { Client } from "../../../test-lib/harnesses/client.js";
 import { ChainKeyRequestBuilder } from "../core-client/ChainKeyRequestBuilder.js";
+import { ChainKeyCache } from "../core-client/ChainKeyCache.js";
+import { explicitChainKeyClientProfile } from "../core-client/chainKeyClientProfile.js";
+import { ContentKeyResolver } from "../../../core-client/ContentKeyResolver.js";
+import { DcaData } from "../../../core-client/DcaData.js";
+import { ResponseAssociation } from "../../../core-client/ResponseAssociation.js";
 import { chainKeyResponseInput } from "../core-client/chainKeyResponseInput.js";
 import { chainKeyCapabilitySource } from "../core-issuer/chainKeyCapabilitySource.js";
 import { chainKeyIssuerEngine } from "../core-issuer/chainKeyIssuerEngine.js";
@@ -38,6 +43,14 @@ import {
   settleChainGeometry,
 } from "../core-shared/chainKeyConstruction.js";
 import { wholeRenderIssuerSupplyPlan } from "../../../core-publisher/issuerSupplyPlan.js";
+import { issuerBlockOf } from "../../../test-lib/helpers/inspect.js";
+import {
+  errorMap,
+  keyAt,
+  periodKeyMap,
+  setKeyAt,
+} from "../../../test-reference/support/namedRecords.js";
+import { chainKeyRecords, cutoffsOf } from "./world.js";
 
 const GROUP = "premium";
 const OTHER = "archive";
@@ -68,7 +81,7 @@ async function capabilityRun({
   const source = chainKeyCapabilitySource({ representation });
   const request = new DcaRequest({
     periodGeometry: GEOMETRY,
-    sealed: { chainKeys: { [GROUP]: { [HONEST_T]: CHAIN_KEY } } },
+    sealed: { chainKeys: [{ accessGroup: GROUP, cutoff: HONEST_T, key: CHAIN_KEY }] },
   });
   const grant = { accessGroup: GROUP, futurePeriodCount: 2, authorizePeriod: () => true };
   const answer = source.selection(request, { capturedAtMs: CAPTURED_AT_MS }, [grant])(
@@ -80,10 +93,13 @@ async function capabilityRun({
     "selected" in answer,
     "the carrier is valid, so selection selects before the injected fault",
   );
-  return source.capabilities({ request, open })(
-    GROUP,
-    amendSelected(/** @type {any} */ (answer).selected),
-  );
+  const selected = amendSelected(/** @type {any} */ (answer).selected);
+  return source.capabilities({
+    request,
+    open,
+    periodKeyCount: 0,
+    selectedCapabilities: [{ accessGroup: GROUP, selected }],
+  })(GROUP, selected);
 }
 
 /** An opener that answers the bytes it was built with, as base does for a good blob. */
@@ -96,7 +112,9 @@ describe("a derivation fault keeps its own identity", () => {
     await assert.rejects(
       capabilityRun({
         open: openerAnswering(new Uint8Array(16).fill(9)),
-        amendSelected: ([selection]) => [{ ...selection, targetTs: [OFF_GRID_T] }],
+        amendSelected: ([selection]) => [
+          { ...selection, targetTs: [OFF_GRID_T], futureTs: [OFF_GRID_T] },
+        ],
       }),
       (/** @type {any} */ error) => error instanceof DcaError && error.code === "bad_config",
       "a label off the family grid is a defect in this issuer, not a blob that would not open",
@@ -263,16 +281,19 @@ async function world() {
   return { page, registration, requestFor };
 }
 
-test("a chain blob moved to another window is the uniform coordinate error, and its sibling answers", async () => {
+test("a chain blob moved to another window is the uniform coordinate error, and an independent sibling article answers", async () => {
   const { page, registration, requestFor } = await world();
-  const terminals = Object.keys(page.issuerData[ISSUER].sealed.chainKeys[GROUP]).sort();
+  const terminals = cutoffsOf(issuerBlockOf(page, ISSUER).sealed.chainKeys, GROUP).sort();
   assert.equal(
     terminals.length,
     2,
     "the render ships two stationary windows to move a blob between",
   );
   const request = requestFor((document) => {
-    document.sealed.chainKeys[GROUP][terminals[0]] = document.sealed.chainKeys[GROUP][terminals[1]];
+    const chainKeys = document.sealed.chainKeys;
+    const moved = keyAt(chainKeys, { accessGroup: GROUP, cutoff: terminals[1] });
+    setKeyAt(chainKeys, { accessGroup: GROUP, cutoff: terminals[0] }, moved);
+    document.requestedPeriodKeys = [{ accessGroup: GROUP, periods: [terminals[1]] }];
   });
 
   const result = await chainKeyIssuerEngine({
@@ -282,20 +303,87 @@ test("a chain blob moved to another window is the uniform coordinate error, and 
   }).unlock(request, registration);
 
   assert.deepEqual(
-    Object.keys(result.errors),
+    Object.keys(errorMap(result.errors)),
     [`${GROUP}|${terminals[0]}`],
     "the moved blob is the one coordinate that fails",
   );
   assert.equal(
-    result.errors[`${GROUP}|${terminals[0]}`].error,
+    errorMap(result.errors)[`${GROUP}|${terminals[0]}`].error,
     "unseal_failed",
     "a real BIND failure stays the uniform per-coordinate error",
   );
-  assert.ok(
-    Object.keys(result.periodKeys[GROUP] ?? {}).length > 0,
-    "and the honest sibling window still answers",
+  assert.deepEqual(
+    Object.keys(periodKeyMap(result.periodKeys)[GROUP] ?? {}),
+    [terminals[1]],
+    "the independently selected article answers beyond the stopped optional horizon",
   );
 });
+
+for (const scenario of [
+  "malformed report with period key",
+  "malformed report with chain key",
+  "unsupported chain section",
+  "invalid chain family",
+  "unsupported chain beside rejected wrapped item",
+]) {
+  test(`a discarded key still occupies its error coordinate: ${scenario}`, async () => {
+    const { page, requestFor } = await world();
+    const data = new DcaData(page, { publisherOrigin: PUB });
+    const request = requestFor();
+    const cutoff = cutoffsOf(request.toObject().sealed.chainKeys, GROUP).sort()[0];
+    const period = scenario.includes("period key");
+    const unsupported = scenario.startsWith("unsupported");
+    const wrapped = scenario.includes("wrapped item");
+    const section = period ? "periodKeys" : "chainKeys";
+    const fields = period ? { period: cutoff } : { cutoff };
+    const entries = [{ accessGroup: GROUP, ...fields, key: CHAIN_KEY }];
+    if (scenario === "invalid chain family") {
+      entries.push({ accessGroup: GROUP, cutoff: "251023T1500", key: CHAIN_KEY });
+    }
+    const resolver = new ContentKeyResolver({
+      cache: new PeriodKeyCache(),
+      ...(unsupported ? {} : { chainCache: new ChainKeyCache() }),
+      chainKeyProfile: explicitChainKeyClientProfile,
+    });
+    const application = await resolver.applyResponse(
+      data,
+      ISSUER,
+      {
+        keys: {
+          [section]: entries,
+          ...(wrapped ? { contentKeys: [{ contentName: NAME, key: { key: "wrapped" } }] } : {}),
+        },
+        ...(scenario.startsWith("malformed report") ? { notDelivered: [] } : {}),
+        errors: [{ coordinate: `${GROUP}|${cutoff}`, error: "key_retired", message: "retired" }],
+      },
+      new ResponseAssociation(data, ISSUER, request),
+    );
+    assert.equal(application.accepted, 0);
+    assert.deepEqual(
+      application.errors,
+      [],
+      "discarding a key cannot make its conflicting error valid",
+    );
+    assert.ok(
+      application.issues.some(
+        (issue) => issue.section === "errors" && issue.code === "malformed_error",
+      ),
+    );
+    const independent = await resolver.applyResponse(
+      data,
+      ISSUER,
+      {
+        errors: [{ coordinate: `${GROUP}|${cutoff}`, error: "key_retired", message: "retired" }],
+      },
+      new ResponseAssociation(data, ISSUER, request),
+    );
+    assert.deepEqual(
+      independent.errors.map((error) => error.coordinate),
+      [`${GROUP}|${cutoff}`],
+      "an associated error without an occupying key remains admissible",
+    );
+  });
+}
 
 /**
  * Read a carrier while counting every `new Error(...)` the reading builds. A
@@ -333,7 +421,7 @@ const CARRIERS = [
         new DcaRequest({
           version: "dca/1",
           issuerName: "issuer.example",
-          sealed: { contentKeys: {}, chainKeys: collection },
+          sealed: { contentKeys: [], chainKeys: collection },
           periodGeometry: GEOMETRY,
         }),
       ),
@@ -354,10 +442,12 @@ describe("the carrier reader holds its refusals as state, not as a thrown sentin
   for (const { carrier, read } of CARRIERS) {
     test(`${carrier}: two members in one window invalidate that family alone, untyped-error-free`, () => {
       const { view, generic } = countingGenericErrors(() =>
-        read({
-          [GROUP]: { [HONEST_T]: CHAIN_KEY, "251023T2330": CHAIN_KEY },
-          [OTHER]: { [HONEST_T]: CHAIN_KEY },
-        }),
+        read(
+          chainKeyRecords({
+            [GROUP]: { [HONEST_T]: CHAIN_KEY, "251023T2330": CHAIN_KEY },
+            [OTHER]: { [HONEST_T]: CHAIN_KEY },
+          }),
+        ),
       );
 
       assert.equal(
@@ -375,10 +465,12 @@ describe("the carrier reader holds its refusals as state, not as a thrown sentin
 
     test(`${carrier}: a label refusal drops only that member, and the refusal is typed`, () => {
       const { view, generic } = countingGenericErrors(() =>
-        read({
-          [GROUP]: { [OFF_GRID_T]: CHAIN_KEY },
-          [OTHER]: { [HONEST_T]: CHAIN_KEY },
-        }),
+        read(
+          chainKeyRecords({
+            [GROUP]: { [OFF_GRID_T]: CHAIN_KEY },
+            [OTHER]: { [HONEST_T]: CHAIN_KEY },
+          }),
+        ),
       );
 
       assert.equal(

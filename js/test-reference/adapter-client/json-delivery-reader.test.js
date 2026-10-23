@@ -19,7 +19,7 @@ const PUB = "https://www.news-site.example";
 const CONTEXT = Object.freeze({ publisherOrigin: PUB });
 const DCA_DATA = Object.freeze({
   version: "1",
-  contentData: { bodytext: {}, premiumtext: {} },
+  contentData: [{ contentName: "bodytext" }, { contentName: "premiumtext" }],
   resource: { data: { section: "politics" } },
 });
 
@@ -129,8 +129,8 @@ describe("The JSON delivery reader, the document refusals", () => {
     }
   });
 
-  test("a present sealedContent that is not a non-array object is a page refusal", async () => {
-    for (const value of ["null", "[]", '["QUJD"]', '"QUJD"', "42", "true"]) {
+  test("a present sealedContent that is not an array is a page refusal", async () => {
+    for (const value of ["null", "{}", '{"bodytext":"QUJD"}', '"QUJD"', "42", "true"]) {
       await refuses(
         () => readerOf(`{"version":"1","sealedContent":${value}}`),
         { code: "bad_page", message: /sealedContent/ },
@@ -139,17 +139,31 @@ describe("The JSON delivery reader, the document refusals", () => {
     }
   });
 
-  test("a sealedContent member name outside the grammar refuses the whole document", async () => {
-    for (const name of ["bad name", "", "1bodytext", "__proto__", "a".repeat(65)]) {
+  test("a sealedContent record whose contentName is outside the grammar refuses the whole document", async () => {
+    for (const name of ["bad name", "", "1bodytext", "a".repeat(65), 7, null]) {
       await refuses(
         () =>
           readerOf(
-            `{"version":"1","sealedContent":{"bodytext":"QUJD",${JSON.stringify(name)}:"QUJD"}}`,
+            `{"version":"1","sealedContent":[{"contentName":"bodytext","content":"QUJD"},` +
+              `{"contentName":${JSON.stringify(name)},"content":"QUJD"}]}`,
           ),
         { code: "bad_page", message: /grammar/ },
-        `a carrier member named ${JSON.stringify(name)}`,
+        `a carrier record named ${JSON.stringify(name)}`,
       );
     }
+    await refuses(
+      () => readerOf('{"version":"1","sealedContent":[{"content":"QUJD"}]}'),
+      { code: "bad_page", message: /grammar/ },
+      "a carrier record with no contentName",
+    );
+  });
+
+  test("a sealedContent element that is not a record supplies nothing, and its siblings read", () => {
+    const reader = readerOf(
+      '{"version":"1","sealedContent":[null,"QUJD",["bodytext","WFla"],' +
+        '{"contentName":"bodytext","content":"QUJD"},42]}',
+    );
+    assert.equal(reader.extract("bodytext"), "QUJD");
   });
 
   test("the markup form's bytes are a page refusal", async () => {
@@ -211,17 +225,48 @@ describe("The JSON delivery reader, what it answers", () => {
     assert.equal(none.extract("bodytext"), null, "a document with no sealedContent member");
   });
 
-  test("a member that is not a string supplies no ciphertext, and its siblings still read", () => {
+  test("a content that is not a string supplies no ciphertext, and its siblings still read", () => {
     const reader = readerOf(
-      '{"version":"1","sealedContent":{"bodytext":"QUJD","a":42,"b":null,"c":{"x":"QUJD"},"d":["QUJD"]}}',
+      '{"version":"1","sealedContent":[{"contentName":"bodytext","content":"QUJD"},' +
+        '{"contentName":"a","content":42},{"contentName":"b","content":null},' +
+        '{"contentName":"c","content":{"x":"QUJD"}},{"contentName":"d","content":["QUJD"]},' +
+        '{"contentName":"e"}]}',
     );
 
     assert.equal(reader.extract("bodytext"), "QUJD");
-    for (const name of ["a", "b", "c", "d"]) assert.equal(reader.extract(name), null, name);
+    for (const name of ["a", "b", "c", "d", "e"]) assert.equal(reader.extract(name), null, name);
+  });
+
+  test("records resolve by contentName in any order, and the last whole record for one name wins", () => {
+    const records = [
+      { contentName: "bodytext", content: "QUJD" },
+      { contentName: "premiumtext", content: "WFla" },
+    ];
+    for (const sealedContent of [records, [...records].reverse()]) {
+      const reader = readerOf(JSON.stringify({ version: "1", sealedContent }));
+      assert.equal(reader.extract("bodytext"), "QUJD");
+      assert.equal(reader.extract("premiumtext"), "WFla");
+    }
+
+    const replaced = readerOf(
+      '{"version":"1","sealedContent":[{"contentName":"bodytext","content":"WFla"},' +
+        '{"contentName":"bodytext","content":"QUJD"}]}',
+    );
+    assert.equal(replaced.extract("bodytext"), "QUJD");
+
+    // Replacement, not merging: a later record without a usable content
+    // leaves the item without ciphertext rather than falling back.
+    const unusable = readerOf(
+      '{"version":"1","sealedContent":[{"contentName":"bodytext","content":"QUJD"},' +
+        '{"contentName":"bodytext","content":7}]}',
+    );
+    assert.equal(unusable.extract("bodytext"), null);
   });
 
   test("extract reads own members only, and a name outside the grammar is null", () => {
-    const reader = readerOf('{"version":"1","sealedContent":{"bodytext":"QUJD"}}');
+    const reader = readerOf(
+      '{"version":"1","sealedContent":[{"contentName":"bodytext","content":"QUJD"}]}',
+    );
 
     for (const name of [...INHERITED, "__proto__", "bad name", ""]) {
       assert.equal(reader.extract(name), null, name);
@@ -247,7 +292,8 @@ describe("The JSON delivery reader, what it answers", () => {
 
   test("of two members with one name, the last is the one read", () => {
     const reader = readerOf(
-      '{"version":"0","version":"1","sealedContent":{"bodytext":"WFla","bodytext":"QUJD"}}',
+      '{"version":"0","version":"1","sealedContent":[{"contentName":"bodytext",' +
+        '"content":"WFla","content":"QUJD"}]}',
     );
 
     assert.equal(reader.dcaData.version, "1");
@@ -255,7 +301,7 @@ describe("The JSON delivery reader, what it answers", () => {
   });
 
   test("the reader checks no dca-data member: that is DcaData's admission", () => {
-    const reader = readerOf('{"version":"vX","sealedContent":{}}');
+    const reader = readerOf('{"version":"vX","sealedContent":[]}');
 
     assert.deepEqual(reader.dcaData, { version: "vX" });
   });

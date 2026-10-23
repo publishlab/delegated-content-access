@@ -17,6 +17,7 @@ import {
 import { admitLockedDocument, resolveTargets } from "../core-shared--client-publisher/targets.js";
 import { treeEntries } from "../core-shared--client-publisher/treePort.js";
 import { deliveredFormDiffers, parseRenderedPage } from "./parse5Tree.js";
+import { recordsByName } from "../../../core-shared--client-publisher/deliveryRecords.js";
 
 const MEMBERS = ["dcaData", "sealedContent", "contentMap", "page", "items", "limits"];
 
@@ -75,10 +76,12 @@ export function writeMappedDelivery(delivery) {
     JSON.stringify(JSON.parse(tree.text(carrier.element)).contentMap),
     admittedLimits,
   );
-  const contentData = /** @type {any} */ (dcaData).contentData;
+  // The render's items, by the name each record carries.
+  const contentData =
+    recordsByName(/** @type {any} */ (dcaData).contentData, "contentName", () => true) ?? new Map();
   admitMapItems(map, {
-    declares: (name) => isRecord(contentData) && Object.hasOwn(contentData, name),
-    contentType: (name) => contentData[name]?.contentType,
+    declares: (name) => contentData.has(name),
+    contentType: (name) => contentData.get(name)?.contentType,
     // The base writer already refused any ciphertext outside canonical base64url.
     carriesCiphertext: (name) => Object.hasOwn(sealedContent, name),
   });

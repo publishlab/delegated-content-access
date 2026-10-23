@@ -3,6 +3,7 @@
 import test, { describe } from "node:test";
 import assert from "node:assert/strict";
 
+import { namedRecordEnvelope } from "../../support/named-record-controls.js";
 import { registeredJwsControls } from "../../support/registered-jws-controls.js";
 import { assertBindingSupportsTarget } from "../../support/contract-runner-validation.js";
 
@@ -13,14 +14,71 @@ const T1 = "251023T1500";
 function wireRequest(vector) {
   const dcaData = vector.expected.dcaData;
   const [issuer] = vector.input.issuers;
+  const block = dcaData.issuerData.find(
+    (/** @type {any} */ record) => record.issuerName === issuer.issuerName,
+  );
   return JSON.stringify({
     version: dcaData.version,
     issuerName: issuer.issuerName,
     resourceJWT: dcaData.resourceJWT,
     keyId: issuer.keyId,
-    sealed: dcaData.issuerData[issuer.issuerName].sealed,
+    sealed: block.sealed,
   });
 }
+
+/**
+ * A record collection as a map from its identity fields to the rest. A
+ * repeated identity fails: a map would keep one record, and a rival at one
+ * coordinate must never disappear inside an assertion.
+ *
+ * @param {unknown} records
+ * @param {string} what
+ * @param {(record: any) => string[]} identity
+ * @param {(record: any) => any} value
+ * @returns {Record<string, any>}
+ */
+function recordMap(records, what, identity, value) {
+  assert.ok(Array.isArray(records), `${what} is a record array`);
+  /** @type {Record<string, any>} */
+  const map = {};
+  for (const record of records) {
+    const path = identity(record);
+    let level = map;
+    for (const name of path.slice(0, -1)) {
+      if (!Object.hasOwn(level, name)) level[name] = {};
+      level = level[name];
+    }
+    const last = /** @type {string} */ (path.at(-1));
+    assert.equal(Object.hasOwn(level, last), false, `${what} carries ${path.join(".")} once`);
+    level[last] = value(record);
+  }
+  return map;
+}
+
+/** @param {unknown} records */
+const contentKeyMap = (records) =>
+  recordMap(
+    records,
+    "contentKeys",
+    (r) => [r.contentName],
+    (r) => r.key,
+  );
+/** @param {unknown} records */
+const periodKeyMap = (records) =>
+  recordMap(
+    records,
+    "periodKeys",
+    (r) => [r.accessGroup, r.period],
+    (r) => r.key,
+  );
+/** @param {unknown} records */
+const errorMap = (records) =>
+  recordMap(
+    records,
+    "errors",
+    (r) => [r.coordinate],
+    ({ coordinate, ...failure }) => failure,
+  );
 
 /** @param {any} vector */
 function allRequestedPolicy(vector, policyData) {
@@ -78,21 +136,21 @@ function assertSuccess(result, keys, expectedErrors, policyData) {
   assert.deepEqual(
     Object.keys(result.document).sort(),
     expectedDocumentMembers,
-    "success document has only DCA keys and an optional errors map, never endpoint fields",
+    "success document has only DCA keys and optional errors, never endpoint fields",
   );
   assert.deepEqual(
     Object.keys(result.document.keys).sort(),
     Object.keys(keys.periodKeys).length === 0 ? ["contentKeys"] : ["contentKeys", "periodKeys"],
     "success keys has only the direct sections this profile returns",
   );
-  assert.deepEqual(result.document.keys.contentKeys, keys.contentKeys);
+  assert.deepEqual(contentKeyMap(result.document.keys.contentKeys), keys.contentKeys);
   if (Object.keys(keys.periodKeys).length === 0) {
     assert.equal(Object.hasOwn(result.document.keys, "periodKeys"), false);
   } else {
-    assert.deepEqual(result.document.keys.periodKeys, keys.periodKeys);
+    assert.deepEqual(periodKeyMap(result.document.keys.periodKeys), keys.periodKeys);
   }
   assert.equal(Object.hasOwn(result.document.keys, "chainKeys"), false);
-  const errors = result.document.errors ?? {};
+  const errors = errorMap(result.document.errors ?? []);
   assert.deepEqual(Object.keys(errors).sort(), Object.keys(expectedErrors).sort());
   for (const [coordinate, code] of Object.entries(expectedErrors)) {
     assert.equal(errors[coordinate]?.error, code, `${coordinate}.error`);
@@ -176,6 +234,109 @@ export function registerIssuerCoreContract(binding, target, vectors) {
       }
     });
 
+    for (const section of ["contentKeys", "periodKeys"]) {
+      const identity = section === "contentKeys" ? "contentName" : "accessGroup";
+      for (const [label, corrupt] of [
+        ["non-array collection", () => ({})],
+        ["missing identity", (records) => [{ key: records[0].key }, ...records]],
+        ["invalid identity", (records) => [{ ...records[0], [identity]: "bad|name" }, ...records]],
+      ]) {
+        test(`${section}: ${label} refuses the entire request with valid siblings`, async () => {
+          const request = JSON.parse(wireRequest(base));
+          request.sealed[section] = corrupt(request.sealed[section]);
+          const core = driver.createIssuerCore(
+            await provisioning(driver, base, allRequestedPolicy(base, [])),
+          );
+          assert.deepEqual(await core.admit(JSON.stringify(request)), {
+            kind: "failure",
+            code: "binding_failed",
+          });
+        });
+      }
+      test(`${section}: non-object element has its specified scope`, async () => {
+        const request = JSON.parse(wireRequest(base));
+        request.sealed[section].splice(1, 0, null);
+        const core = driver.createIssuerCore(
+          await provisioning(driver, base, allRequestedPolicy(base, [])),
+        );
+        const result = await admittedResult(core, JSON.stringify(request), {
+          principal: null,
+          context: null,
+        });
+        if (section === "periodKeys") {
+          assert.deepEqual(result, { kind: "failure", code: "binding_failed" });
+        } else {
+          assertSuccess(
+            result,
+            {
+              contentKeys: base.expected.contentKeys,
+              periodKeys: base.expected.periodKeys,
+            },
+            {},
+            [],
+          );
+        }
+      });
+    }
+
+    for (const section of ["contentKeys", "periodKeys"]) {
+      test(`${section}: distinct authenticating rivals survive either record order`, async () => {
+        const initial = JSON.parse(wireRequest(base));
+        const original = initial.sealed[section][0];
+        const coordinate =
+          section === "contentKeys"
+            ? { contentName: original.contentName }
+            : { accessGroup: original.accessGroup, period: original.period };
+        const rivalBytes = new Uint8Array(16).fill(0xa7);
+        const rivalKey = Buffer.from(rivalBytes).toString("base64url");
+        const originalKey =
+          section === "contentKeys"
+            ? base.expected.contentKeys[original.contentName]
+            : base.expected.periodKeys[original.accessGroup][original.period];
+        assert.notEqual(rivalKey, originalKey);
+        const rival = {
+          ...coordinate,
+          key: await namedRecordEnvelope(base, coordinate, rivalBytes),
+        };
+        for (const records of [
+          [original, rival],
+          [rival, original],
+        ]) {
+          const request = JSON.parse(wireRequest(base));
+          request.sealed[section] = [...records, ...request.sealed[section].slice(1)];
+          const core = driver.createIssuerCore(
+            await provisioning(driver, base, allRequestedPolicy(base, [])),
+          );
+          const result = await admittedResult(core, JSON.stringify(request), {
+            principal: null,
+            context: null,
+          });
+          assert.equal(result.kind, "success");
+          assert.deepEqual(result.document.errors ?? [], []);
+          const expectedContent = Object.entries(base.expected.contentKeys).map(
+            ([contentName, key]) => [contentName, key],
+          );
+          const expectedPeriods = Object.entries(base.expected.periodKeys).flatMap(
+            ([accessGroup, periods]) =>
+              Object.entries(periods).map(([period, key]) => [accessGroup, period, key]),
+          );
+          if (section === "contentKeys") expectedContent.push([original.contentName, rivalKey]);
+          else expectedPeriods.push([original.accessGroup, original.period, rivalKey]);
+          const sorted = (records) => records.map((record) => JSON.stringify(record)).sort();
+          assert.deepEqual(
+            sorted(result.document.keys.contentKeys.map((r) => [r.contentName, r.key])),
+            sorted(expectedContent),
+            "all content candidates and sibling coordinates survive unchanged",
+          );
+          assert.deepEqual(
+            sorted(result.document.keys.periodKeys.map((r) => [r.accessGroup, r.period, r.key])),
+            sorted(expectedPeriods),
+            "all period candidates and sibling coordinates survive unchanged",
+          );
+        }
+      });
+    }
+
     test("the selected format-1 baseline is complete", () => {
       assert.ok(seals.length > 0, "the manifest selected format-1 vectors");
       assert.deepEqual(
@@ -221,12 +382,15 @@ export function registerIssuerCoreContract(binding, target, vectors) {
       );
     });
 
-    test("period grants open only the explicitly listed labels, not request member order", async () => {
+    test("period grants open only the explicitly listed labels, not request record order", async () => {
       const request = JSON.parse(wireRequest(base));
-      request.sealed.periodKeys.premium = Object.fromEntries([
-        ["251023T1500", request.sealed.periodKeys.premium["251023T1500"]],
-        ["251023T1400", request.sealed.periodKeys.premium["251023T1400"]],
-      ]);
+      // The later period first: a grant that opened by position would open T1.
+      const isPremium = (/** @type {any} */ record) => record.accessGroup === "premium";
+      request.sealed.periodKeys = [
+        ...request.sealed.periodKeys.filter(isPremium).reverse(),
+        ...request.sealed.periodKeys.filter((/** @type {any} */ r) => !isPremium(r)),
+      ];
+      assert.equal(request.sealed.periodKeys[0].period, T1);
       const policyData = [];
       const core = driver.createIssuerCore(
         await provisioning(driver, base, {
@@ -278,7 +442,12 @@ export function registerIssuerCoreContract(binding, target, vectors) {
         {},
         policyData,
       );
-      assert.equal(Object.hasOwn(result.document.keys.periodKeys, "not-present"), false);
+      assert.equal(
+        result.document.keys.periodKeys.some(
+          (/** @type {any} */ record) => record.accessGroup === "not-present",
+        ),
+        false,
+      );
     });
 
     test("duplicate period grants union labels and never invent coordinates", async () => {

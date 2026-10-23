@@ -11,6 +11,7 @@ import {
 } from "../signedGrant.js";
 import { createRecipientGrantIssuer } from "../issuer.js";
 import { requestFor } from "../../../test-lib/harnesses/issuer-endpoint.js";
+import { keyAt } from "../../../test-reference/support/namedRecords.js";
 import {
   world as hardeningWorld,
   BODYTEXT,
@@ -346,8 +347,8 @@ test("a policy answering beyond its question cannot widen the grant", async () =
     observedOrigin: PUBLISHER_ORIGIN,
   });
   assert.equal(answer.status, 200);
-  assert.ok(answer.body.keys.contentKeys[BODYTEXT]);
-  assert.equal(answer.body.keys.contentKeys[PREMIUM], undefined);
+  assert.ok(keyAt(answer.body.keys.contentKeys, { contentName: BODYTEXT }));
+  assert.equal(keyAt(answer.body.keys.contentKeys, { contentName: PREMIUM }), undefined);
 });
 
 test("unlock refuses an observed origin the render did not sign, without an origins list", async () => {

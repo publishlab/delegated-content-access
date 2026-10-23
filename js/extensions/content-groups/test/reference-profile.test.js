@@ -233,7 +233,7 @@ test("the client bundle builds dedicated caches and the members composeClient ta
   ]);
   assert.deepEqual(recoverySources, [bundle.recoverySource]);
   assert.deepEqual(responseSections, [bundle.responseInput]);
-  assert.equal(bundle.responseInput.name, "contentGroups");
+  assert.equal(bundle.responseInput.name, "contentGroupKeys");
   assert.equal(typeof bundle.responseInput.clearReaderContext, "function");
   assert.ok(requestBuilderFactory({ relayPeriodKeys: true }) instanceof ContentGroupRequestBuilder);
   assert.throws(

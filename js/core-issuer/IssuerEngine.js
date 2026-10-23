@@ -146,7 +146,11 @@ import { isPeriodKeyLabel } from "../core-shared/periodLabels.js";
 import { periodGeometriesAgree } from "../core-shared/geometryBounds.js";
 import { DcaError, dcaError } from "../core-shared/errors.js";
 import { own, setOwn } from "../core-shared/wire.js";
-import { DcaRequest } from "../core-shared--client-issuer/DcaRequest.js";
+import {
+  DcaRequest,
+  SEALED_FIELDS,
+  sealedCandidates,
+} from "../core-shared--client-issuer/DcaRequest.js";
 
 // The checks an issuer runs before it touches a private key are pure: a request
 // and a key go in, verified claims
@@ -502,16 +506,19 @@ export async function checkEnvelopes(request, publisherKey, developmentHttpOrigi
 
 /**
  * @typedef {object} UnlockResult
- * @property {Record<string, string>} contentKeys - base64url raw key bytes, per contentName
- * @property {Record<string, Record<string, string>>} periodKeys - base64url raw key bytes, per accessGroup per t
- * @property {{ kind: string, accessGroup: string, entries: Record<string, string>, interpretation: any }[]} capabilities -
- *   represented period capabilities. The engine preserves the source-declared
- *   kind and interpretation; the processor's configured encoder names the wire
- *   section.
- * @property {Record<string, { error: string, message: string }>} errors
- * @property {Record<string, { reason: 'denied'|'unavailable' }>} notDelivered -
- *   presented access-group families this unlock delivers nothing for, by
- *   reason; empty when the host reports none
+ * @property {{ contentName: string, key: string }[]} contentKeys - base64url raw
+ *   key bytes; several records at one contentName are distinct candidates
+ * @property {{ accessGroup: string, period: string, key: string }[]} periodKeys -
+ *   base64url raw key bytes; several records at one coordinate are distinct candidates
+ * @property {{ kind: string, accessGroup: string, entries: { t: string, key: string }[], interpretation: any }[]} capabilities -
+ *   represented period capabilities, one distinct candidate per entry. The
+ *   engine preserves the source-declared kind and interpretation; the
+ *   processor's configured encoder names the wire section.
+ * @property {{ coordinate: string, error: string, message: string }[]} errors -
+ *   one record per failed coordinate, none where a candidate produced a key
+ * @property {{ accessGroup: string, reason: 'denied'|'unavailable' }[]} notDelivered -
+ *   presented access-group families this unlock delivers nothing for, one
+ *   record each; empty when the host reports none
  * @property {any} policyData - opaque host data from the access policy
  * @property {Record<string, unknown>} [sections] - the presented section
  *   sources' response members, by member name
@@ -566,7 +573,7 @@ export async function checkEnvelopes(request, publisherKey, developmentHttpOrigi
  * into the same seam as a strict one.
  *
  * @typedef {object} AccessPolicy
- * @property {(claims: any, requested: { contentNames: string[], accessGroups: string[], periodCoordinates: Record<string, string[]> }, input: IssuerPolicyDecisionInput) => (PolicyDecision|Promise<PolicyDecision>)} decide -
+ * @property {(claims: any, requested: { contentNames: string[], accessGroups: string[], periodCoordinates: Record<string, string[]>, sourcePeriodCoordinates?: Record<string, string[]> }, input: IssuerPolicyDecisionInput) => (PolicyDecision|Promise<PolicyDecision>)} decide -
  *   answers granted `contentNames` and `periodGrants`, a list of
  *   base `{ accessGroup, periods }` or independent capability grants with
  *   `futurePeriodCount` and a trusted `authorizePeriod(t)` boolean decision.
@@ -636,7 +643,7 @@ export async function checkEnvelopes(request, publisherKey, developmentHttpOrigi
  *   composition selected before opening-key work
  * @property {number} asked - how many coordinate families the request presented
  * @property {number} granted - how many authorized coordinates have a selected delivery route
- * @property {Record<string, { reason: 'denied'|'unavailable' }>} notDelivered -
+ * @property {{ accessGroup: string, reason: 'denied'|'unavailable' }[]} notDelivered -
  *   each reportable presented family that has no delivery route, by reason
  * @property {any} policyData
  * @property {any} decision - the whole policy answer, read here for the members
@@ -703,7 +710,7 @@ export async function checkEnvelopes(request, publisherKey, developmentHttpOrigi
  * nonconforming.
  *
  * @typedef {object} ContentKeySource
- * @property {(request: DcaRequest) => { contentNames?: string[], accessGroups?: string[] }} [presented] -
+ * @property {(request: DcaRequest) => { contentNames?: string[], accessGroups?: string[], sourcePeriodCoordinates?: Record<string, string[]> }} [presented] -
  *   coordinates this request carries that the ordinary reading does not see.
  *   Presenting grants nothing.
  * @property {(unlock: ContentKeyUnlock) => ((contentName: string) => Promise<ContentKeyAnswer>)} contentKeys -
@@ -785,11 +792,14 @@ export async function checkEnvelopes(request, publisherKey, developmentHttpOrigi
  */
 
 /**
- * What one unlock hands a period-capability source. Two members, because a
- * representation of a granted period is derived from the request's own material
- * and nothing else:
+ * What one unlock hands a period-capability source. Preparation and output
+ * accounting belong to this invocation, even when the request object is reused:
  *
  * - `request` carries this source's own grammar.
+ * - `periodKeyCount` reserves actual deduplicated ordinary fallback output.
+ * - `selectedCapabilities` is the complete immutable list of authorized source
+ *   selections. Their payloads remain opaque to base; the source can reserve
+ *   mandatory output across every family before admitting optional output.
  * - `open` is the one opening operation, closed over the verified render anchor
  *   and the key state this request resolved to, and confined to the coordinates
  *   this source selected. It returns bytes or a typed failure, and this view
@@ -801,6 +811,10 @@ export async function checkEnvelopes(request, publisherKey, developmentHttpOrigi
  *
  * @typedef {object} PeriodCapabilityUnlock
  * @property {DcaRequest} request
+ * @property {number} periodKeyCount - actual deduplicated ordinary fallback
+ *   output already reserved for this invocation
+ * @property {readonly { accessGroup: string, selected: readonly PeriodSelection[] }[]} selectedCapabilities -
+ *   complete authorized source selections; payloads remain opaque to base
  * @property {(sealed: unknown, coordinate: BoundCoordinate)
  *   => Promise<{ bytes: Uint8Array }|{ error: { error: string, message: string } }>} open
  */
@@ -835,8 +849,13 @@ export async function checkEnvelopes(request, publisherKey, developmentHttpOrigi
  *   => PeriodSelectionAnswer)} selection - which coordinates of a granted
  *   capability this source will represent, answered before any opening key
  * @property {(unlock: PeriodCapabilityUnlock, invocation: IssuerInvocationContext) => ((accessGroup: string, selected: PeriodSelection[])
- *   => Promise<PeriodCapabilityAnswer>)} capabilities - what this source
- *   represents for one unlock, as a lookup by granted access group
+ *   => Promise<PeriodCapabilityAnswer|{ kind: "omitted" }>)} capabilities - what this source
+ *   represents for one unlock, as a lookup by granted access group. An explicit
+ *   `{ kind: "omitted" }` produces no output after optional-output clamping;
+ *   mandatory output still refuses the exchange if it cannot fit.
+ * @property {(count: number) => void} [checkPeriodKeyOutput] - synchronous
+ *   postcondition on the final deduplicated ordinary period-key record count,
+ *   including base fallback. Returns undefined or throws; receives no keys.
  */
 
 /**
@@ -1052,6 +1071,9 @@ export class IssuerEngine {
   /** @type {PeriodCapabilitySource|null} */
   #periodCapabilitySource;
 
+  /** @type {((count: number) => void)|null} */
+  #checkPeriodKeyOutput;
+
   /** @type {'none'|'partial'|'complete'} */
   #notDeliveredReport;
 
@@ -1193,6 +1215,11 @@ export class IssuerEngine {
       );
     }
 
+    const checkPeriodKeyOutput = periodCapabilitySource?.checkPeriodKeyOutput;
+    if (checkPeriodKeyOutput !== undefined && typeof checkPeriodKeyOutput !== "function") {
+      throw dcaError("bad_config", "a period output check is a synchronous function");
+    }
+
     this.#supportedVersions = [...(supportedVersions ?? SUPPORTED_VERSIONS)];
     this.#operatingIssuerNames = new Set(operatingIssuerNames);
     this.#accessPolicy = accessPolicy;
@@ -1200,6 +1227,7 @@ export class IssuerEngine {
     this.#contentKeySource = contentKeySource ?? null;
     this.#contentKeyScope = contentKeyScope ?? null;
     this.#periodCapabilitySource = periodCapabilitySource ?? null;
+    this.#checkPeriodKeyOutput = checkPeriodKeyOutput?.bind(periodCapabilitySource) ?? null;
     this.#notDeliveredReport = notDeliveredReport;
     this.#sectionSources = checkedSectionSources(responseSectionSources);
     const procedures = checkedEnvelopeProcedures(envelopeProcedures);
@@ -1225,8 +1253,20 @@ export class IssuerEngine {
    * @returns {Promise<GrantedCoordinates>}
    */
   async #decide(request, claims, policyInput, invocation) {
-    const sealedContentKeys = request.sealedContentKeys ?? {};
-    const sealedPeriodKeys = request.sealedPeriodKeys ?? {};
+    // Admission already checked every record. Several records at one
+    // coordinate present it once. The decision needs coordinates only, so no
+    // envelope is read here.
+    const none = () => false;
+    const sealedContentKeys = sealedCandidates(
+      request.sealedContentKeys,
+      SEALED_FIELDS.contentKeys,
+      none,
+    );
+    const sealedPeriodKeys = sealedCandidates(
+      request.sealedPeriodKeys,
+      SEALED_FIELDS.periodKeys,
+      none,
+    );
 
     // A composed content-key source may see coordinates in members of its
     // own that this engine does not read. They join the presented set the
@@ -1238,17 +1278,33 @@ export class IssuerEngine {
     } catch (cause) {
       throw contentKeySourceFault(cause);
     }
+    /** Source-only labels never expand the ordinary period grant route. */
+    const sourcePeriodCoordinates = {};
+    const sourceLabels = described.sourcePeriodCoordinates;
+    if (sourceLabels !== undefined) {
+      if (sourceLabels === null || typeof sourceLabels !== "object" || Array.isArray(sourceLabels))
+        throw dcaError("bad_config", "source period coordinates must be a record");
+      for (const [group, labels] of Object.entries(sourceLabels)) {
+        if (
+          !isAccessGroup(group) ||
+          !Array.isArray(labels) ||
+          labels.some((t) => !isPeriodKeyLabel(t))
+        )
+          throw dcaError("bad_config", "invalid source period coordinates");
+        setOwn(sourcePeriodCoordinates, group, [...new Set(labels)].sort());
+      }
+    }
     const describedPeriods = this.#periodCapabilitySource?.presented?.(request, invocation) ?? {};
     const presentedByPeriodSource = presentedNames(describedPeriods.accessGroups, "accessGroups");
     const presentedContent = [
       ...new Set([
-        ...Object.keys(sealedContentKeys),
+        ...sealedContentKeys.keys(),
         ...presentedNames(described.contentNames, "contentNames"),
       ]),
     ];
     const presentedGroups = [
       ...new Set([
-        ...Object.keys(sealedPeriodKeys),
+        ...sealedPeriodKeys.keys(),
         ...presentedNames(described.accessGroups, "accessGroups"),
         ...presentedByPeriodSource,
       ]),
@@ -1256,11 +1312,8 @@ export class IssuerEngine {
 
     /** @type {Record<string, string[]>} */
     const periodCoordinates = {};
-    for (const accessGroup of Object.keys(sealedPeriodKeys)) {
-      const family = own(sealedPeriodKeys, accessGroup);
-      if (family !== null && typeof family === "object" && !Array.isArray(family)) {
-        setOwn(periodCoordinates, accessGroup, Object.keys(family).filter(isPeriodKeyLabel).sort());
-      }
+    for (const [accessGroup, family] of sealedPeriodKeys) {
+      setOwn(periodCoordinates, accessGroup, [...family.keys()].filter(isPeriodKeyLabel).sort());
     }
 
     /** @type {Record<string, string[]>} */
@@ -1276,6 +1329,7 @@ export class IssuerEngine {
           contentNames: [...presentedContent],
           accessGroups: [...presentedGroups],
           periodCoordinates: policyPeriodCoordinates,
+          ...(sourceLabels === undefined ? {} : { sourcePeriodCoordinates }),
         },
         policyInput,
       );
@@ -1361,12 +1415,10 @@ export class IssuerEngine {
         });
       }
       if (independent) continue;
-      const family = own(sealedPeriodKeys, accessGroup);
-      if (family === null || typeof family !== "object") continue;
+      const family = sealedPeriodKeys.get(accessGroup);
+      if (family === undefined) continue;
       const allowed = new Set(grant.periods ?? []);
-      const grantedLabels = Object.keys(family)
-        .filter((t) => allowed.has(t))
-        .sort();
+      const grantedLabels = [...family.keys()].filter((t) => allowed.has(t)).sort();
       if (grantedLabels.length > 0) periodKeyGrants.push({ accessGroup, periods: grantedLabels });
     }
 
@@ -1392,17 +1444,14 @@ export class IssuerEngine {
     // A family a content-key source presented stays out of the report: the
     // client never sent it in a period section, so its association would read
     // an entry for it as unsolicited and refuse the whole answer.
-    /** @type {Record<string, { reason: 'denied'|'unavailable' }>} */
-    const notDelivered = {};
-    for (const accessGroup of new Set([
-      ...Object.keys(sealedPeriodKeys),
-      ...presentedByPeriodSource,
-    ])) {
+    /** @type {{ accessGroup: string, reason: 'denied'|'unavailable' }[]} */
+    const notDelivered = [];
+    for (const accessGroup of new Set([...sealedPeriodKeys.keys(), ...presentedByPeriodSource])) {
       const capability = periodCapabilities.find((entry) => entry.accessGroup === accessGroup);
       if (capability === undefined || capability.route.kind === "denied") {
-        setOwn(notDelivered, accessGroup, { reason: "denied" });
+        notDelivered.push({ accessGroup, reason: "denied" });
       } else if (capability.route.kind === "authorized-unavailable") {
-        setOwn(notDelivered, accessGroup, { reason: "unavailable" });
+        notDelivered.push({ accessGroup, reason: "unavailable" });
       }
     }
 
@@ -1496,6 +1545,17 @@ export class IssuerEngine {
     checkVersion(request, this.#supportedVersions);
   }
 
+  /** @param {number} count */
+  #assertPeriodKeyOutput(count) {
+    const checked = /** @type {unknown} */ (this.#checkPeriodKeyOutput?.(count));
+    if (checked !== undefined) {
+      // An accidentally async check cannot authorize output. Consume its
+      // rejection so it cannot escape as an unhandled promise afterwards.
+      void Promise.resolve(checked).catch(() => {});
+      throw dcaError("bad_config", "a period output check returns undefined synchronously");
+    }
+  }
+
   /**
    * Two classes of failure, and the return shape carries the split. A
    * request that cannot be trusted at all throws, and the port
@@ -1571,7 +1631,7 @@ export class IssuerEngine {
     // through structural admission, which refuses it before this engine
     // runs; the count stays on this branch for a host that reaches the
     // engine directly, where an empty walk is no decision to report.
-    const notDelivered = this.#notDeliveredReport === "none" ? {} : granted.notDelivered;
+    const notDelivered = this.#notDeliveredReport === "none" ? [] : granted.notDelivered;
     /** @returns {UnlockResult} */
     const completeDenial = () => {
       const policyAuthorized =
@@ -1583,13 +1643,14 @@ export class IssuerEngine {
       // when no section source is presented.
       if (
         policyAuthorized ||
-        (this.#notDeliveredReport === "complete" && Object.keys(notDelivered).length > 0)
+        (this.#notDeliveredReport === "complete" && notDelivered.length > 0)
       ) {
+        this.#assertPeriodKeyOutput(0);
         return {
-          contentKeys: {},
-          periodKeys: {},
+          contentKeys: [],
+          periodKeys: [],
           capabilities: [],
-          errors: {},
+          errors: [],
           notDelivered,
           policyData: granted.policyData,
         };
@@ -1632,14 +1693,16 @@ export class IssuerEngine {
       return openedAt(sealed, coordinate);
     };
 
-    /** @type {Record<string, string>} */
-    const contentKeys = {};
-    /** @type {Record<string, Record<string, string>>} */
-    const periodKeys = {};
-    /** @type {{ kind: string, accessGroup: string, entries: Record<string, string>, interpretation: any }[]} */
+    /** @type {{ contentName: string, key: string }[]} */
+    const contentKeys = [];
+    /** @type {{ accessGroup: string, period: string, key: string }[]} */
+    const periodKeys = [];
+    /** @type {{ kind: string, accessGroup: string, entries: { t: string, key: string }[], interpretation: any }[]} */
     const capabilities = [];
-    /** @type {Record<string, { error: string, message: string }>} */
-    const errors = {};
+    // One failure per coordinate, kept by coordinate until the end: a later
+    // answer for the same coordinate replaces an earlier one, as the map did.
+    /** @type {Map<string, { error: string, message: string }>} */
+    const errors = new Map();
 
     // The name a blob is opened at is the same string the policy said yes
     // to. Reading the coordinate off a field beside the blob instead would
@@ -1708,28 +1771,43 @@ export class IssuerEngine {
       return fromSourcePromise;
     };
 
-    const sealedContentKeys = request.sealedContentKeys ?? {};
+    // Only a granted name's envelopes are read.
+    const sealedContentKeys = sealedCandidates(
+      request.sealedContentKeys,
+      SEALED_FIELDS.contentKeys,
+      ([contentName]) => grantedContentNames.has(contentName),
+    );
     for (const contentName of granted.contentNames) {
-      const opened = await open(own(sealedContentKeys, contentName), { contentName });
-      /** @type {Uint8Array|null} */
-      let bytes = "error" in opened ? null : opened.bytes;
+      // Every record at this name is a source candidate. Each opens under the
+      // one granted coordinate, and every distinct key that opens goes out as
+      // a candidate: an envelope that opens does not prove its key opens the
+      // content. A name a composed source presented has no record, and opens
+      // its absent value once, as before.
+      const sources = sealedContentKeys.get(contentName) ?? [undefined];
+      /** @type {string[]} */
+      const opened = [];
       /** @type {{ error: string, message: string }|null} */
-      let failure = "error" in opened ? opened.error : null;
+      let failure = null;
+      for (const sealed of sources) {
+        const answer = await open(sealed, { contentName });
+        if ("error" in answer) failure ??= answer.error;
+        else distinctPush(opened, base64urlEncode(answer.bytes));
+      }
 
       // Each item gets one answer. A failed content-key seal is provisional while
       // another way to produce the same key is still to be asked, and a
       // source that answers with bytes or an error replaces any earlier error.
-      if (bytes === null && failure?.error !== "key_retired") {
+      if (opened.length === 0 && failure?.error !== "key_retired") {
         const fromSource = await fromSourceForFallback();
         if (fromSource !== null) {
           const answer = await answerFor(fromSource, contentName);
-          if ("bytes" in answer) bytes = answer.bytes;
+          if ("bytes" in answer) opened.push(base64urlEncode(answer.bytes));
           else if ("error" in answer) failure = answer.error;
         }
       }
 
-      if (bytes !== null) setOwn(contentKeys, contentName, base64urlEncode(bytes));
-      else setOwn(errors, contentName, failure ?? UNSEAL_FAILED);
+      for (const key of opened) contentKeys.push({ contentName, key });
+      if (opened.length === 0) errors.set(contentName, failure ?? UNSEAL_FAILED);
     }
 
     // A composed source represents the capabilities it already selected,
@@ -1750,21 +1828,30 @@ export class IssuerEngine {
       ),
     );
     let fromPeriods = null;
-    if (this.#periodCapabilitySource !== null && selectedCoordinates.size > 0) {
-      const { state } = await openingContext();
-      if (!state.retired) {
-        fromPeriods = this.#periodCapabilitySource.capabilities(
-          {
-            request,
-            open: openerWithin(open, claims.resource.renderId, selectedCoordinates),
-          },
-          context,
-        );
-      }
-    }
+    const selectedCapabilities = Object.freeze(
+      granted.periodCapabilities.flatMap(({ accessGroup, route }) =>
+        route.kind === "selected"
+          ? [Object.freeze({ accessGroup, selected: Object.freeze([...route.selected]) })]
+          : [],
+      ),
+    );
 
-    const sealedPeriodKeys = request.sealedPeriodKeys ?? {};
-    for (const { accessGroup, route } of granted.periodCapabilities) {
+    // Only a granted label's envelopes are read.
+    const sealedPeriodKeys = sealedCandidates(
+      request.sealedPeriodKeys,
+      SEALED_FIELDS.periodKeys,
+      ([accessGroup, t]) =>
+        granted.periodKeyGrants.some(
+          (grant) => grant.accessGroup === accessGroup && grant.periods.includes(t),
+        ),
+    );
+    // Reserve actual fallback output before a source clamps optional output.
+    // Retain the decision's order within each route kind.
+    const orderedCapabilities = [
+      ...granted.periodCapabilities.filter(({ route }) => route.kind !== "selected"),
+      ...granted.periodCapabilities.filter(({ route }) => route.kind === "selected"),
+    ];
+    for (const { accessGroup, route } of orderedCapabilities) {
       if (
         route.kind === "unavailable" ||
         route.kind === "authorized-unavailable" ||
@@ -1774,8 +1861,7 @@ export class IssuerEngine {
 
       if (route.kind === "selected" && (await openingContext()).state.retired) {
         for (const { t } of route.selected) {
-          setOwn(
-            errors,
+          errors.set(
             `${accessGroup}${BIND_DELIMITER}${t}`,
             retirementOf(/** @type {string} */ (request.keyId)),
           );
@@ -1783,13 +1869,28 @@ export class IssuerEngine {
         continue;
       }
 
-      /** @type {Record<string, string>} */
-      const openedFamily = {};
-      let section = periodKeys;
+      // Each distinct opened key at a label is one candidate there.
+      /** @type {{ t: string, key: string }[]} */
+      const openedFamily = [];
+      /** @param {string} t @param {Uint8Array} bytes */
+      const keep = (t, bytes) => {
+        const key = base64urlEncode(bytes);
+        if (!openedFamily.some((entry) => entry.t === t && entry.key === key))
+          openedFamily.push({ t, key });
+      };
       /** @type {PeriodCapabilityAnswer|null} */
       let represented = null;
 
       if (route.kind === "selected") {
+        fromPeriods ??= this.#periodCapabilitySource?.capabilities(
+          {
+            request,
+            periodKeyCount: periodKeys.length,
+            selectedCapabilities,
+            open: openerWithin(open, claims.resource.renderId, selectedCoordinates),
+          },
+          context,
+        );
         if (typeof fromPeriods !== "function") {
           throw dcaError(
             "bad_config",
@@ -1797,15 +1898,19 @@ export class IssuerEngine {
               "for its selected representation",
           );
         }
-        represented = await representationFor(
+        const representation = await representationFor(
           fromPeriods,
           accessGroup,
           route.selected,
           claims.resource.renderId,
         );
+        if (representation.kind === "omitted" && !("periods" in representation)) continue;
+        represented = /** @type {PeriodCapabilityAnswer} */ (representation);
         const authorizedPeriods = granted.periodCapabilities.find(
           (entry) => entry.accessGroup === accessGroup,
         )?.authorizedPeriods;
+        /** @type {Map<string, any>} */
+        const failed = new Map();
         for (const period of represented.periods) {
           if (authorizedPeriods && !authorizedPeriods.includes(period.t)) {
             throw dcaError(
@@ -1815,29 +1920,44 @@ export class IssuerEngine {
           }
           // A period reports under the label it is delivered at, and
           // a selected coordinate that failed reports under its own.
-          if ("bytes" in period) setOwn(openedFamily, period.t, base64urlEncode(period.bytes));
-          else setOwn(errors, `${accessGroup}${BIND_DELIMITER}${period.t}`, period.error);
+          if ("bytes" in period) keep(period.t, period.bytes);
+          else if (!failed.has(period.t)) failed.set(period.t, period.error);
+        }
+        // A rival candidate that opened at a label answers it; the failure
+        // of another candidate there is no error (core Section 7.1).
+        for (const [t, error] of failed) {
+          if (!openedFamily.some((entry) => entry.t === t))
+            errors.set(`${accessGroup}${BIND_DELIMITER}${t}`, error);
         }
       } else {
         const periods =
           granted.periodKeyGrants.find((grant) => grant.accessGroup === accessGroup)?.periods ?? [];
-        const family = own(sealedPeriodKeys, accessGroup);
+        const family = sealedPeriodKeys.get(accessGroup);
         for (const t of periods) {
-          const opened = await open(own(family, t), { accessGroup, t });
-          // The format keys `errors` by contentName and says nothing
-          // about a periodKey that will not open. A period is a pair,
-          // so it is reported as one, under the delimiter the sealer
+          let openedAny = false;
+          /** @type {{ error: string, message: string }|null} */
+          let failure = null;
+          // One grant, every source record at it: each opens on its own.
+          for (const sealed of family?.get(t) ?? [undefined]) {
+            const opened = await open(sealed, { accessGroup, t });
+            if ("error" in opened) failure ??= opened.error;
+            else {
+              keep(t, opened.bytes);
+              openedAny = true;
+            }
+          }
+          // The format reports a content failure by contentName and a
+          // period failure as the pair, under the delimiter the sealer
           // already bans inside both fields.
-          if ("error" in opened)
-            setOwn(errors, `${accessGroup}${BIND_DELIMITER}${t}`, opened.error);
-          else setOwn(openedFamily, t, base64urlEncode(opened.bytes));
+          if (!openedAny)
+            errors.set(`${accessGroup}${BIND_DELIMITER}${t}`, failure ?? UNSEAL_FAILED);
         }
       }
 
-      // A family whose every period failed never gets a member here,
+      // A family whose every period failed never gets a record here,
       // because field presence selects the client's cached delivery
       // path.
-      if (Object.keys(openedFamily).length > 0) {
+      if (openedFamily.length > 0) {
         if (
           route.kind === "selected" &&
           /** @type {PeriodCapabilityAnswer} */ (represented).kind !== "period-keys"
@@ -1849,7 +1969,7 @@ export class IssuerEngine {
             interpretation: /** @type {PeriodCapabilityAnswer} */ (represented).interpretation,
           });
         } else {
-          setOwn(section, accessGroup, openedFamily);
+          for (const { t, key } of openedFamily) periodKeys.push({ accessGroup, period: t, key });
         }
       }
     }
@@ -1898,11 +2018,22 @@ export class IssuerEngine {
       return completeDenial();
     }
 
+    // A coordinate where some candidate produced a key reports no error,
+    // even when a rival record there failed.
+    for (const { contentName } of contentKeys) errors.delete(contentName);
+    for (const { accessGroup, period } of periodKeys)
+      errors.delete(`${accessGroup}${BIND_DELIMITER}${period}`);
+
+    // A source's output constraint covers the complete response, including
+    // ordinary fallback families and requests with no selected coordinates.
+    // Capture the check at composition; only a count crosses this boundary.
+    this.#assertPeriodKeyOutput(periodKeys.length);
+
     return {
       contentKeys,
       periodKeys,
       capabilities,
-      errors,
+      errors: [...errors].map(([coordinate, failure]) => ({ coordinate, ...failure })),
       notDelivered,
       policyData: granted.policyData,
       ...(Object.keys(sections).length > 0 ? { sections } : {}),
@@ -2065,7 +2196,8 @@ function auxiliaryOpenerAt(openingContext, keyId, openers) {
       );
       if (!(bytes instanceof Uint8Array)) return { error: UNSEAL_FAILED };
       return { bytes: Uint8Array.from(bytes) };
-    } catch {
+    } catch (cause) {
+      if (cause instanceof DcaError && cause.code === "bad_config") throw cause;
       // An envelope that does not open under this key and AAD is malformed,
       // moved or altered; no case is told apart from another.
       return { error: UNSEAL_FAILED };
@@ -2384,6 +2516,17 @@ function contentKeySourceFault(cause) {
 }
 
 /**
+ * Append `value` unless the list already holds it: identical candidates are
+ * one candidate.
+ *
+ * @param {string[]} list
+ * @param {string} value
+ */
+function distinctPush(list, value) {
+  if (!list.includes(value)) list.push(value);
+}
+
+/**
  * A composed source's lookup for one unlock, with a throw classified at this
  * engine's boundary.
  *
@@ -2446,32 +2589,32 @@ function selectionOf(lookup, accessGroup, periodCount, grant) {
 }
 
 /**
- * One selected capability out of a composed source, checked against the one
- * shape an answer has. It names its periods, at least one, each a label with
- * either bytes or the failure that label reports and never both. There is no
- * miss and no empty answer here: the group was counted as granted because this
- * source selected it, so it reports a key or the reason there is none. Anything
- * else is a composition fault, and reading it as a representation would file
- * whatever a source handed back.
+ * One selected capability out of a composed source. A represented answer
+ * names at least one period, each a label with either bytes or the failure
+ * that label reports and never both. There is no
+ * miss or empty period list: a selected group reports a key or the reason
+ * there is none. The explicit `{ kind: "omitted" }` result alone may omit
+ * optional output after capacity clamping; mandatory output must fit or refuse
+ * the exchange. Every other answer is a composition fault, refused before filing.
  *
  * A source representing the ordinary period-key section represents this
  * route's period-key profile: a period key of another width is a composition fault, refused here
  * before a byte of it is encoded or filed.
  *
  * Every label becomes a coordinate in `keys` or `errors`, so each one must name
- * a period coordinate of the kind it is filed as, and no label may appear
- * twice: a coordinate filed as a key and as an error names two answers for one
- * item. Both are refused here, before anything is filed, rather than left to a
- * client to discard.
+ * a period coordinate of the kind it is filed as. Successful rivals may share
+ * a label; a coordinate filed both as a key and as an error, or as repeated
+ * failures, is refused before anything is filed.
  *
- * @param {(accessGroup: string, selected: PeriodSelection[]) => Promise<PeriodCapabilityAnswer>} lookup
+ * @param {(accessGroup: string, selected: PeriodSelection[]) => Promise<PeriodCapabilityAnswer|{ kind: "omitted" }>} lookup
  * @param {string} accessGroup
  * @param {PeriodSelection[]} selected
  * @param {string} renderId - the anchor every represented coordinate binds under
- * @returns {Promise<PeriodCapabilityAnswer>}
+ * @returns {Promise<PeriodCapabilityAnswer|{ kind: "omitted" }>}
  */
 async function representationFor(lookup, accessGroup, selected, renderId) {
   const answer = await lookup(accessGroup, selected);
+  if (answer?.kind === "omitted" && Object.keys(answer).length === 1) return answer;
   if (
     answer !== null &&
     typeof answer === "object" &&
@@ -2502,9 +2645,14 @@ async function representationFor(lookup, accessGroup, selected, renderId) {
       }
     }
     const kind = /** @type {any} */ (answer).kind;
-    const filed = new Set();
-    for (const { t } of /** @type {any} */ (answer).periods) {
-      if (filed.has(t)) {
+    const filed = new Map();
+    for (const period of /** @type {any} */ (answer).periods) {
+      const { t } = period;
+      const successful = "bytes" in period;
+      // Several successful keys are rival candidates at one coordinate.
+      // A source still cannot report that coordinate both as a key and as
+      // an error, or report its failure twice.
+      if (filed.has(t) && (!successful || !filed.get(t))) {
         throw dcaError(
           "bad_config",
           `a periodCapabilitySource represented ${JSON.stringify(accessGroup)} at ` +
@@ -2518,7 +2666,7 @@ async function representationFor(lookup, accessGroup, selected, renderId) {
             `${JSON.stringify(t)}, which names no ${JSON.stringify(kind)} coordinate of this render`,
         );
       }
-      filed.add(t);
+      filed.set(t, successful);
     }
     return answer;
   }

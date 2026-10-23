@@ -18,6 +18,7 @@ import { AllowAllPolicy } from "../../../demo/support/AllowAllPolicy.js";
 import { Clock } from "../../../demo/actors/Clock.js";
 import { Random } from "../../../demo/actors/Random.js";
 import { Client } from "../../../test-lib/harnesses/client.js";
+import { issuerBlockOf, recordNamed } from "../../../test-lib/helpers/inspect.js";
 import { unlockThroughAdmission } from "../../../test-lib/harnesses/unlockThroughAdmission.js";
 import { issuerKeypair, signingKeypair } from "../../../test-reference/support/keys.js";
 import { compactEcdhPublisherContribution } from "../core-publisher/keySealing.js";
@@ -29,6 +30,38 @@ const COMPACT = "compact";
 const ORDINARY = "ordinary";
 const BODY = "body";
 const TEXT = "The authorized original content.";
+
+/**
+ * One item's sealed or delivered content-key record in a `contentKeys`
+ * collection, or undefined.
+ *
+ * @param {unknown} contentKeys
+ * @param {string} contentName
+ * @returns {any}
+ */
+const contentKeyRecord = (contentKeys, contentName) =>
+  recordNamed(contentKeys, "contentName", contentName);
+
+/**
+ * The error record a response reports at one coordinate, or undefined.
+ *
+ * @param {any} body
+ * @param {string} coordinate
+ * @returns {any}
+ */
+const errorAt = (body, coordinate) => recordNamed(body?.errors, "coordinate", coordinate);
+
+/**
+ * The period-key records one collection carries under one accessGroup.
+ *
+ * @param {unknown} periodKeys
+ * @param {string} accessGroup
+ * @returns {any[]}
+ */
+const periodKeysUnder = (periodKeys, accessGroup) =>
+  Array.isArray(periodKeys)
+    ? periodKeys.filter((/** @type {any} */ record) => record?.accessGroup === accessGroup)
+    : [];
 
 async function world() {
   const signing = await signingKeypair();
@@ -117,13 +150,23 @@ describe("compact-ECDH exchange", () => {
   test("one delivery carries a compact block and an ordinary block, and each opens", async () => {
     const w = await world();
     const r = await w.render();
-    const compact = r.rendered.dcaData.issuerData[COMPACT];
-    const ordinary = r.rendered.dcaData.issuerData[ORDINARY];
+    const compact = issuerBlockOf(r.rendered.dcaData, COMPACT);
+    const ordinary = issuerBlockOf(r.rendered.dcaData, ORDINARY);
     assert.equal(compact.envelope, COMPACT_ECDH);
     assert.equal(Object.hasOwn(ordinary, "envelope"), false);
-    assert.equal(compact.sealed.contentKeys[BODY].length, 87, "65 octets, unpadded base64url");
-    assert.equal(binaryStringBytes(compact.sealed.contentKeys[BODY])?.length, 65);
-    assert.equal(binaryStringBytes(ordinary.sealed.contentKeys[BODY])?.length, 109);
+    assert.equal(
+      contentKeyRecord(compact.sealed.contentKeys, BODY).key.length,
+      87,
+      "65 octets, unpadded base64url",
+    );
+    assert.equal(
+      binaryStringBytes(contentKeyRecord(compact.sealed.contentKeys, BODY).key)?.length,
+      65,
+    );
+    assert.equal(
+      binaryStringBytes(contentKeyRecord(ordinary.sealed.contentKeys, BODY).key)?.length,
+      97,
+    );
     assert.equal(await readThrough(w, r, COMPACT), TEXT);
     assert.equal(await readThrough(w, await w.render({ seed: 2 }), ORDINARY), TEXT);
   });
@@ -131,7 +174,7 @@ describe("compact-ECDH exchange", () => {
   test("one key pair and keyId serve a cached ordinary delivery and a compact one", async () => {
     const w = await world();
     const older = await w.render({ compactSelected: false, seed: 3 });
-    assert.equal(Object.hasOwn(older.rendered.dcaData.issuerData[COMPACT], "envelope"), false);
+    assert.equal(Object.hasOwn(issuerBlockOf(older.rendered.dcaData, COMPACT), "envelope"), false);
     assert.equal(await readThrough(w, older, COMPACT), TEXT);
     assert.equal(await readThrough(w, await w.render({ seed: 4 }), COMPACT), TEXT);
   });
@@ -143,8 +186,8 @@ describe("compact-ECDH exchange", () => {
     const request = older.client.buildRequest(older.page, COMPACT, [BODY]);
     const { status, body } = await w.unlock(request);
     assert.equal(status, 200);
-    assert.equal(body.keys?.contentKeys?.[BODY], undefined);
-    assert.ok(body.errors?.[BODY]);
+    assert.equal(contentKeyRecord(body.keys?.contentKeys, BODY), undefined);
+    assert.ok(errorAt(body, BODY));
     assert.equal(await readThrough(w, await w.render({ seed: 4 }), COMPACT), TEXT);
   });
 
@@ -154,8 +197,8 @@ describe("compact-ECDH exchange", () => {
     const r = await w.render();
     const { status, body } = await w.unlock(r.client.buildRequest(r.page, COMPACT, [BODY]));
     assert.equal(status, 200);
-    assert.equal(body.keys?.contentKeys?.[BODY], undefined);
-    assert.ok(body.errors?.[BODY]);
+    assert.equal(contentKeyRecord(body.keys?.contentKeys, BODY), undefined);
+    assert.ok(errorAt(body, BODY));
   });
 
   test("a removed, inserted, changed or copied selector opens nothing", async () => {
@@ -176,8 +219,8 @@ describe("compact-ECDH exchange", () => {
     ]) {
       const { status, body } = await w.unlock(request);
       assert.equal(status, 200, label);
-      assert.equal(body.keys?.contentKeys?.[BODY], undefined, label);
-      assert.ok(body.errors?.[BODY], label);
+      assert.equal(contentKeyRecord(body.keys?.contentKeys, BODY), undefined, label);
+      assert.ok(errorAt(body, BODY), label);
     }
   });
 
@@ -299,9 +342,9 @@ test("period keys in a compact block are compact envelopes the issuer opens", as
   sealer.resource("resource", {});
   sealer.content(BODY, TEXT, "text/plain", { accessGroups: ["premium"] });
   const { dcaData } = await sealer.seal();
-  const periods = dcaData.issuerData[COMPACT].sealed.periodKeys.premium;
-  assert.ok(Object.keys(periods).length > 0);
-  for (const blob of Object.values(periods)) assert.equal(binaryStringBytes(blob)?.length, 65);
+  const periods = periodKeysUnder(issuerBlockOf(dcaData, COMPACT).sealed.periodKeys, "premium");
+  assert.ok(periods.length > 0);
+  for (const { key } of periods) assert.equal(binaryStringBytes(key)?.length, 65);
 
   const core = createIssuerCore(
     {
@@ -335,7 +378,7 @@ test("period keys in a compact block are compact envelopes the issuer opens", as
   );
   assert.equal(status, 200);
   assert.equal(body.errors, undefined);
-  assert.ok(Object.keys(body.keys?.periodKeys?.premium ?? {}).length > 0, JSON.stringify(body));
+  assert.ok(periodKeysUnder(body.keys?.periodKeys, "premium").length > 0, JSON.stringify(body));
 });
 
 test("a compact blob copied to another item's coordinate opens nothing", async () => {
@@ -368,9 +411,16 @@ test("a compact blob copied to another item's coordinate opens nothing", async (
   const page = client.parse({ ...rendered.dcaData, sealedContent: rendered.sealedContent });
   const request = client.buildRequest(page, COMPACT, [BODY, "summary"]);
   const keys = request.sealed.contentKeys;
+  const keyOf = (/** @type {string} */ name) => contentKeyRecord(keys, name).key;
   const swapped = {
     ...request,
-    sealed: { ...request.sealed, contentKeys: { [BODY]: keys.summary, summary: keys[BODY] } },
+    sealed: {
+      ...request.sealed,
+      contentKeys: [
+        { contentName: BODY, key: keyOf("summary") },
+        { contentName: "summary", key: keyOf(BODY) },
+      ],
+    },
   };
   const core = createIssuerCore(
     { operatingIssuerNames: [COMPACT], accessPolicy: new AllowAllPolicy() },
@@ -394,7 +444,7 @@ test("a compact blob copied to another item's coordinate opens nothing", async (
   assert.equal(honest.body.errors, undefined);
   const { status, body } = await unlock(swapped);
   assert.equal(status, 200);
-  assert.equal(body.keys?.contentKeys?.[BODY], undefined);
-  assert.equal(body.keys?.contentKeys?.summary, undefined);
-  assert.ok(body.errors?.[BODY] && body.errors?.summary);
+  assert.equal(contentKeyRecord(body.keys?.contentKeys, BODY), undefined);
+  assert.equal(contentKeyRecord(body.keys?.contentKeys, "summary"), undefined);
+  assert.ok(errorAt(body, BODY) && errorAt(body, "summary"));
 });

@@ -54,3 +54,14 @@ The registered-signing-key controls carry real ES256 signatures and attacker
 continues to work; a signature under the header's attacker key is refused.
 The harness constructs these serialized inputs independently of the tested
 implementation. No network key fetch or primitive corpus regeneration is used.
+
+The harness also serializes named-record controls from the selected recorded
+request. A non-array collection or a missing/invalid identity refuses the whole
+request; a non-object content-key element is skipped while a non-object
+period-key element refuses it. Each case retains valid siblings to discriminate
+whole-request refusal from element skipping. Fresh harness-owned envelopes,
+constructed with WebCrypto and literal BIND independently of implementation
+source, supply two distinct authenticating keys at one content or period
+coordinate. Both orders must return both keys and preserve other coordinates.
+These are portable semantic controls, not new recorded primitive vectors or a
+claim of exhaustive record coverage.

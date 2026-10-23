@@ -84,7 +84,7 @@ export class PageLoad {
   #delivered;
   /** @type {DcaData} */
   #dcaData;
-  /** @type {{ applyResponse: Function, resolveDetailed: Function, contentKeyWithOriginFor: Function }} */
+  /** @type {{ applyResponse: Function, resolveDetailed: Function, contentKeyWithOriginFor: Function, resolveAuthenticated: Function }} */
   #resolver;
   /** @type {{ build: Function }} */
   #builder;
@@ -129,10 +129,10 @@ export class PageLoad {
    *   to file directly delivered period keys in this browser's caches
    * @param {boolean} [config.relayPeriodKeys] - whether this load's requests
    *   relay the selected period keys
-   * @param {(options: object) => object} [config.resolverFactory] - the
+   * @param {(options: import("../../integration-client/composeClient.js").ResolverOptions) => Pick<import("../../integration-client/createDeliveryClient.js").DeliveryResolver, "applyResponse"|"resolveDetailed"|"contentKeyWithOriginFor"|"resolveAuthenticated">} [config.resolverFactory] - the
    *   browser-selected resolver composition, built once for this load. Left
    *   out, this load takes the base resolver.
-   * @param {(options: object) => object} [config.requestBuilderFactory] - the
+   * @param {import("../../integration-client/composeClient.js").ComposeClientOptions["requestBuilderFactory"]} [config.requestBuilderFactory] - the
    *   independently selected request composition, built once for this load.
    *   Left out, this load takes the base request builder.
    * @param {import("../../core-client/ContentRepresentationOpener.js").ContentRepresentationOpener} [config.contentRepresentationOpener] -
@@ -255,10 +255,20 @@ export class PageLoad {
       ...(resolverFactory === undefined ? {} : { resolverFactory }),
       ...(requestBuilderFactory === undefined ? {} : { requestBuilderFactory }),
     });
-    // PageLoad calls three operations on an injected resolver. Validate that
-    // exact surface here; the reusable browser entry needs two more.
-    for (const method of ["applyResponse", "resolveDetailed", "contentKeyWithOriginFor"]) {
-      if (typeof resolver?.[method] !== "function") {
+    // PageLoad requires authenticated selection alongside its other resolver duties.
+    for (const method of [
+      "applyResponse",
+      "resolveDetailed",
+      "contentKeyWithOriginFor",
+      "resolveAuthenticated",
+    ]) {
+      if (
+        typeof resolver?.[
+          /** @type {"applyResponse"|"resolveDetailed"|"contentKeyWithOriginFor"|"resolveAuthenticated"} */ (
+            method
+          )
+        ] !== "function"
+      ) {
         throw dcaError("bad_config", `a resolverFactory result needs ${method}`);
       }
     }
@@ -468,6 +478,9 @@ export class PageLoad {
       if (!this.#breaker.allows(unlockUrl, this.#clock.now())) {
         this.#skipped++;
         attempts.push({ issuerName, url: unlockUrl, outcome: "skipped", status: null });
+        // A local skip grants no conditional retry permission. Keep any
+        // scoped eligibility established by an earlier issuer in this walk.
+        if (retryIdentity === null) break;
         continue;
       }
 
@@ -662,12 +675,28 @@ export class PageLoad {
       const bytes = await this.#contentRepresentationOpener.open({
         item,
         ciphertext,
-        resolveKey: async () => {
-          const resolved = await this.#resolver.contentKeyWithOriginFor(this.#dcaData, contentName);
-          this.#observeKeyResolution("open", {
-            origins: [{ contentName, origin: resolved.origin }],
-          });
-          return resolved.key;
+        // Rival candidates for one item are held newest first, and the newest
+        // may be a wrong one: authenticated selection tries each with the
+        // opener's predicate. The key comes out of the predicate rather than a
+        // second read of the live page.
+        resolveKey: async (authenticate) => {
+          /** @type {Uint8Array|CryptoKey|null} */
+          let opened = null;
+          const { origins } = await this.#resolver.resolveAuthenticated(
+            this.#dcaData,
+            [contentName],
+            async (
+              /** @type {string} */ _name,
+              /** @type {Uint8Array|CryptoKey} */ candidate,
+              /** @type {{ kind?: string }|undefined} */ origin,
+            ) => {
+              const opens = await authenticate(candidate, origin);
+              if (opens) opened = candidate;
+              return opens;
+            },
+          );
+          this.#observeKeyResolution("open", { origins });
+          return opened;
         },
       });
       this.#decrypted.push(contentName);

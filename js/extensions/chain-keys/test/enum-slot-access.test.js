@@ -14,6 +14,7 @@ import { PeriodKeyCache } from "../../../adapter-client/PeriodKeyCache.js";
 import { attemptContentKeyWrap } from "../../../core-client/contentKeyWrapAttempt.js";
 import { decrypt } from "../../../core-shared/aead.js";
 import { contentAadOctets } from "../../../test-reference/support/contentAadOctets.js";
+import { wrapNonceOf } from "../../../test-reference/support/contentKeyWrapNonceOctets.js";
 import { base64urlDecode, utf8Decode } from "../../../core-shared/codec.js";
 import { ChainKeyRequestBuilder } from "../core-client/ChainKeyRequestBuilder.js";
 import { ChainKeyRequest } from "../core-shared--client-issuer/ChainKeyRequest.js";
@@ -21,7 +22,19 @@ import { ChainKeyCache } from "../core-client/ChainKeyCache.js";
 import { periodFamilyGeneration } from "../core-shared--publisher-issuer/periodFamilyGeneration.js";
 import { periodFamilySupply } from "../core-publisher/periodFamilySupply.js";
 import { referenceChainKeyProfile } from "../referenceProfile.js";
-import { exchangesPosted } from "./world.js";
+import {
+  issuerBlockOf,
+  periodsOn,
+  sealedContentOf,
+  wrapGroupsOn,
+  wrapsOf,
+} from "../../../test-lib/helpers/inspect.js";
+import {
+  contentKeyMap,
+  keyAt,
+  periodKeyMap,
+} from "../../../test-reference/support/namedRecords.js";
+import { cutoffsOf, exchangesPosted } from "./world.js";
 
 const GEOMETRY = Object.freeze({ chainsPerDay: 1, periodMinutes: 60 });
 const DAY = "2026-10-07";
@@ -196,7 +209,7 @@ async function setup({
           const request = builder.build(page, issuerName, needed);
           return new ChainKeyRequest({
             ...request.toObject(),
-            requestedPeriodKeys: { [SLOT]: [...requestedPeriods] },
+            requestedPeriodKeys: [{ accessGroup: SLOT, periods: [...requestedPeriods] }],
           });
         },
       };
@@ -219,14 +232,16 @@ async function render(world, id, position, slot = SLOT, day = DAY) {
 }
 /** @param {any} fixture */
 function wrapOf(fixture) {
-  return fixture.page.asJson().contentData[BODY].keys[fixture.slot][0];
+  return wrapsOf(fixture.page.asJson(), BODY, fixture.slot)[0];
 }
 /** @param {any} fixture @param {Uint8Array} periodKey */
 async function openWrap(fixture, periodKey) {
   // The ordinary v1 content-key wrap uses no AAD. Item encryption has its own
   // content AAD, derived from the token and the item; do not invent a
-  // coordinate wrap AAD.
-  return attemptContentKeyWrap(wrapOf(fixture), periodKey);
+  // coordinate wrap AAD. Its nonce derives from the render and the wrap's coordinate.
+  const wrap = wrapOf(fixture);
+  const nonce = wrapNonceOf(fixture.page.asJson(), BODY, fixture.slot, wrap.period);
+  return attemptContentKeyWrap(wrap, periodKey, nonce);
 }
 /** @param {any} fixture */
 async function positiveControl(fixture) {
@@ -238,7 +253,7 @@ async function positiveControl(fixture) {
   const body = await decrypt(
     cK,
     new Uint8Array(12),
-    base64urlDecode(doc.sealedContent[BODY]),
+    base64urlDecode(/** @type {string} */ (sealedContentOf(doc, BODY))),
     contentAadOctets(doc, BODY),
   );
   assert.equal(utf8Decode(body), fixture.text);
@@ -266,19 +281,21 @@ function cacheContext(world, group, t) {
 function ledger(fixture, response) {
   const doc = fixture.page.asJson();
   const entry = wrapOf(fixture);
-  const source = doc.issuerData[ISSUER_NAME].sealed.chainKeys;
-  const rawResponse = Object.values(response.keys.chainKeys ?? response.keys.periodKeys)
-    .flatMap((family) => Object.values(family))
-    .reduce((sum, value) => sum + base64urlDecode(value).length, 0);
+  const source = issuerBlockOf(doc, ISSUER_NAME).sealed.chainKeys;
+  const rawResponse = (response.keys.chainKeys ?? response.keys.periodKeys).reduce(
+    (/** @type {number} */ sum, /** @type {any} */ record) =>
+      sum + base64urlDecode(record.key).length,
+    0,
+  );
   return {
     serialization:
       "Buffer.byteLength(JSON.stringify(value), 'utf8'); compact object serialization, not HTTP bytes",
-    itemKeyMapJson: jsonBytes(doc.contentData[BODY].keys),
-    sourceMapJson: jsonBytes(source),
+    itemKeyRecordsJson: jsonBytes(wrapsOf(doc, BODY, fixture.slot)),
+    sourceRecordsJson: jsonBytes(source),
     deliveryJson: jsonBytes(doc),
     responseJson: jsonBytes(response),
-    itemWrapPayload: base64urlDecode(entry.nonce).length + base64urlDecode(entry.key).length,
-    sourcePayload: base64urlDecode(source[SLOT][label(12)]).length,
+    itemWrapPayload: base64urlDecode(entry.key).length,
+    sourcePayload: base64urlDecode(keyAt(source, { accessGroup: SLOT, cutoff: label(12) })).length,
     responsePayload: rawResponse,
   };
 }
@@ -328,18 +345,22 @@ test("slot8 C12 supply returns future C4, opens fresh prefix articles and preser
   }
   const a = await render(world, "A", 0);
   const doc = a.page.asJson();
-  assert.deepEqual(Object.keys(doc.contentData[BODY].keys), [SLOT]);
+  assert.deepEqual(wrapGroupsOn(doc, BODY), [SLOT]);
+  assert.deepEqual(periodsOn(doc, BODY, SLOT), [label(0)]);
   assert.deepEqual(
-    doc.contentData[BODY].keys[SLOT].map((entry) => entry.t),
-    [label(0)],
+    Object.keys(wrapOf(a)).sort(),
+    ["accessGroup", "key", "period"],
+    "the wrap carries no nonce",
   );
-  assert.equal(base64urlDecode(wrapOf(a).nonce).length, 12);
   assert.equal(base64urlDecode(wrapOf(a).key).length, 32);
-  const sealed = doc.issuerData[ISSUER_NAME].sealed;
-  assert.deepEqual(Object.keys(sealed.chainKeys), [SLOT]);
-  assert.deepEqual(Object.keys(sealed.chainKeys[SLOT]), [label(12)]);
-  assert.equal(base64urlDecode(sealed.chainKeys[SLOT][label(12)]).length, 109);
-  assert.deepEqual(Object.keys(sealed.contentKeys ?? {}), []);
+  const sealed = issuerBlockOf(doc, ISSUER_NAME).sealed;
+  assert.deepEqual(Object.keys(periodKeyMap(sealed.chainKeys, "cutoff")), [SLOT]);
+  assert.deepEqual(cutoffsOf(sealed.chainKeys, SLOT), [label(12)]);
+  assert.equal(
+    base64urlDecode(keyAt(sealed.chainKeys, { accessGroup: SLOT, cutoff: label(12) })).length,
+    97,
+  );
+  assert.deepEqual(Object.keys(contentKeyMap(sealed.contentKeys ?? [])), []);
   assert.equal(sealed.periodKeys, undefined);
   const { result, exchanges } = await exchangesPosted(world.network, () =>
     readArticle(browser, a.page, [BODY]),
@@ -348,17 +369,20 @@ test("slot8 C12 supply returns future C4, opens fresh prefix articles and preser
   assert.equal(result.texts[BODY], a.text);
   assert.equal(exchanges.length, 1);
   assert.equal(exchanges[0].status, 200);
-  assert.deepEqual(exchanges[0].request.requestedPeriodKeys, { [SLOT]: [label(0)] });
+  assert.deepEqual(exchanges[0].request.requestedPeriodKeys, [
+    { accessGroup: SLOT, periods: [label(0)] },
+  ]);
   assert.deepEqual(exchanges[0].request.sealed.chainKeys, sealed.chainKeys);
   assert.deepEqual(policyClaims[0].resource.data, { section: "sports", slot: SLOT });
   const response = exchanges[0].body;
-  assert.deepEqual(Object.keys(response.keys.chainKeys), [SLOT]);
-  assert.deepEqual(Object.keys(response.keys.chainKeys[SLOT]), [label(4)]);
-  const c4 = base64urlDecode(response.keys.chainKeys[SLOT][label(4)]);
+  const returnedChain = periodKeyMap(response.keys.chainKeys, "cutoff");
+  assert.deepEqual(Object.keys(returnedChain), [SLOT]);
+  assert.deepEqual(Object.keys(returnedChain[SLOT]), [label(4)]);
+  const c4 = base64urlDecode(returnedChain[SLOT][label(4)]);
   assert.equal(c4.length, 16);
   assert.deepEqual(c4, expectedChain(SLOT, 4));
   assert.equal(response.keys.periodKeys, undefined);
-  assert.deepEqual(Object.keys(response.keys.contentKeys ?? {}), []);
+  assert.deepEqual(Object.keys(contentKeyMap(response.keys.contentKeys ?? [])), []);
   assert.equal(Object.hasOwn(response, "periodGeometry"), false);
   assert.deepEqual(exchanges[0].request.periodGeometry, GEOMETRY);
   assert.deepEqual(
@@ -438,8 +462,8 @@ test("slot8 C12 supply returns future C4, opens fresh prefix articles and preser
   assert.equal(control.exchanges.length, 0);
   assert.equal(await openWrap(a, expectedPeriod(SLOT, 4)), null);
   const sizes = ledger(a, response);
-  assert.equal(sizes.itemWrapPayload, 44);
-  assert.equal(sizes.sourcePayload, 109);
+  assert.equal(sizes.itemWrapPayload, 32);
+  assert.equal(sizes.sourcePayload, 97);
   assert.equal(sizes.responsePayload, 16);
   t.diagnostic(`chain response byte ledger: ${JSON.stringify(sizes)}`);
 });
@@ -460,18 +484,21 @@ test("sparse selected period output returns only canonical0,2,4 and caches those
   assert.equal(result.unlock.ok, true, JSON.stringify(exchanges));
   assert.equal(result.texts[BODY], a.text);
   assert.equal(exchanges.length, 1);
-  assert.deepEqual(exchanges[0].request.requestedPeriodKeys, { [SLOT]: [...SELECTED] });
+  assert.deepEqual(exchanges[0].request.requestedPeriodKeys, [
+    { accessGroup: SLOT, periods: [...SELECTED] },
+  ]);
   const response = exchanges[0].body;
+  const periodKeys = periodKeyMap(response.keys.periodKeys);
   assert.equal(response.keys.chainKeys, undefined);
-  assert.deepEqual(Object.keys(response.keys.periodKeys), [SLOT]);
-  assert.deepEqual(Object.keys(response.keys.periodKeys[SLOT]), SELECTED);
-  assert.deepEqual(Object.keys(response.keys.contentKeys ?? {}), []);
+  assert.deepEqual(Object.keys(periodKeys), [SLOT]);
+  assert.deepEqual(Object.keys(periodKeys[SLOT]), SELECTED);
+  assert.deepEqual(Object.keys(contentKeyMap(response.keys.contentKeys ?? [])), []);
   assert.equal(
     chainCache.entries().some((entry) => entry.kind === "chain-key"),
     false,
   );
   for (const position of [0, 2, 4]) {
-    const key = base64urlDecode(response.keys.periodKeys[SLOT][label(position)]);
+    const key = base64urlDecode(periodKeys[SLOT][label(position)]);
     assert.deepEqual(key, expectedPeriod(SLOT, position));
     assert.deepEqual(
       await periodCache.candidatesAt(SLOT, label(position), { publisher: world.publisher.origin }),
@@ -494,7 +521,7 @@ test("sparse selected period output returns only canonical0,2,4 and caches those
   }
   // Keep A's entry unchanged and demonstrate its two legitimate opening inputs.
   const original = JSON.stringify(wrapOf(a));
-  const individual = base64urlDecode(response.keys.periodKeys[SLOT][label(0)]);
+  const individual = base64urlDecode(periodKeys[SLOT][label(0)]);
   const chain = new ChainKeyCache();
   await chain.put(SLOT, label(4), expectedChain(SLOT, 4), cacheContext(world, SLOT, label(4)));
   const [derived] = await chain.candidates(SLOT, label(0), cacheContext(world, SLOT, label(0)));
@@ -546,10 +573,11 @@ test("fresh acquisition cannot exceed absent or earlier supply, or a denied pref
       );
       assert.equal(checked.exchanges.length, 1);
       if (row.requestedPeriods !== undefined)
-        assert.deepEqual(checked.exchanges[0].request.requestedPeriodKeys, {
-          [SLOT]: row.requestedPeriods,
-        });
-      const returned = checked.exchanges[0].body.keys?.chainKeys?.[SLOT] ?? {};
+        assert.deepEqual(checked.exchanges[0].request.requestedPeriodKeys, [
+          { accessGroup: SLOT, periods: row.requestedPeriods },
+        ]);
+      const returned =
+        periodKeyMap(checked.exchanges[0].body.keys?.chainKeys, "cutoff")?.[SLOT] ?? {};
       assert.deepEqual(Object.keys(returned), row.cutoff === null ? [] : [label(row.cutoff)]);
       assert.equal(Object.hasOwn(returned, label(4)), false);
       if (row.cutoff !== null)
@@ -580,19 +608,22 @@ test("equal prefix authority can return C4 or five canonical period keys", async
   assert.equal(result.unlock.ok, true);
   assert.equal(result.texts[BODY], a.text);
   assert.equal(exchanges.length, 1);
-  assert.deepEqual(exchanges[0].request.requestedPeriodKeys, { [SLOT]: [label(0)] });
+  assert.deepEqual(exchanges[0].request.requestedPeriodKeys, [
+    { accessGroup: SLOT, periods: [label(0)] },
+  ]);
   const response = exchanges[0].body;
+  const periodKeys = periodKeyMap(response.keys.periodKeys);
   assert.equal(response.keys.chainKeys, undefined);
-  assert.deepEqual(Object.keys(response.keys.periodKeys), [SLOT]);
+  assert.deepEqual(Object.keys(periodKeys), [SLOT]);
   assert.deepEqual(
-    Object.keys(response.keys.periodKeys[SLOT]),
+    Object.keys(periodKeys[SLOT]),
     Array.from({ length: 5 }, (_, index) => label(index)),
   );
   // The same authority as the C4 response above: all period keys in prefix0..4.
   const chain = new ChainKeyCache();
   await chain.put(SLOT, label(4), expectedChain(SLOT, 4), cacheContext(world, SLOT, label(4)));
   for (let position = 0; position <= 4; position++) {
-    const period = base64urlDecode(response.keys.periodKeys[SLOT][label(position)]);
+    const period = base64urlDecode(periodKeys[SLOT][label(position)]);
     assert.deepEqual(period, expectedPeriod(SLOT, position));
     assert.deepEqual(
       await chain.candidates(SLOT, label(position), cacheContext(world, SLOT, label(position))),

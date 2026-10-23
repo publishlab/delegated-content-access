@@ -46,7 +46,7 @@ function stubClient(opened, contentTypeOf = () => "text/plain") {
         covered: names.filter((name) => Object.hasOwn(opened, name)),
         missing: names.filter((name) => !Object.hasOwn(opened, name)),
       }),
-      contentKeyWithOriginFor: async () => ({ key: new Uint8Array(16) }),
+      resolveAuthenticated: async () => ({ covered: [], missing: [], origins: [] }),
     },
     opener: {
       open: async (/** @type {{ item: { contentName: string } }} */ call) =>

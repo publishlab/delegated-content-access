@@ -41,6 +41,7 @@ import { DcaRequest } from "../core-shared--client-issuer/DcaRequest.js";
 import { DcaData } from "../core-client/DcaData.js";
 import { openContent } from "../core-client/openContent.js";
 import { attemptContentKeyWrap } from "../core-client/contentKeyWrapAttempt.js";
+import { contentKeyWrapNonceOctets } from "../test-reference/support/contentKeyWrapNonceOctets.js";
 import { encrypt } from "../core-shared/aead.js";
 import { base64urlDecode, base64urlEncode, utf8Decode } from "../core-shared/codec.js";
 import { Storage } from "../demo/actors/Storage.js";
@@ -71,6 +72,16 @@ import {
 import { keyKindContext } from "../extensions/client-bound-transport/core-shared--client-issuer/keyKind.js";
 import { compactEcdhPublisherContribution } from "../extensions/compact-ecdh/core-publisher/keySealing.js";
 import { COMPACT_ECDH } from "../extensions/compact-ecdh/core-shared--publisher-issuer/selector.js";
+import {
+  connectorsOf,
+  find,
+  findAll,
+  groupRecords,
+  issuerBlock,
+  item as itemRecord,
+  seedOf,
+  seedRecords,
+} from "../extensions/content-groups/test/_lib/records.js";
 
 const subtle = globalThis.crypto.subtle;
 const ORIGIN = "https://news.example";
@@ -515,13 +526,23 @@ function pageItem(page, name, origin = ORIGIN) {
     item: /** @type {any} */ (data.contentItemFor(name)),
     ciphertext: /** @type {string} */ (reader.extract(name)),
     renderId: /** @type {string} */ (data.renderId),
-    connectors: /** @type {Record<string, string>} */ (raw.contentData[name].connectors ?? {}),
+    connectors: connectorsOf(raw, name),
   };
 }
 
-/** The sealed seed envelopes one issuer's page carries. @param {any} page @param {string} [issuerName] */
+/** The seed records one issuer's page carries. @param {any} page @param {string} [issuerName] */
 function pageSeeds(page, issuerName = "issuerA") {
-  return readerOf(page, "json").dcaData.issuerData[issuerName].sealed.contentWindowSeeds;
+  return seedRecords(readerOf(page, "json").dcaData, issuerName);
+}
+
+/** One seed envelope the page carries. @param {any} page @param {string} issuerName @param {string} contentName @param {string} windowStart */
+function pageSeed(page, issuerName, contentName, windowStart) {
+  return seedOf(readerOf(page, "json").dcaData, issuerName, contentName, windowStart);
+}
+
+/** Each distinct value of `field` across `records`, in first-seen order. @param {any[]|undefined} records @param {string} field */
+function namesIn(records, field) {
+  return [...new Set((records ?? []).map((record) => record[field]))];
 }
 
 /**
@@ -534,7 +555,7 @@ function pageSeeds(page, issuerName = "issuerA") {
 async function tryPeriodKey(page, name, group, periodKey, origin) {
   const { item, ciphertext, renderId, connectors } = pageItem(page, name, origin);
   const pad = await itemPad(periodKey, { renderId, contentName: name });
-  const contentKey = xor16(base64urlDecode(connectors[group]), pad);
+  const contentKey = xor16(base64urlDecode(find(connectors, { group })?.connector), pad);
   return openContent(contentKey, name, ciphertext, item.contentAad);
 }
 
@@ -566,20 +587,18 @@ async function periodFromDelivered(chainKey, group, cutoffT, t) {
 
 /** The first delivered chain key in a recorded direct answer. @param {any} body */
 function deliveredChain(body) {
-  for (const [contentName, groups] of Object.entries(body?.contentGroups?.chainKeys ?? {}))
-    for (const [group, entries] of Object.entries(/** @type {any} */ (groups)))
-      for (const [cutoffT, key] of Object.entries(/** @type {any} */ (entries)))
-        return { contentName, group, cutoffT, key: base64urlDecode(key) };
-  return null;
+  const [record] = body?.contentGroupKeys?.chainKeys ?? [];
+  if (record === undefined) return null;
+  const { contentName, group, cutoff, key } = record;
+  return { contentName, group, cutoffT: cutoff, key: base64urlDecode(key) };
 }
 
 /** The first delivered period key in a recorded direct answer. @param {any} body */
 function deliveredPeriod(body) {
-  for (const [contentName, groups] of Object.entries(body?.contentGroups?.periodKeys ?? {}))
-    for (const [group, entries] of Object.entries(/** @type {any} */ (groups)))
-      for (const [t, key] of Object.entries(/** @type {any} */ (entries)))
-        return { contentName, group, t, key: base64urlDecode(/** @type {string} */ (key)) };
-  return null;
+  const [record] = body?.contentGroupKeys?.periodKeys ?? [];
+  if (record === undefined) return null;
+  const { contentName, group, period, key } = record;
+  return { contentName, group, t: period, key: base64urlDecode(/** @type {string} */ (key)) };
 }
 
 /** Every storage key, to show what a step wrote. @param {Storage} storage */
@@ -604,7 +623,7 @@ describe("publish, unlock and read through the composed roles", () => {
       assert.ok(deliveredPeriod(issuer.last.body), "headline opened from a delivered period key");
       assert.equal(await text(client, "shoppingAd"), "ad");
       assert.deepEqual(
-        Object.keys(issuer.last.body.contentGroups.contentKeys),
+        namesIn(issuer.last.body.contentGroupKeys.contentKeys, "contentName"),
         ["shoppingAd"],
         "shoppingAd opened from its recovered item key",
       );
@@ -655,7 +674,7 @@ describe("publish, unlock and read through the composed roles", () => {
     const response = await issuer.transport.post(UNLOCK, request.toObject());
     const body = response.body;
     assert.equal(response.status, 200);
-    assert.deepEqual(Object.keys(body.contentGroups), ["contentKeys"]);
+    assert.deepEqual(Object.keys(body.contentGroupKeys), ["contentKeys"]);
     await resolver.applyResponse(
       data,
       "issuerA",
@@ -679,7 +698,7 @@ describe("publish, unlock and read through the composed roles", () => {
     // from the JWT or relax the cache boundary to repair the item-key path.
     const chainRequest = builder.build(data, "issuerA", ["bodytext"]);
     const chainAnswer = await issuer.transport.post(UNLOCK, chainRequest.toObject());
-    assert.ok(chainAnswer.body.contentGroups.chainKeys.bodytext);
+    assert.ok(find(chainAnswer.body.contentGroupKeys.chainKeys, { contentName: "bodytext" }));
     await assert.rejects(
       resolver.applyResponse(
         data,
@@ -757,9 +776,9 @@ describe("publish, unlock and read through the composed roles", () => {
       ],
     );
     assert.deepEqual(walk.missing, ["bodytext"]);
-    assert.deepEqual(Object.keys(sent[0].sealed.contentWindowSeeds), ["bodytext"]);
+    assert.deepEqual(namesIn(sent[0].sealed.contentWindowSeeds, "contentName"), ["bodytext"]);
     assert.deepEqual(Object.keys(sent[1].sealed), ["contentKeys"]);
-    assert.deepEqual(Object.keys(sent[1].sealed.contentKeys), ["purchase"]);
+    assert.deepEqual(namesIn(sent[1].sealed.contentKeys, "contentName"), ["purchase"]);
     assert.equal(utf8Decode((await client.openLocal("purchase")).bytes), "buy");
     await assert.rejects(client.openLocal("bodytext"), coded("no_key"));
   });
@@ -956,7 +975,8 @@ describe("the composed exchange refuses substitutions and unbound answers", () =
   test("a seed envelope of another content name does not open at this name's coordinate", async () => {
     const { issuer, page } = await world();
     const refusal = await refusedRequest(issuer, page, "bodytext", "body text", (request) => {
-      request.sealed.contentWindowSeeds.bodytext[W12] = pageSeeds(page).headline[W12];
+      find(request.sealed.contentWindowSeeds, { contentName: "bodytext", windowStart: W12 }).key =
+        pageSeed(page, "issuerA", "headline", W12);
       return request;
     });
     assert.equal(refusal.status, 400);
@@ -971,7 +991,8 @@ describe("the composed exchange refuses substitutions and unbound answers", () =
       "bodytext",
       "body text",
       (request) => {
-        request.sealed.contentWindowSeeds.bodytext[W12] = pageSeeds(page, "issuerA").bodytext[W12];
+        find(request.sealed.contentWindowSeeds, { contentName: "bodytext", windowStart: W12 }).key =
+          pageSeed(page, "issuerA", "bodytext", W12);
         return request;
       },
       { issuerName: "issuerB" },
@@ -990,11 +1011,11 @@ describe("the composed exchange refuses substitutions and unbound answers", () =
 
   test("a substituted connector returns a candidate but cannot open genuine content", async () => {
     const { issuer, page } = await world();
+    // The client relays every sports connector of shoppingAd; each one is swapped.
+    const substitute = find(pageItem(page, "bodytext").connectors, { group: "sports" }).connector;
     issuer.rewriteRequests((request) => {
-      request.requestedContentKeys.shoppingAd.connector = pageItem(
-        page,
-        "bodytext",
-      ).connectors.sports;
+      for (const record of findAll(request.requestedContentKeys, { contentName: "shoppingAd" }))
+        record.connector = substitute;
       return request;
     });
     const changed = clientFor(page, { transport: issuer.transport }).client;
@@ -1004,7 +1025,9 @@ describe("the composed exchange refuses substitutions and unbound answers", () =
     const control = clientFor(page, { transport: issuer.transport }).client;
     assert.equal(await text(control, "shoppingAd"), "ad", "the unchanged request opens");
     assert.equal(refusal.status, 200);
-    const candidate = refusal.body.contentGroups.contentKeys.shoppingAd;
+    const candidate = find(refusal.body.contentGroupKeys.contentKeys, {
+      contentName: "shoppingAd",
+    })?.key;
     assert.equal(typeof candidate, "string");
     const { item, ciphertext } = pageItem(page, "shoppingAd");
     await assert.rejects(
@@ -1035,15 +1058,22 @@ describe("the composed exchange refuses substitutions and unbound answers", () =
     assert.equal(await text(client, "purchase"), "buy", "the ordinary item opens");
   });
 
-  const malformed = { section: "contentGroups", code: "malformed_response" };
+  const malformed = { section: "contentGroupKeys", code: "malformed_response" };
   // Each case names the issue the client reports: a refused content-group
   // section, or the whole response when the declared key table is broken.
+  /** bodytext's delivered politics chain record at T18. @param {any} body */
+  const bodytextChain = (body) =>
+    find(body.contentGroupKeys.chainKeys, {
+      contentName: "bodytext",
+      group: "politics",
+      cutoff: T18,
+    });
   const responseCases = /** @type {[string, string, (body: any) => void, object][]} */ ([
     [
       "a chain key for a name the request did not carry",
       "bodytext",
       (body) => {
-        body.contentGroups.chainKeys.headline = body.contentGroups.chainKeys.bodytext;
+        body.contentGroupKeys.chainKeys.push({ ...bodytextChain(body), contentName: "headline" });
       },
       malformed,
     ],
@@ -1051,8 +1081,7 @@ describe("the composed exchange refuses substitutions and unbound answers", () =
       "a chain key for a group the request did not carry",
       "bodytext",
       (body) => {
-        const chains = body.contentGroups.chainKeys.bodytext;
-        chains.culture = chains.politics;
+        body.contentGroupKeys.chainKeys.push({ ...bodytextChain(body), group: "culture" });
       },
       malformed,
     ],
@@ -1060,9 +1089,12 @@ describe("the composed exchange refuses substitutions and unbound answers", () =
       "a chain key for a window the page did not supply",
       "bodytext",
       (body) => {
-        body.contentGroups.chainKeys.bodytext.politics["261015T1200"] = base64urlEncode(
-          new Uint8Array(16),
-        );
+        body.contentGroupKeys.chainKeys.push({
+          contentName: "bodytext",
+          group: "politics",
+          cutoff: "261015T1200",
+          key: base64urlEncode(new Uint8Array(16)),
+        });
       },
       malformed,
     ],
@@ -1070,10 +1102,8 @@ describe("the composed exchange refuses substitutions and unbound answers", () =
       "a chain key inside a redundant wrapper",
       "bodytext",
       (body) => {
-        body.contentGroups.chainKeys.bodytext.politics[T18] = {
-          position: 5,
-          key: body.contentGroups.chainKeys.bodytext.politics[T18],
-        };
+        const chain = bodytextChain(body);
+        chain.key = { position: 5, key: chain.key };
       },
       { section: "response", code: "invalid_transport" },
     ],
@@ -1081,17 +1111,19 @@ describe("the composed exchange refuses substitutions and unbound answers", () =
       "a chain key of 15 bytes",
       "bodytext",
       (body) => {
-        body.contentGroups.chainKeys.bodytext.politics[T18] = base64urlEncode(new Uint8Array(15));
+        bodytextChain(body).key = base64urlEncode(new Uint8Array(15));
       },
-      { section: "contentGroups", code: "malformed_key" },
+      { section: "contentGroupKeys", code: "malformed_key" },
     ],
     [
       "a chain member answered under periodKeys",
       "bodytext",
       (body) => {
-        const chain = body.contentGroups.chainKeys.bodytext.politics[T18];
-        body.contentGroups.periodKeys = { bodytext: { politics: { [T14]: chain } } };
-        delete body.contentGroups.chainKeys;
+        const { key } = bodytextChain(body);
+        body.contentGroupKeys.periodKeys = [
+          { contentName: "bodytext", group: "politics", period: T14, key },
+        ];
+        delete body.contentGroupKeys.chainKeys;
       },
       null,
     ],
@@ -1099,9 +1131,15 @@ describe("the composed exchange refuses substitutions and unbound answers", () =
       "a period key answered under chainKeys",
       "headline",
       (body) => {
-        const key = body.contentGroups.periodKeys.headline.politics[T14];
-        body.contentGroups.chainKeys = { headline: { politics: { [T14]: key } } };
-        delete body.contentGroups.periodKeys;
+        const { key } = find(body.contentGroupKeys.periodKeys, {
+          contentName: "headline",
+          group: "politics",
+          period: T14,
+        });
+        body.contentGroupKeys.chainKeys = [
+          { contentName: "headline", group: "politics", cutoff: T14, key },
+        ];
+        delete body.contentGroupKeys.periodKeys;
       },
       null,
     ],
@@ -1109,9 +1147,20 @@ describe("the composed exchange refuses substitutions and unbound answers", () =
       "an unknown content-group member",
       "headline",
       (body) => {
-        body.contentGroups.windowSeeds = {};
+        body.contentGroupKeys.windowSeeds = [];
       },
       malformed,
+    ],
+    [
+      // No alias: the earlier member name is an unknown top-level member, so
+      // no consumer reads it and the client reports nothing.
+      "content-group keys under the earlier member name contentGroups",
+      "bodytext",
+      (body) => {
+        body.contentGroups = body.contentGroupKeys;
+        delete body.contentGroupKeys;
+      },
+      null,
     ],
   ]);
   for (const [label, name, change, issue] of responseCases)
@@ -1120,7 +1169,7 @@ describe("the composed exchange refuses substitutions and unbound answers", () =
       const issuer = issuerFor(keys);
       const page = await render(publisherFor(keys, { at: AT.T14 }));
       issuer.rewriteResponses((body) => {
-        if (body.contentGroups) change(body);
+        if (body.contentGroupKeys) change(body);
         return body;
       });
       const { client } = clientFor(page, { transport: issuer.transport });
@@ -1229,7 +1278,11 @@ describe("shared client storage", () => {
     const storage = new Storage();
     const page = await render(publisherFor(keys, { at: AT.T14 }));
     issuer.rewriteResponses((body) => {
-      body.contentGroups.chainKeys.bodytext.politics[T18] = base64urlEncode(random.bytes(16));
+      find(body.contentGroupKeys.chainKeys, {
+        contentName: "bodytext",
+        group: "politics",
+        cutoff: T18,
+      }).key = base64urlEncode(random.bytes(16));
       return body;
     });
     const fooled = clientFor(page, { transport: issuer.transport, storage }).client;
@@ -1477,12 +1530,10 @@ for (const [name, method, kind] of /** @type {const} */ ([
         assert.equal(Object.hasOwn(body, "periodGeometry"), false);
         assert.equal(body.transport.method, method.METHOD);
         for (const member of ["chainKeys", "periodKeys"])
-          for (const groups of Object.values(body.contentGroups?.[member] ?? {}))
-            for (const entries of Object.values(/** @type {any} */ (groups)))
-              for (const entry of Object.values(/** @type {any} */ (entries)))
-                assert.equal(typeof entry, "object", `${member} leave wrapped`);
-        for (const entry of Object.values(body.contentGroups?.contentKeys ?? {}))
-          assert.equal(typeof entry, "object", "a recovered item key leaves wrapped");
+          for (const { key } of body.contentGroupKeys?.[member] ?? [])
+            assert.equal(typeof key, "object", `${member} leave wrapped`);
+        for (const { key } of body.contentGroupKeys?.contentKeys ?? [])
+          assert.equal(typeof key, "object", "a recovered item key leaves wrapped");
       }
     });
 
@@ -1518,7 +1569,7 @@ for (const [name, method, kind] of /** @type {const} */ ([
         await assert.rejects(client.open(item), undefined, item);
       assert.ok(issuer.calls.posts > 0, "the client asked");
       assert.deepEqual(
-        issuer.calls.responses.filter(({ body }) => Object.hasOwn(body, "contentGroups")),
+        issuer.calls.responses.filter(({ body }) => Object.hasOwn(body, "contentGroupKeys")),
         [],
         "no body carried the undeclared section",
       );
@@ -1539,7 +1590,7 @@ for (const [name, method, kind] of /** @type {const} */ ([
       await assert.rejects(client.open("headline"), { code: "bad_config" });
       assert.ok(issuer.calls.posts > 0);
       assert.deepEqual(
-        issuer.calls.responses.filter(({ body }) => Object.hasOwn(body, "contentGroups")),
+        issuer.calls.responses.filter(({ body }) => Object.hasOwn(body, "contentGroupKeys")),
         [],
       );
     });
@@ -1561,7 +1612,8 @@ for (const [name, method, kind] of /** @type {const} */ ([
         assert.equal(await text(opened, item), value, `wholly direct: ${item}`);
       assert.ok(
         direct.calls.responses.some(
-          ({ body }) => Object.hasOwn(body, "contentGroups") && !Object.hasOwn(body, "transport"),
+          ({ body }) =>
+            Object.hasOwn(body, "contentGroupKeys") && !Object.hasOwn(body, "transport"),
         ),
         "the keys came in a wholly direct content-group section",
       );
@@ -1569,23 +1621,23 @@ for (const [name, method, kind] of /** @type {const} */ ([
       // Keep the transport and the wrapped base keys; spell each content-group
       // key directly with the true bytes the direct issuer sent, as a
       // downgrading issuer would, so only the mixed-body refusal stops it.
+      /** The label field of each content-group key section. */
+      const LABEL = /** @type {const} */ ({ chainKeys: "cutoff", periodKeys: "period" });
       /** @type {any} */
       const raw = { chainKeys: {}, periodKeys: {} };
       for (const { body } of direct.calls.responses)
-        for (const member of ["chainKeys", "periodKeys"])
-          for (const [name, groups] of Object.entries(body.contentGroups?.[member] ?? {}))
-            for (const [group, entries] of Object.entries(/** @type {any} */ (groups)))
-              for (const [label, entry] of Object.entries(/** @type {any} */ (entries)))
-                raw[member][`${name}/${group}/${label}`] = entry;
+        for (const member of /** @type {const} */ (["chainKeys", "periodKeys"]))
+          for (const record of body.contentGroupKeys?.[member] ?? [])
+            raw[member][`${record.contentName}/${record.group}/${record[LABEL[member]]}`] =
+              record.key;
       mixed.rewriteResponses((body) => {
-        for (const member of ["chainKeys", "periodKeys"])
-          for (const [name, groups] of Object.entries(body.contentGroups?.[member] ?? {}))
-            for (const [group, entries] of Object.entries(/** @type {any} */ (groups)))
-              for (const label of Object.keys(entries)) {
-                const value = raw[member][`${name}/${group}/${label}`];
-                assert.equal(typeof value, "string", "the direct issuer sent this key");
-                entries[label] = value;
-              }
+        for (const member of /** @type {const} */ (["chainKeys", "periodKeys"]))
+          for (const record of body.contentGroupKeys?.[member] ?? []) {
+            const value =
+              raw[member][`${record.contentName}/${record.group}/${record[LABEL[member]]}`];
+            assert.equal(typeof value, "string", "the direct issuer sent this key");
+            record.key = value;
+          }
         return body;
       });
       const refused = clientFor(page, {
@@ -1658,9 +1710,9 @@ describe("compression beside content groups", () => {
     const { dcaData } = await sealer.seal();
     const claims = JSON.parse(utf8Decode(base64urlDecode(dcaData.resourceJWT.split(".")[1])));
     return {
-      encodings: dcaData.contentData.bodytext.contentEncodings,
-      connectors: Object.keys(dcaData.contentData.bodytext.connectors ?? {}),
-      seeds: Object.keys(dcaData.issuerData.issuerA.sealed.contentWindowSeeds ?? {}),
+      encodings: itemRecord(dcaData, "bodytext").contentEncodings,
+      connectors: namesIn(connectorsOf(dcaData, "bodytext"), "group"),
+      seeds: namesIn(seedRecords(dcaData, "issuerA"), "contentName"),
       claims: Object.keys(claims).filter(
         (name) => !["renderId", "origin", "issuedAt", "resourceId", "data"].includes(name),
       ),
@@ -1685,8 +1737,8 @@ describe("compression beside content groups", () => {
     sealer.resource("story1", {});
     sealer.content("shoppingAd", "ad", "text/plain", { contentGroups: ["sports"] });
     const { dcaData } = await sealer.seal();
-    assert.deepEqual(Object.keys(dcaData.contentData.shoppingAd.connectors), ["sports"]);
-    assert.deepEqual(dcaData.contentData.shoppingAd.contentEncodings, ["gzip"]);
+    assert.deepEqual(namesIn(connectorsOf(dcaData, "shoppingAd"), "group"), ["sports"]);
+    assert.deepEqual(itemRecord(dcaData, "shoppingAd").contentEncodings, ["gzip"]);
   });
 });
 
@@ -1742,7 +1794,7 @@ describe("a chain-keys family supply beside content groups", () => {
     connectorOnly.content("bodytext", "body text", "text/plain", { contentGroups: ["politics"] });
     const first = (await connectorOnly.seal()).dcaData;
     assert.deepEqual(first.periodGeometry, GEOMETRY);
-    assert.deepEqual(Object.keys(first.contentData.bodytext.connectors), ["politics"]);
+    assert.deepEqual(namesIn(connectorsOf(first, "bodytext"), "group"), ["politics"]);
 
     // premium rides period keys only, so base alone would write its minutes alone.
     const periodOnly = new Sealer(
@@ -1753,10 +1805,10 @@ describe("a chain-keys family supply beside content groups", () => {
     periodOnly.content("bodytext", "body text", "text/plain", { contentGroups: ["politics"] });
     const second = (await periodOnly.seal()).dcaData;
     assert.deepEqual(second.periodGeometry, GEOMETRY);
-    assert.deepEqual(Object.keys(second.issuerData.issuerA.sealed.periodKeys), ["premium"]);
-    assert.deepEqual(Object.keys(second.issuerData.issuerA.sealed.contentWindowSeeds), [
-      "bodytext",
+    assert.deepEqual(namesIn(issuerBlock(second, "issuerA").sealed.periodKeys, "accessGroup"), [
+      "premium",
     ]);
+    assert.deepEqual(namesIn(seedRecords(second, "issuerA"), "contentName"), ["bodytext"]);
   });
 });
 
@@ -1813,12 +1865,10 @@ describe("compact ECDH beside content groups", () => {
       data: {},
       items: structuredClone(ITEMS),
     });
-    assert.equal(dcaData.issuerData.compact.envelope, COMPACT_ECDH);
-    assert.deepEqual(Object.keys(dcaData.issuerData.compact.sealed), ["contentKeys"]);
-    assert.equal(Object.hasOwn(dcaData.issuerData.issuerA, "envelope"), false);
-    assert.deepEqual(Object.keys(dcaData.issuerData.issuerA.sealed.contentWindowSeeds), [
-      "bodytext",
-    ]);
+    assert.equal(issuerBlock(dcaData, "compact").envelope, COMPACT_ECDH);
+    assert.deepEqual(Object.keys(issuerBlock(dcaData, "compact").sealed), ["contentKeys"]);
+    assert.equal(Object.hasOwn(issuerBlock(dcaData, "issuerA"), "envelope"), false);
+    assert.deepEqual(namesIn(seedRecords(dcaData, "issuerA"), "contentName"), ["bodytext"]);
   });
 
   test("seeds for the compact issuer are refused, whatever the ordinary issuer receives", async () => {
@@ -1941,7 +1991,7 @@ describe("one base issuer engine composing chain keys with content groups", () =
       ...base,
       sealed: { ...base.sealed, contentWindowSeeds: pageSeeds(page) },
       renderPeriod: dcaData.renderPeriod,
-      requestedContentGroups: groups,
+      requestedContentGroups: groupRecords(groups),
     };
   }
 
@@ -2072,29 +2122,23 @@ describe("one base issuer engine composing chain keys with content groups", () =
   async function readerKeysAt(body, t) {
     /** @type {{ origin: string, key: Uint8Array }[]} */
     const found = [];
-    for (const [g, family] of Object.entries(body?.keys?.periodKeys ?? {}))
-      for (const [label, key] of Object.entries(/** @type {any} */ (family)))
-        found.push({ origin: `periodKeys.${g}.${label}`, key: base64urlDecode(key) });
-    for (const [g, family] of Object.entries(body?.keys?.chainKeys ?? {}))
-      for (const [cutoffT, key] of Object.entries(/** @type {any} */ (family)))
-        found.push({
-          origin: `chainKeys.${g}.${cutoffT}`,
-          key: await periodFromDelivered(base64urlDecode(key), g, cutoffT, t),
-        });
-    for (const [name, groups] of Object.entries(body?.contentGroups?.chainKeys ?? {}))
-      for (const [g, entries] of Object.entries(/** @type {any} */ (groups)))
-        for (const [cutoffT, key] of Object.entries(/** @type {any} */ (entries)))
-          found.push({
-            origin: `contentGroups.chainKeys.${name}.${g}.${cutoffT}`,
-            key: await periodFromDelivered(base64urlDecode(key), g, cutoffT, t),
-          });
-    for (const [name, groups] of Object.entries(body?.contentGroups?.periodKeys ?? {}))
-      for (const [g, entries] of Object.entries(/** @type {any} */ (groups)))
-        for (const [label, key] of Object.entries(/** @type {any} */ (entries)))
-          found.push({
-            origin: `contentGroups.periodKeys.${name}.${g}.${label}`,
-            key: base64urlDecode(key),
-          });
+    for (const { accessGroup, period, key } of body?.keys?.periodKeys ?? [])
+      found.push({ origin: `periodKeys.${accessGroup}.${period}`, key: base64urlDecode(key) });
+    for (const { accessGroup, cutoff, key } of body?.keys?.chainKeys ?? [])
+      found.push({
+        origin: `chainKeys.${accessGroup}.${cutoff}`,
+        key: await periodFromDelivered(base64urlDecode(key), accessGroup, cutoff, t),
+      });
+    for (const { contentName, group, cutoff, key } of body?.contentGroupKeys?.chainKeys ?? [])
+      found.push({
+        origin: `contentGroupKeys.chainKeys.${contentName}.${group}.${cutoff}`,
+        key: await periodFromDelivered(base64urlDecode(key), group, cutoff, t),
+      });
+    for (const { contentName, group, period, key } of body?.contentGroupKeys?.periodKeys ?? [])
+      found.push({
+        origin: `contentGroupKeys.periodKeys.${contentName}.${group}.${period}`,
+        key: base64urlDecode(key),
+      });
     return found;
   }
 
@@ -2111,7 +2155,13 @@ describe("one base issuer engine composing chain keys with content groups", () =
     });
     const { item, ciphertext } = pageItem(page, name);
     for (const entry of data.sealedEntriesFor(name, accessGroup)) {
-      const contentKey = await attemptContentKeyWrap(entry, periodKey, undefined);
+      const nonce = contentKeyWrapNonceOctets({
+        renderId: data.renderId,
+        contentName: name,
+        accessGroup,
+        t: entry.t,
+      });
+      const contentKey = await attemptContentKeyWrap(entry, periodKey, nonce, undefined);
       if (contentKey === null) continue;
       try {
         return utf8Decode(await openContent(contentKey, name, ciphertext, item.contentAad));
@@ -2132,18 +2182,18 @@ describe("one base issuer engine composing chain keys with content groups", () =
     /** @type {string[]} */
     const opened = [];
     const { item, ciphertext, connectors } = pageItem(page, name);
-    for (const [section, keys] of /** @type {const} */ ([
+    for (const [section, records] of /** @type {const} */ ([
       ["contentKeys", body?.keys?.contentKeys],
-      ["contentGroups.contentKeys", body?.contentGroups?.contentKeys],
+      ["contentGroupKeys.contentKeys", body?.contentGroupKeys?.contentKeys],
     ]))
-      if (
-        keys?.[name] !== undefined &&
-        (await openContent(base64urlDecode(keys[name]), name, ciphertext, item.contentAad).then(
-          () => true,
-          () => false,
-        ))
-      )
-        opened.push(`${section}.${name}`);
+      for (const { key } of findAll(records, { contentName: name }))
+        if (
+          await openContent(base64urlDecode(key), name, ciphertext, item.contentAad).then(
+            () => true,
+            () => false,
+          )
+        )
+          opened.push(`${section}.${name}`);
     const data = new DcaData(JSON.parse(JSON.stringify(readerOf(page, "json").dcaData)), {
       publisherOrigin: ORIGIN,
     });
@@ -2151,7 +2201,7 @@ describe("one base issuer engine composing chain keys with content groups", () =
       for (const accessGroup of data.accessGroupsFor(name))
         if ((await openWrapped(page, name, accessGroup, key)) !== null)
           opened.push(`${origin}->wrap.${accessGroup}`);
-      for (const group of Object.keys(connectors))
+      for (const group of namesIn(connectors, "group"))
         if (
           await tryPeriodKey(page, name, group, key).then(
             () => true,
@@ -2177,14 +2227,16 @@ describe("one base issuer engine composing chain keys with content groups", () =
     const data = client.parse(JSON.parse(JSON.stringify(readerOf(page, "json").dcaData)));
     const request = client.buildRequest(data, "issuerA", ["bodytext"]);
     assert.equal(Object.hasOwn(request.sealed, "periodKeys"), false);
-    assert.ok(request.sealed.chainKeys.premium);
+    assert.ok(find(request.sealed.chainKeys, { accessGroup: "premium" }));
     const answer = await unlock(baseEngineIssuer(), registrationFor(keys), request);
     assert.equal(answer.status, 200, JSON.stringify(answer.body));
-    assert.ok(answer.body.keys.periodKeys.premium[T14]);
+    assert.ok(find(answer.body.keys.periodKeys, { accessGroup: "premium", period: T14 }));
     // Forwarding the hook preserves its admission bounds: an unrequested
     // family and a period outside the presented chain window remain refused.
-    answer.body.keys.periodKeys.unasked = { [T14]: base64urlEncode(new Uint8Array(16)) };
-    answer.body.keys.periodKeys.premium["261016T0000"] = base64urlEncode(new Uint8Array(16));
+    answer.body.keys.periodKeys.push(
+      { accessGroup: "unasked", period: T14, key: base64urlEncode(new Uint8Array(16)) },
+      { accessGroup: "premium", period: "261016T0000", key: base64urlEncode(new Uint8Array(16)) },
+    );
     const applied = await client.applyResponse(data, "issuerA", answer.body);
     assert.deepEqual(applied.issues, [
       { section: "periodKeys", code: "unsolicited_coordinate" },
@@ -2215,7 +2267,7 @@ describe("one base issuer engine composing chain keys with content groups", () =
           representation === "chain-keys"
             ? [`chainKeys.premium.${T15}->wrap.premium`]
             : [`periodKeys.premium.${T14}->wrap.premium`],
-        sportsNews: [`contentGroups.chainKeys.sportsNews.sports.${T18}->connector.sports`],
+        sportsNews: [`contentGroupKeys.chainKeys.sportsNews.sports.${T18}->connector.sports`],
         headline: ["contentKeys.headline"],
       });
 
@@ -2267,7 +2319,7 @@ describe("one base issuer engine composing chain keys with content groups", () =
     const answer = await unlock(baseEngineIssuer(), registrationFor(keys), request);
     assert.equal(answer.status, 200, JSON.stringify(answer.body));
     assert.deepEqual(await routesOpening(page, answer.body, "sportsNews"), [
-      `contentGroups.chainKeys.sportsNews.sports.${T18}->connector.sports`,
+      `contentGroupKeys.chainKeys.sportsNews.sports.${T18}->connector.sports`,
     ]);
     assert.deepEqual(await routesOpening(page, answer.body, "bodytext"), []);
   });
@@ -2304,7 +2356,7 @@ describe("one base issuer engine composing chain keys with content groups", () =
     const page = await chainPage(keys, ["period-keys"]);
     const registration = registrationFor(keys);
     const request = { ...chainRequest(page), periodGeometry: GEOMETRY };
-    assert.deepEqual(Object.keys(request.sealed.periodKeys), ["premium"]);
+    assert.deepEqual(namesIn(request.sealed.periodKeys, "accessGroup"), ["premium"]);
     assert.equal(Object.hasOwn(request.sealed, "chainKeys"), false);
 
     const unwrapped = await unlock(
@@ -2318,7 +2370,7 @@ describe("one base issuer engine composing chain keys with content groups", () =
     assert.equal(wrapped.status, 200, JSON.stringify(wrapped.body));
     assert.deepEqual(await routesOpening(page, wrapped.body, "bodytext"), []);
     assert.deepEqual(await routesOpening(page, wrapped.body, "sportsNews"), [
-      `contentGroups.chainKeys.sportsNews.sports.${T18}->connector.sports`,
+      `contentGroupKeys.chainKeys.sportsNews.sports.${T18}->connector.sports`,
     ]);
     assert.deepEqual(await routesOpening(page, wrapped.body, "headline"), ["contentKeys.headline"]);
   });
@@ -2376,7 +2428,7 @@ describe("one base issuer engine composing chain keys with content groups", () =
       `periodKeys.premium.${T14}->wrap.premium`,
     ]);
     assert.deepEqual(await routesOpening(page, body, "sportsNews"), [
-      `contentGroups.chainKeys.sportsNews.sports.${T18}->connector.sports`,
+      `contentGroupKeys.chainKeys.sportsNews.sports.${T18}->connector.sports`,
     ]);
     assert.deepEqual(await routesOpening(page, body, "headline"), ["contentKeys.headline"]);
   });
@@ -2409,25 +2461,29 @@ describe("one base issuer engine composing chain keys with content groups", () =
       const raw = JSON.parse(JSON.stringify(direct.response.body));
       const bound = JSON.parse(JSON.stringify(await delivery.prepare(direct.response.body, view)));
       const text = JSON.stringify(bound);
-      for (const family of Object.values(raw.keys.chainKeys ?? raw.keys.periodKeys))
-        for (const key of Object.values(/** @type {any} */ (family)))
-          assert.ok(!text.includes(key), "a raw base chain or period key left");
-      for (const groups of Object.values(raw.contentGroups.chainKeys))
-        for (const entries of Object.values(/** @type {any} */ (groups)))
-          for (const { key } of Object.values(/** @type {any} */ (entries)))
-            assert.ok(!text.includes(key), "a raw content-group chain key left");
-      assert.ok(!text.includes(raw.keys.contentKeys.headline), "the raw content key left");
+      for (const { key } of raw.keys.chainKeys ?? raw.keys.periodKeys)
+        assert.ok(!text.includes(key), "a raw base chain or period key left");
+      for (const { key } of raw.contentGroupKeys.chainKeys)
+        assert.ok(!text.includes(key), "a raw content-group chain key left");
+      assert.ok(
+        !text.includes(find(raw.keys.contentKeys, { contentName: "headline" }).key),
+        "the raw content key left",
+      );
 
       const opener = await capability.openDeliveredKeys(bound.transport);
       if (representation === "chain-keys") {
-        const chainKey = await opener.open(bound.keys.chainKeys.premium[T15], [], "chainKey");
+        const chainKey = await opener.open(
+          find(bound.keys.chainKeys, { accessGroup: "premium", cutoff: T15 }).key,
+          [],
+          "chainKey",
+        );
         assert.ok(chainKey instanceof Uint8Array && chainKey.length === 16);
         const t14 = await periodFromDelivered(chainKey, "premium", T15, T14);
         assert.equal(await openWrapped(page, "bodytext", "premium", t14), "premium body");
       } else {
         // The delivery client opens period keys for unwrapping content-key wraps.
         const handle = await opener.open(
-          bound.keys.periodKeys.premium[T14],
+          find(bound.keys.periodKeys, { accessGroup: "premium", period: T14 }).key,
           ["unwrapKey"],
           "periodKey",
         );
@@ -2435,7 +2491,11 @@ describe("one base issuer engine composing chain keys with content groups", () =
         assert.equal(await openWrapped(page, "bodytext", "premium", handle), "premium body");
       }
       const groupKey = await opener.open(
-        bound.contentGroups.chainKeys.sportsNews.sports[T18],
+        find(bound.contentGroupKeys.chainKeys, {
+          contentName: "sportsNews",
+          group: "sports",
+          cutoff: T18,
+        }).key,
         [],
         CHAIN_KIND,
       );
@@ -2453,16 +2513,21 @@ describe("one base issuer engine composing chain keys with content groups", () =
     const core = baseEngineIssuer();
     const registration = registrationFor(keys);
     const request = chainRequest(page);
-    const seed = request.sealed.contentWindowSeeds.sportsNews[W12];
-    const [chainLabel, chainBlob] = Object.entries(request.sealed.chainKeys.premium)[0];
+    const sportsSeed = { contentName: "sportsNews", windowStart: W12 };
+    const seed = find(request.sealed.contentWindowSeeds, sportsSeed).key;
+    // The premium chain of the render window: the one the issuer would open at 14:00.
+    const { cutoff: chainLabel, key: chainBlob } = findAll(request.sealed.chainKeys, {
+      accessGroup: "premium",
+    }).find(({ cutoff }) => chainKeyCoordinate(cutoff, GEOMETRY).startT === W12);
+    const premiumChain = { accessGroup: "premium", cutoff: chainLabel };
 
     const seedAsChain = structuredClone(request);
-    seedAsChain.sealed.chainKeys.premium[chainLabel] = seed;
+    find(seedAsChain.sealed.chainKeys, premiumChain).key = seed;
     const first = await unlock(core, registration, seedAsChain);
     assert.deepEqual(await routesOpening(page, first.body, "bodytext"), []);
 
     const chainAsSeed = structuredClone(request);
-    chainAsSeed.sealed.contentWindowSeeds.sportsNews[W12] = chainBlob;
+    find(chainAsSeed.sealed.contentWindowSeeds, sportsSeed).key = chainBlob;
     const second = await unlock(core, registration, chainAsSeed);
     assert.notEqual(second.status, 200, JSON.stringify(second.body));
   });
@@ -2536,7 +2601,7 @@ describe("one base issuer engine composing chain keys with content groups", () =
     const first = /** @type {any} */ (parsed(chained));
     assert.deepEqual(first.periodGeometry, OTHER);
     const chainRequest = client.buildRequest(first, "issuerA", ["bodytext"]);
-    assert.deepEqual(Object.keys(chainRequest.sealed.chainKeys), ["premium"]);
+    assert.deepEqual(namesIn(chainRequest.sealed.chainKeys, "accessGroup"), ["premium"]);
     const chainAnswer = await unlock(
       baseEngineIssuer({ representation: "chain-keys" }),
       registration,
@@ -2556,7 +2621,7 @@ describe("one base issuer engine composing chain keys with content groups", () =
       "the retained chain opens a period-only relay",
     );
     const periodRequest = client.buildRequest(second, "issuerA", ["bodytext"]);
-    assert.deepEqual(Object.keys(periodRequest.sealed.periodKeys), ["premium"]);
+    assert.deepEqual(namesIn(periodRequest.sealed.periodKeys, "accessGroup"), ["premium"]);
     assert.equal(Object.hasOwn(periodRequest.sealed, "chainKeys"), false);
     const periodIssuer = createIssuerCore(
       {

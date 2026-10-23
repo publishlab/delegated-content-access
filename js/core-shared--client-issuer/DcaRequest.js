@@ -46,8 +46,8 @@ export class DcaRequest {
    * @param {unknown} [parts.resourceJWT] - carried only when it is a string
    * @param {unknown} [parts.keyId] - carried only when it is a string
    * @param {unknown} [parts.envelope] - carried as given; omitted when undefined
-   * @param {Record<string, string>} [parts.contentKeys]
-   * @param {Record<string, Record<string, string>>} [parts.periodKeys]
+   * @param {{ contentName: string, key: string }[]} [parts.contentKeys]
+   * @param {{ accessGroup: string, period: string, key: string }[]} [parts.periodKeys]
    * @param {unknown} [parts.clientPublicKey] - offered, never demanded
    * @returns {DcaRequest}
    */
@@ -56,7 +56,7 @@ export class DcaRequest {
       throw dcaError("bad_config", "a DCA request is built from a parts object");
     }
 
-    const periodKeys = parts.periodKeys ?? {};
+    const periodKeys = parts.periodKeys ?? [];
     /** @type {any} */
     const document = {
       version: parts.version,
@@ -67,9 +67,9 @@ export class DcaRequest {
       // issuer's configuration permits it, so the client never writes a
       // value in its place.
       ...(parts.envelope !== undefined ? { envelope: parts.envelope } : {}),
-      sealed: { contentKeys: parts.contentKeys ?? {} },
+      sealed: { contentKeys: parts.contentKeys ?? [] },
     };
-    if (Object.keys(periodKeys).length > 0) document.sealed.periodKeys = periodKeys;
+    if (periodKeys.length > 0) document.sealed.periodKeys = periodKeys;
     if (parts.clientPublicKey !== undefined) document.clientPublicKey = parts.clientPublicKey;
 
     return new DcaRequest(document);
@@ -123,27 +123,44 @@ export class DcaRequest {
   }
 
   /**
+   * One sealed collection as it arrived, or undefined when it is absent or not
+   * an array. The records in it are not checked here: issuer admission checks
+   * every record before any use, and several records at one coordinate stay
+   * as the candidate alternatives they are.
+   *
    * @param {'contentKeys'|'periodKeys'|'chainKeys'} name
-   * @returns {Record<string, unknown>|undefined}
+   * @returns {unknown[]|undefined}
    */
-  #sealedMapFor(name) {
+  #sealedRecordsFor(name) {
     const value = own(this.sealed, name);
-    return value !== null && typeof value === "object" && !Array.isArray(value) ? value : undefined;
+    return Array.isArray(value) ? value : undefined;
   }
 
-  /** @returns {Record<string, unknown>|undefined} */
+  /**
+   * The `{contentName, key}` records, unchecked.
+   *
+   * @returns {unknown[]|undefined}
+   */
   get sealedContentKeys() {
-    return this.#sealedMapFor("contentKeys");
+    return this.#sealedRecordsFor("contentKeys");
   }
 
-  /** @returns {Record<string, unknown>|undefined} */
+  /**
+   * The `{accessGroup, period, key}` records, unchecked.
+   *
+   * @returns {unknown[]|undefined}
+   */
   get sealedPeriodKeys() {
-    return this.#sealedMapFor("periodKeys");
+    return this.#sealedRecordsFor("periodKeys");
   }
 
-  /** @returns {Record<string, unknown>|undefined} */
+  /**
+   * The `{accessGroup, cutoff, key}` records, unchecked.
+   *
+   * @returns {unknown[]|undefined}
+   */
   get sealedChainKeys() {
-    return this.#sealedMapFor("chainKeys");
+    return this.#sealedRecordsFor("chainKeys");
   }
 
   /**
@@ -157,6 +174,92 @@ export class DcaRequest {
   toObject() {
     return this.#document;
   }
+}
+
+/**
+ * The coordinate fields of each sealed collection's records, in coordinate
+ * order. The delivery's issuer block and the request carry the same records.
+ */
+export const SEALED_FIELDS = Object.freeze({
+  contentKeys: Object.freeze(["contentName"]),
+  periodKeys: Object.freeze(["accessGroup", "period"]),
+  chainKeys: Object.freeze(["accessGroup", "cutoff"]),
+});
+
+/**
+ * @param {unknown} value
+ * @returns {value is Record<string, unknown>}
+ */
+function isRecord(value) {
+  return value !== null && typeof value === "object" && !Array.isArray(value);
+}
+
+/**
+ * Whether one sealed collection is admissible as a whole: an array whose every
+ * element is a non-array object carrying each coordinate field as an own
+ * string that its grammar admits. One bad record or identity refuses the
+ * whole collection, as an invalid member name refused a whole map. The `key`
+ * value is not checked here; its own scope decides it.
+ *
+ * @param {unknown} collection
+ * @param {readonly string[]} fields
+ * @param {Readonly<Record<string, (value: string) => boolean>>} grammars - by field
+ * @returns {collection is Record<string, unknown>[]}
+ */
+export function sealedRecordsAdmit(collection, fields, grammars) {
+  if (!Array.isArray(collection)) return false;
+  return collection.every(
+    (record) =>
+      isRecord(record) &&
+      fields.every((field) => {
+        const value = own(record, field);
+        const grammar = own(grammars, field);
+        return typeof value === "string" && (grammar === undefined || grammar(value));
+      }),
+  );
+}
+
+/**
+ * Group one sealed collection's `key` values by their coordinate, keeping
+ * every distinct candidate in first-appearance order. A nested Map follows
+ * `fields`: `contentKeys` gives contentName to values, `periodKeys` gives
+ * accessGroup to period to values. A record that is not a non-array object or
+ * lacks a string coordinate field supplies nothing; a caller that refuses
+ * such a collection whole checks `sealedRecordsAdmit` first. An identical
+ * string at one coordinate is one candidate; any other value is kept as its
+ * own candidate for its own scope to judge. A Map keeps `__proto__` and
+ * `constructor` ordinary coordinates.
+ *
+ * A coordinate `wanted` refuses still appears, with no candidates, and its
+ * records' `key` members are never read: the issuer presents every name to
+ * its policy and touches only the envelopes the policy granted.
+ *
+ * @param {unknown} collection
+ * @param {readonly string[]} fields
+ * @param {(path: string[]) => boolean} [wanted]
+ * @returns {Map<string, any>}
+ */
+export function sealedCandidates(collection, fields, wanted = () => true) {
+  /** @type {Map<string, any>} */
+  const root = new Map();
+  if (!Array.isArray(collection)) return root;
+  for (const record of collection) {
+    if (!isRecord(record)) continue;
+    const path = fields.map((field) => own(record, field));
+    if (!path.every((value) => typeof value === "string")) continue;
+    let level = root;
+    for (const name of path.slice(0, -1)) {
+      if (!level.has(name)) level.set(name, new Map());
+      level = level.get(name);
+    }
+    const last = /** @type {string} */ (path.at(-1));
+    if (!level.has(last)) level.set(last, []);
+    if (!wanted(/** @type {string[]} */ (path))) continue;
+    const values = level.get(last);
+    const key = own(record, "key");
+    if (typeof key !== "string" || !values.includes(key)) values.push(key);
+  }
+  return root;
 }
 
 /**

@@ -54,6 +54,59 @@ async function twoRenders(options = {}) {
   return { page, other, request, registration, engine, document: request.toObject() };
 }
 
+/**
+ * The candidates a request document forwards for one content name.
+ *
+ * @param {any} document
+ * @param {string} contentName
+ * @returns {any[]}
+ */
+function candidatesOf(document, contentName) {
+  return document.boundCandidates.filter(
+    (/** @type {any} */ candidate) => candidate.contentName === contentName,
+  );
+}
+
+/**
+ * Swap the candidates one content name forwards for `replacement`, and leave
+ * every other name's candidates as they were.
+ *
+ * @param {any} document
+ * @param {string} contentName
+ * @param {any[]} replacement
+ */
+function replaceCandidates(document, contentName, replacement) {
+  document.boundCandidates = [
+    ...document.boundCandidates.filter(
+      (/** @type {any} */ candidate) => candidate.contentName !== contentName,
+    ),
+    ...replacement,
+  ];
+}
+
+/**
+ * The names an unlock result opened, once each: several records at one name
+ * are rival candidates that opened the same item.
+ *
+ * @param {any} result
+ */
+const openedNames = (result) => [
+  ...new Set(result.contentKeys.map((/** @type {any} */ record) => record.contentName)),
+];
+
+/**
+ * The error an unlock result reports at one coordinate.
+ *
+ * @param {any} result
+ * @param {string} coordinate
+ */
+const errorAt = (result, coordinate) =>
+  result.errors.find((/** @type {any} */ record) => record.coordinate === coordinate)?.error;
+
+/** @param {any} result */
+const erroredCoordinates = (result) =>
+  result.errors.map((/** @type {any} */ record) => record.coordinate);
+
 test("the wrapper relays period keys only when its base selector is explicitly true", async () => {
   const { page } = await twoRenders();
   const data = new DcaData(page, { publisherOrigin: PUB });
@@ -75,111 +128,118 @@ test("the wrapper relays period keys only when its base selector is explicitly t
 
 test("a candidate lifted out of another render opens nothing", async () => {
   const { other, request, registration, engine, document } = await twoRenders();
-  document.boundCandidates.bodytext = other.contentData.bodytext.keys.premium.map(
-    (/** @type {any} */ entry) => ({
-      accessGroup: "premium",
-      ...entry,
-    }),
+  const lifted = other.contentData.find(
+    (/** @type {any} */ item) => item.contentName === "bodytext",
+  );
+  replaceCandidates(
+    document,
+    "bodytext",
+    lifted.keys
+      .filter((/** @type {any} */ entry) => entry.accessGroup === "premium")
+      .map((/** @type {any} */ entry) => ({ contentName: "bodytext", ...entry })),
   );
 
   const result = await engine.unlock(request, registration);
 
-  assert.deepEqual(result.contentKeys, {});
-  assert.equal(result.errors.bodytext.error, "unseal_failed");
+  assert.deepEqual(result.contentKeys, []);
+  assert.equal(errorAt(result, "bodytext"), "unseal_failed");
 });
 
 test("a candidate presented under another content name opens nothing", async () => {
   const { request, registration, engine, document } = await twoRenders({
     items: ["bodytext", "note"],
   });
-  document.boundCandidates.note = document.boundCandidates.bodytext;
+  replaceCandidates(
+    document,
+    "note",
+    candidatesOf(document, "bodytext").map((candidate) => ({ ...candidate, contentName: "note" })),
+  );
 
   const result = await engine.unlock(request, registration);
 
-  assert.deepEqual(
-    Object.keys(result.contentKeys),
-    ["bodytext"],
-    "the item at its own coordinate still opens",
-  );
-  assert.equal(result.errors.note.error, "unseal_failed");
+  assert.deepEqual(openedNames(result), ["bodytext"], "the item at its own coordinate still opens");
+  assert.equal(errorAt(result, "note"), "unseal_failed");
 });
 
 test("a candidate relabelled to another access group the issuer can open still opens nothing", async () => {
   const { request, registration, engine, document } = await twoRenders({
     items: ["bodytext", "sidebar"],
   });
-  document.boundCandidates.bodytext = document.boundCandidates.bodytext.map(
-    (/** @type {any} */ candidate) => ({
-      ...candidate,
-      accessGroup: "free",
-    }),
+  replaceCandidates(
+    document,
+    "bodytext",
+    candidatesOf(document, "bodytext").map((candidate) => ({ ...candidate, accessGroup: "free" })),
   );
 
   const result = await engine.unlock(request, registration);
 
-  assert.deepEqual(Object.keys(result.contentKeys), ["sidebar"]);
-  assert.equal(result.errors.bodytext.error, "unseal_failed");
+  assert.deepEqual(openedNames(result), ["sidebar"]);
+  assert.equal(errorAt(result, "bodytext"), "unseal_failed");
 });
 
 test("a candidate relabelled to another period of its own group opens nothing", async () => {
   const { request, registration, engine, document } = await twoRenders();
-  const [first, second] = document.boundCandidates.bodytext;
-  document.boundCandidates.bodytext = [{ ...first, t: second.t }];
+  const [first, second] = candidatesOf(document, "bodytext");
+  assert.notEqual(first.period, second.period, "the two candidates sit at two periods");
+  replaceCandidates(document, "bodytext", [{ ...first, period: second.period }]);
 
   const result = await engine.unlock(request, registration);
 
-  assert.deepEqual(result.contentKeys, {});
-  assert.equal(result.errors.bodytext.error, "unseal_failed");
+  assert.deepEqual(result.contentKeys, []);
+  assert.equal(errorAt(result, "bodytext"), "unseal_failed");
 });
 
 test("a candidate labelled with a period the issuer holds no material for opens nothing", async () => {
   const { request, registration, engine, document } = await twoRenders();
-  document.boundCandidates.bodytext = document.boundCandidates.bodytext.map(
-    (/** @type {any} */ candidate) => ({
+  replaceCandidates(
+    document,
+    "bodytext",
+    candidatesOf(document, "bodytext").map((candidate) => ({
       ...candidate,
-      t: "251023T2300",
-    }),
+      period: "251023T2300",
+    })),
   );
   assert.equal(PERIODS.includes("251023T2300"), false);
 
   const result = await engine.unlock(request, registration);
 
-  assert.deepEqual(result.contentKeys, {});
-  assert.equal(result.errors.bodytext.error, "unseal_failed");
+  assert.deepEqual(result.contentKeys, []);
+  assert.equal(errorAt(result, "bodytext"), "unseal_failed");
 });
 
 test("a candidate carrying no binding marker is refused rather than tried unbound", async () => {
   const { request, registration, engine, document } = await twoRenders();
-  document.boundCandidates.bodytext = document.boundCandidates.bodytext.map(
-    (/** @type {any} */ candidate) => {
+  replaceCandidates(
+    document,
+    "bodytext",
+    candidatesOf(document, "bodytext").map((candidate) => {
       const { bind, ...rest } = candidate;
       void bind;
       return rest;
-    },
+    }),
   );
 
   const result = await engine.unlock(request, registration);
 
-  assert.deepEqual(result.contentKeys, {});
-  assert.equal(result.errors.bodytext.error, "unseal_failed");
+  assert.deepEqual(result.contentKeys, []);
+  assert.equal(errorAt(result, "bodytext"), "unseal_failed");
 });
 
 test("one malformed candidate reports its own failure beside a sibling that opened", async () => {
   const { request, registration, engine, document } = await twoRenders({
     items: ["bodytext", "note"],
   });
-  document.boundCandidates.note = document.boundCandidates.note.map(
-    (/** @type {any} */ candidate) => ({
-      ...candidate,
-      key: "not base64url ***",
-    }),
+  replaceCandidates(
+    document,
+    "note",
+    candidatesOf(document, "note").map((candidate) => ({ ...candidate, key: "not base64url ***" })),
   );
 
   const result = await engine.unlock(request, registration);
 
-  assert.deepEqual(Object.keys(result.contentKeys), ["bodytext"]);
-  assert.deepEqual(Object.keys(result.errors), ["note"]);
-  assert.equal(result.errors.note.error, "unseal_failed");
+  assert.deepEqual(openedNames(result), ["bodytext"]);
+  assert.deepEqual(erroredCoordinates(result), ["note"]);
+  assert.equal(errorAt(result, "note"), "unseal_failed");
 });
 
 test("a candidate padded off the canonical spelling reports its own failure", async () => {
@@ -189,8 +249,10 @@ test("a candidate padded off the canonical spelling reports its own failure", as
   // A 16-byte key need not happen to contain a `-` or `_`, so use its padded
   // base64 spelling: a lenient decoder recovers the same bytes, but v1 admits
   // only unpadded base64url on a forwarded candidate.
-  document.boundCandidates.note = document.boundCandidates.note.map(
-    (/** @type {any} */ candidate) => {
+  replaceCandidates(
+    document,
+    "note",
+    candidatesOf(document, "note").map((candidate) => {
       const key = `${candidate.key}==`;
       assert.notEqual(key, candidate.key, "the forwarded key is padded");
       assert.deepEqual(
@@ -199,18 +261,14 @@ test("a candidate padded off the canonical spelling reports its own failure", as
         "the lenient spelling is the same bytes",
       );
       return { ...candidate, key };
-    },
+    }),
   );
 
   const result = await engine.unlock(request, registration);
 
-  assert.deepEqual(
-    Object.keys(result.contentKeys),
-    ["bodytext"],
-    "the item forwarded canonically still opens",
-  );
-  assert.deepEqual(Object.keys(result.errors), ["note"]);
-  assert.equal(result.errors.note.error, "unseal_failed");
+  assert.deepEqual(openedNames(result), ["bodytext"], "the item forwarded canonically still opens");
+  assert.deepEqual(erroredCoordinates(result), ["note"]);
+  assert.equal(errorAt(result, "note"), "unseal_failed");
 });
 
 test("a candidate at a real coordinate the policy did not select opens nothing", async () => {
@@ -233,8 +291,10 @@ test("a candidate at a real coordinate the policy did not select opens nothing",
   // they authenticate: without the coordinate check the item opens through a
   // group the policy never selected.
   const document = request.toObject();
-  document.boundCandidates.both = document.boundCandidates.both.filter(
-    (/** @type {any} */ candidate) => candidate.accessGroup === "free",
+  replaceCandidates(
+    document,
+    "both",
+    candidatesOf(document, "both").filter((candidate) => candidate.accessGroup === "free"),
   );
 
   const policy = contentOnlyPolicy(["both"], {
@@ -254,8 +314,8 @@ test("a candidate at a real coordinate the policy did not select opens nothing",
     }),
   ]) {
     const result = await engine.unlock(request, registration);
-    assert.deepEqual(result.contentKeys, {});
-    assert.equal(result.errors.both.error, "unseal_failed");
+    assert.deepEqual(result.contentKeys, []);
+    assert.equal(errorAt(result, "both"), "unseal_failed");
   }
 });
 
@@ -275,9 +335,9 @@ test("a candidate at a period outside the granted prefix of its own group opens 
     ["bodytext"],
   );
   const document = request.toObject();
-  const [first, second] = document.boundCandidates.bodytext;
-  document.boundCandidates.bodytext = [second];
-  assert.equal(first.t < second.t, true, "the granted prefix is the earlier label");
+  const [first, second] = candidatesOf(document, "bodytext");
+  replaceCandidates(document, "bodytext", [second]);
+  assert.equal(first.period < second.period, true, "the granted prefix is the earlier label");
 
   const engine = omissionIssuerEngine({
     operatingIssuerNames: [ISSUER_A],
@@ -288,6 +348,6 @@ test("a candidate at a period outside the granted prefix of its own group opens 
 
   const result = await engine.unlock(request, registration);
 
-  assert.deepEqual(result.contentKeys, {});
-  assert.equal(result.errors.bodytext.error, "unseal_failed");
+  assert.deepEqual(result.contentKeys, []);
+  assert.equal(errorAt(result, "bodytext"), "unseal_failed");
 });

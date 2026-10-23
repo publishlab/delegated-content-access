@@ -53,6 +53,19 @@ function pageWithSealed(sealedText) {
   );
 }
 
+/**
+ * The sealed-content block text for ciphertext by name: one
+ * `{contentName, content}` record per entry, in the given order.
+ *
+ * @param {Record<string, unknown>} byName
+ * @returns {string}
+ */
+function carrierText(byName) {
+  return JSON.stringify(
+    Object.entries(byName).map(([contentName, content]) => ({ contentName, content })),
+  );
+}
+
 describe("The markup delivery reader, entry refusals", () => {
   test("a parsed Document reads only its body, while a fragment uses its explicit scope", () => {
     const head = domOver(pageWithData('{"version":"head"}'));
@@ -170,7 +183,7 @@ describe("The markup delivery reader, entry refusals", () => {
     // sealed-content element, each a script whose type is exactly
     // application/json, and no element serving as both carriers.
     const data = '{"version":"1"}';
-    const sealed = '{"bodytext":"QUJD"}';
+    const sealed = carrierText({ bodytext: "QUJD" });
     const sealedBlock = `<script type="application/json" class="dca-sealed-content">${sealed}</script>`;
 
     for (const [label, markup, message] of [
@@ -213,7 +226,7 @@ describe("The markup delivery reader, entry refusals", () => {
   });
 
   test("a sealed-content block that is not JSON is a page refusal", async () => {
-    const root = domOver(pageWithSealed('{"bodytext": "QUJ'));
+    const root = domOver(pageWithSealed('[{"contentName": "bodytext", "content": "QUJ'));
 
     await refuses(
       () => new MarkupDeliveryReader(root),
@@ -222,17 +235,17 @@ describe("The markup delivery reader, entry refusals", () => {
     );
   });
 
-  test("a sealed-content carrier that is not an object is a page refusal", async () => {
-    // An array carries positions and not names, and `null` carries nothing:
-    // both are a carrier the page said it had and did not, which is not the
-    // same page as one that shipped no carrier at all.
-    for (const jsonText of ["[]", '["QUJD"]', "null", "42", '"QUJD"', "true"]) {
+  test("a sealed-content carrier that is not an array is a page refusal", async () => {
+    // The old name-keyed map is not the collection, and `null` carries
+    // nothing: both are a carrier the page said it had and did not, which is
+    // not the same page as one that shipped no carrier at all.
+    for (const jsonText of ["{}", '{"bodytext":"QUJD"}', "null", "42", '"QUJD"', "true"]) {
       const root = domOver(pageWithSealed(jsonText));
 
       await refuses(
         () => new MarkupDeliveryReader(root),
-        { code: "bad_page", message: /not an object/ },
-        `a sealed-content carrier of \`${jsonText}\` is not a map of ciphertext`,
+        { code: "bad_page", message: /not an array/ },
+        `a sealed-content carrier of \`${jsonText}\` is not a collection of ciphertext`,
       );
     }
   });
@@ -247,14 +260,14 @@ describe("The markup delivery reader, the sealed-content carrier", () => {
   });
 
   test("an empty carrier reads the same way", () => {
-    const read = new MarkupDeliveryReader(domOver(pageWithSealed("{}")));
+    const read = new MarkupDeliveryReader(domOver(pageWithSealed("[]")));
 
     assert.equal(read.extract("bodytext"), null);
   });
 
-  test("a member the carrier does not have is a miss, and one it has comes back exactly", () => {
+  test("a record the carrier does not have is a miss, and one it has comes back exactly", () => {
     const read = new MarkupDeliveryReader(
-      domOver(pageWithSealed('{"bodytext":"QUJD_-","premiumtext":""}')),
+      domOver(pageWithSealed(carrierText({ bodytext: "QUJD_-", premiumtext: "" }))),
     );
 
     assert.equal(read.extract("bodytext"), "QUJD_-", "byte for byte, no trim and no decode");
@@ -262,20 +275,24 @@ describe("The markup delivery reader, the sealed-content carrier", () => {
     assert.equal(read.extract("sidebar"), null, "a name the carrier never had");
   });
 
-  test("a member whose value is not a string supplies no ciphertext", () => {
+  test("a record whose content is not a string supplies no ciphertext", () => {
     // Decryption stays responsible for rejecting unusable bytes; what the
-    // reader answers for a non-string is the same miss an absent member gets.
-    const read = new MarkupDeliveryReader(
-      domOver(pageWithSealed('{"a":null,"b":42,"c":{},"d":[],"e":true}')),
-    );
+    // reader answers for a non-string is the same miss an absent record gets.
+    const records = [
+      ...JSON.parse(carrierText({ a: null, b: 42, c: {}, d: [], e: true })),
+      { contentName: "f" },
+    ];
+    const read = new MarkupDeliveryReader(domOver(pageWithSealed(JSON.stringify(records))));
 
-    for (const contentName of ["a", "b", "c", "d", "e"]) {
+    for (const contentName of ["a", "b", "c", "d", "e", "f"]) {
       assert.equal(read.extract(contentName), null, `a non-string under ${contentName}`);
     }
   });
 
   test("the carrier is read by own-property lookup, so an inherited name is a miss", () => {
-    const read = new MarkupDeliveryReader(domOver(pageWithSealed('{"bodytext":"QUJD"}')));
+    const read = new MarkupDeliveryReader(
+      domOver(pageWithSealed(carrierText({ bodytext: "QUJD" }))),
+    );
 
     for (const contentName of INHERITED) {
       assert.equal(
@@ -287,14 +304,16 @@ describe("The markup delivery reader, the sealed-content carrier", () => {
     assert.equal(read.extract("__proto__"), null, "and the one name that is a setter on a literal");
   });
 
-  test("a carrier member name outside the grammar is a page refusal", async () => {
-    // The format rejects a map keyed by contentName when one member name
-    // violates the grammar, and the carrier is such a map: one bad name
-    // stops every ciphertext on the page rather than that one member.
+  test("a carrier record name outside the grammar is a page refusal", async () => {
+    // The format rejects a collection of records named by contentName when
+    // one record's name is missing or violates the grammar: one bad name
+    // stops every ciphertext on the page rather than that one record.
     for (const carrier of [
-      '{"bad|name":"QUJD"}',
-      '{"bodytext":"QUJD","2bad":"REVG"}',
-      '{"":"QUJD"}',
+      carrierText({ "bad|name": "QUJD" }),
+      carrierText({ bodytext: "QUJD", "2bad": "REVG" }),
+      carrierText({ "": "QUJD" }),
+      '[{"contentName":"bodytext","content":"QUJD"},{"content":"REVG"}]',
+      '[{"contentName":7,"content":"REVG"}]',
     ]) {
       await refuses(
         () => new MarkupDeliveryReader(domOver(pageWithSealed(carrier))),
@@ -305,7 +324,9 @@ describe("The markup delivery reader, the sealed-content carrier", () => {
 
     // Over an admitted carrier, a lookup argument that is no name is the
     // ordinary miss it always was.
-    const read = new MarkupDeliveryReader(domOver(pageWithSealed('{"bodytext":"QUJD"}')));
+    const read = new MarkupDeliveryReader(
+      domOver(pageWithSealed(carrierText({ bodytext: "QUJD" }))),
+    );
     assert.equal(read.extract("bad|name"), null);
     assert.equal(read.extract(/** @type {any} */ (null)), null);
     assert.equal(read.extract(/** @type {any} */ (42)), null);
@@ -316,10 +337,55 @@ describe("The markup delivery reader, the sealed-content carrier", () => {
     // lexically last value, and never merges them. `JSON.parse` takes the
     // last, which is what this reader inherits.
     const read = new MarkupDeliveryReader(
-      domOver(pageWithSealed('{"bodytext":"QUJD","bodytext":"REVG"}')),
+      domOver(pageWithSealed('[{"contentName":"bodytext","content":"QUJD","content":"REVG"}]')),
     );
 
     assert.equal(read.extract("bodytext"), "REVG");
+  });
+
+  test("the last whole record for one name is what the carrier answers, in any order of names", () => {
+    const replaced = new MarkupDeliveryReader(
+      domOver(
+        pageWithSealed(
+          carrierText({ bodytext: "QUJD" }).replace(
+            "]",
+            ',{"contentName":"bodytext","content":"REVG"}]',
+          ),
+        ),
+      ),
+    );
+    assert.equal(replaced.extract("bodytext"), "REVG");
+
+    // Replacement, not merging: a later record without usable content
+    // leaves no ciphertext rather than falling back to the earlier one.
+    const unusable = new MarkupDeliveryReader(
+      domOver(
+        pageWithSealed(
+          carrierText({ bodytext: "QUJD" }).replace("]", ',{"contentName":"bodytext"}]'),
+        ),
+      ),
+    );
+    assert.equal(unusable.extract("bodytext"), null);
+
+    for (const order of [
+      { bodytext: "QUJD", premiumtext: "REVG" },
+      { premiumtext: "REVG", bodytext: "QUJD" },
+    ]) {
+      const read = new MarkupDeliveryReader(domOver(pageWithSealed(carrierText(order))));
+      assert.equal(read.extract("bodytext"), "QUJD");
+      assert.equal(read.extract("premiumtext"), "REVG");
+    }
+  });
+
+  test("an element that is not a record supplies nothing, and its siblings read", () => {
+    const read = new MarkupDeliveryReader(
+      domOver(
+        pageWithSealed(
+          '[null,"QUJD",["bodytext","REVG"],{"contentName":"bodytext","content":"QUJD"},42]',
+        ),
+      ),
+    );
+    assert.equal(read.extract("bodytext"), "QUJD");
   });
 
   test("a carrier nested inside another element is the carrier the reader reads", () => {
@@ -328,7 +394,7 @@ describe("The markup delivery reader, the sealed-content carrier", () => {
     // query, and the shared markup fixture has to find it there too.
     const read = new MarkupDeliveryReader(
       domOver(
-        `<div class="wrap"><section>${pageWithSealed('{"bodytext":"QUJD"}')}</section></div>`,
+        `<div class="wrap"><section>${pageWithSealed(carrierText({ bodytext: "QUJD" }))}</section></div>`,
       ),
     );
 
@@ -352,7 +418,7 @@ describe("The markup delivery reader, the sealed-content carrier", () => {
               ...script,
               get textContent() {
                 sealedReads += 1;
-                return '{"bodytext":"QUJD"}';
+                return carrierText({ bodytext: "QUJD" });
               },
             },
           ];

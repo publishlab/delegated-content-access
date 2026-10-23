@@ -208,7 +208,13 @@ export async function render(sealer, options = {}) {
     sealer.content(item.name, item.value, item.contentType, { accessGroups: item.accessGroups });
   }
   const sealed = await sealer.seal();
-  return JSON.parse(JSON.stringify({ ...sealed.dcaData, sealedContent: sealed.sealedContent }));
+  // The page carries ciphertexts as named records, the way the JSON writer
+  // writes the sealer's map.
+  const sealedContent = Object.entries(sealed.sealedContent).map(([contentName, content]) => ({
+    contentName,
+    content,
+  }));
+  return JSON.parse(JSON.stringify({ ...sealed.dcaData, sealedContent }));
 }
 
 /**
@@ -226,7 +232,7 @@ export function contentOnlyPolicy(contentNames, options = {}) {
   return {
     /**
      * @param {any} claims
-     * @param {{ contentNames: string[], accessGroups: string[], periodCoordinates: Record<string, string[]> }} requested
+     * @param {{ contentNames: string[], accessGroups: string[], periodCoordinates: Record<string, string[]>, sourcePeriodCoordinates?: Record<string, string[]> }} requested
      */
     decide(claims, requested) {
       void claims;
@@ -236,7 +242,12 @@ export function contentOnlyPolicy(contentNames, options = {}) {
           options.sourceGrants ??
           requested.accessGroups.map((accessGroup) => ({
             accessGroup,
-            periods: [...(requested.periodCoordinates[accessGroup] ?? [])],
+            periods: [
+              ...new Set([
+                ...(requested.periodCoordinates[accessGroup] ?? []),
+                ...(requested.sourcePeriodCoordinates?.[accessGroup] ?? []),
+              ]),
+            ],
           })),
       };
     },

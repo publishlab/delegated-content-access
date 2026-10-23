@@ -49,7 +49,8 @@ test("the contract names are the root-pinned production literals in one frozen o
     connectors: "connectors",
     requestedContentGroups: "requestedContentGroups",
     requestedContentKeys: "requestedContentKeys",
-    response: "contentGroups",
+    requestedChainCutoffs: "requestedChainCutoffs",
+    response: "contentGroupKeys",
     chainKeys: "chainKeys",
     periodKeys: "periodKeys",
     contentKeys: "contentKeys",
@@ -164,47 +165,67 @@ test("settleLimits applies the annex defaults and refuses retired and unknown na
   assert.throws(() => settleLimits(/** @type {any} */ ([])), /trusted configuration/);
 });
 
-test("content records admit named connector maps and refuse every other carrier", () => {
+test("content records admit connector records and refuse every other carrier", () => {
   const limits = settleLimits();
   const c1 = "AAECAwQFBgcICQoLDA0ODw";
   const c2 = "EBESExQVFhcYGRobHB0eHw";
+  /** @param {string} group @param {string} connector */
+  const route = (group, connector) => ({ group, connector });
   const page = {
-    contentData: {
-      bodytext: { connectors: { politics: c1, sports: c2 } },
-      purchase: { keys: {} },
-    },
+    contentData: [
+      { contentName: "bodytext", connectors: [route("politics", c1), route("sports", c2)] },
+      { contentName: "purchase", keys: [] },
+    ],
   };
   assert.deepEqual(
     { ...checkedContentRecords(page, limits) },
     {
-      bodytext: [
-        { group: "politics", connector: c1 },
-        { group: "sports", connector: c2 },
-      ],
+      bodytext: [route("politics", c1), route("sports", c2)],
       purchase: [],
     },
   );
+  /** @param {unknown} connectors */
+  const item = (connectors) => ({ contentData: [{ contentName: "bodytext", connectors }] });
   const refused = [
-    { contentData: { bodytext: { connectors: {} } } },
-    { contentData: { bodytext: { connectors: [c1] } } },
-    { contentData: { bodytext: { connectors: { politics: null } } } },
-    { contentData: { bodytext: { connectors: { politics: "AAEC" } } } },
-    { contentData: { bodytext: { connectors: { "bad group": c1 } } } },
-    { contentData: { bodytext: null } },
-    { contentData: { "bad name": {} } },
-    { contentData: [] },
-    { contentGroups: ["politics"], contentData: { bodytext: {} } },
+    item([]),
+    item({ politics: c1 }),
+    item([c1]),
+    item([route("politics", /** @type {any} */ (null))]),
+    item([route("politics", "AAEC")]),
+    item([route("bad group", c1)]),
+    item([{ connector: c1 }]),
+    { contentData: [{ contentName: "bad name" }] },
+    { contentData: { bodytext: {} } },
+    { contentGroups: ["politics"], contentData: [{ contentName: "bodytext" }] },
   ];
   for (const bad of refused) assert.throws(() => checkedContentRecords(bad, limits));
-  const many = Object.fromEntries(Array.from({ length: 3 }, (_, i) => [`item${i}`, {}]));
+  const many = Array.from({ length: 3 }, (_, i) => ({ contentName: `item${i}` }));
   assert.throws(
     () => checkedContentRecords({ contentData: many }, settleLimits({ maxItems: 2 })),
     /contentData/,
   );
-  const groups = { connectors: { a: c1, b: c1, c: c1 } };
+  // Raw records count toward maxGroups, also when several name one group.
   assert.throws(
-    () => checkedContentRecords({ contentData: { x: groups } }, settleLimits({ maxGroups: 2 })),
+    () =>
+      checkedContentRecords(
+        item([route("a", c1), route("a", c2), route("a", c1)]),
+        settleLimits({ maxGroups: 2 }),
+      ),
     /maxGroups/,
+  );
+  // Several connectors for one group are candidates; an identical copy is one.
+  assert.deepEqual(
+    checkedContentRecords(item([route("a", c1), route("a", c2), route("a", c1)]), limits).bodytext,
+    [route("a", c1), route("a", c2)],
+  );
+  // Record order changes no route.
+  const reversed = checkedContentRecords(
+    item([route("sports", c2), route("politics", c1)]),
+    limits,
+  ).bodytext;
+  assert.deepEqual(
+    [...reversed].sort((a, b) => (a.group < b.group ? -1 : 1)),
+    [route("politics", c1), route("sports", c2)],
   );
 });
 
@@ -248,4 +269,31 @@ test("no module exports the retired publisher-wide seed form", () => {
   for (const [label, [namespace, names]] of Object.entries(retired))
     for (const name of names)
       assert.equal(Object.hasOwn(namespace, name), false, `${label}.${name}`);
+});
+
+test("content records skip non-records and validate only each last whole payload", () => {
+  const connector = "AAECAwQFBgcICQoLDA0ODw";
+  const last = { contentName: "body", connectors: [{ group: "paid", connector }] };
+  assert.deepEqual(
+    {
+      ...checkedContentRecords(
+        { contentData: [null, [], false, { contentName: "body", connectors: "bad" }, last] },
+        settleLimits(),
+      ),
+    },
+    { body: last.connectors },
+  );
+  assert.throws(() =>
+    checkedContentRecords(
+      { contentData: [last, { contentName: "body", connectors: "bad" }] },
+      settleLimits(),
+    ),
+  );
+  assert.throws(() =>
+    checkedContentRecords({ contentData: [{ contentName: "bad name" }, last] }, settleLimits()),
+  );
+  assert.throws(
+    () => checkedContentRecords({ contentData: [null, last, last] }, settleLimits({ maxItems: 2 })),
+    /contentData/,
+  );
 });

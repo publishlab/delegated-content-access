@@ -56,7 +56,7 @@ function plainJsonCopy(value, what) {
   const copy = (node) => {
     if (node === null || typeof node === "string" || typeof node === "boolean") return node;
     if (typeof node === "number") return Number.isFinite(node) ? node : refuse();
-    if (typeof node !== "object" || ancestors.has(node)) refuse();
+    if (typeof node !== "object" || ancestors.has(node)) return refuse();
     const array = Array.isArray(node);
     const prototype = Object.getPrototypeOf(node);
     if (!array && prototype !== Object.prototype && prototype !== null) refuse();
@@ -69,7 +69,7 @@ function plainJsonCopy(value, what) {
       if (typeof key !== "string") refuse();
       if (array && String(Number(key)) !== key) refuse();
       const descriptor = Object.getOwnPropertyDescriptor(node, key);
-      if (!descriptor || !Object.hasOwn(descriptor, "value")) refuse();
+      if (!descriptor || !Object.hasOwn(descriptor, "value")) return refuse();
       if (!array && !descriptor.enumerable) refuse();
       // defineProperty keeps an own "__proto__" JSON member as data.
       Object.defineProperty(out, key, {
@@ -95,15 +95,20 @@ export class CompressingSealer {
   #hasPeriodKeySupply;
   /** @type {readonly string[]} */
   #itemOptionMembers;
+  /** @type {readonly (readonly string[])[]} */
+  #supportedEncodingSequences;
   #flushed = false;
   /** @type {Promise<void>|null} */
   #flushPromise = null;
 
   /**
    * @param {any} config - base Sealer configuration
-   * @param {{ gzip?: import('../core-shared--client-publisher/gzipCodec.js').Gzip }} [options]
+   * @param {{ gzip?: import('../core-shared--client-publisher/gzipCodec.js').Gzip, supportedEncodingSequences?: readonly (readonly string[])[] }} [options]
    */
-  constructor(config, { gzip = webStreamsGzip } = {}) {
+  constructor(
+    config,
+    { gzip = webStreamsGzip, supportedEncodingSequences = [[], [ENCODING]] } = {},
+  ) {
     this.#base = new Sealer(config);
     // Base has validated the config; a supply it holds is a usable object.
     this.#hasPeriodKeySupply = config.periodKeySupply != null;
@@ -114,6 +119,27 @@ export class CompressingSealer {
       throw dcaError("bad_config", "a gzip implementation compresses bytes with encode(bytes)");
     }
     this.#gzip = gzip;
+    if (!Array.isArray(supportedEncodingSequences) || supportedEncodingSequences.length === 0) {
+      throw dcaError(
+        "bad_config",
+        "supportedEncodingSequences is a nonempty list of encoding sequences",
+      );
+    }
+    const sequences = [];
+    for (const sequence of supportedEncodingSequences) {
+      if (!Array.isArray(sequence)) {
+        throw dcaError("bad_config", "each supported encoding sequence is a list");
+      }
+      const copy = [];
+      for (const encoding of sequence) {
+        if (typeof encoding !== "string" || encoding.length === 0) {
+          throw dcaError("bad_config", "a supported encoding sequence contains nonempty names");
+        }
+        copy.push(encoding);
+      }
+      sequences.push(Object.freeze(copy));
+    }
+    this.#supportedEncodingSequences = Object.freeze(sequences);
   }
 
   /**
@@ -228,12 +254,29 @@ export class CompressingSealer {
       }
     }
 
+    const gzip = !descriptor && contentEncoding === ENCODING;
+    const outputEncodings = gzip
+      ? [...representation.contentEncodings, ENCODING]
+      : representation.contentEncodings;
+    if (
+      !this.#supportedEncodingSequences.some(
+        (sequence) =>
+          sequence.length === outputEncodings.length &&
+          sequence.every((encoding, index) => encoding === outputEncodings[index]),
+      )
+    ) {
+      throw dcaError(
+        "unsupported_encoding",
+        `content "${name}" encoding sequence ${JSON.stringify(outputEncodings)} is not supported by this publisher`,
+      );
+    }
+
     this.#items.push({
       name,
       representation,
       accessGroups: [...accessGroups],
       options: declaredOptions,
-      gzip: !descriptor && contentEncoding === ENCODING,
+      gzip,
     });
     return this;
   }
@@ -266,7 +309,7 @@ export class CompressingSealer {
         if (!item.gzip) return item.representation;
         let bytes;
         try {
-          bytes = await this.#gzip.encode(item.representation.bytes);
+          bytes = await this.#gzip.encode(item.representation.bytes.slice());
         } catch (cause) {
           if (cause instanceof DcaError) throw cause;
           throw dcaError("bad_encoding", `gzip encode failed for "${item.name}"`);
@@ -292,10 +335,17 @@ export class CompressingSealer {
     );
 
     for (const [index, item] of this.#items.entries()) {
-      this.#base.content(item.name, prepared[index], {
-        ...item.options,
-        accessGroups: item.accessGroups,
-      });
+      this.#base.content(
+        item.name,
+        {
+          ...prepared[index],
+          contentEncodings: [...prepared[index].contentEncodings],
+        },
+        {
+          ...item.options,
+          accessGroups: item.accessGroups,
+        },
+      );
     }
     this.#flushed = true;
   }

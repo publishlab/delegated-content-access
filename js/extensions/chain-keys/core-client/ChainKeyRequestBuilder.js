@@ -5,7 +5,9 @@
 // needed by the unresolved items, and carries the corresponding publisher
 // geometry representation without rewriting it. It resolves the shared pair
 // only to filter article hints onto its grid. Invalid root geometry and raw
-// chain member maxima still decide whether a family has anything to relay.
+// chain record maxima still decide whether a family has anything to relay.
+// Every chain record of a selected family travels, rivals at one cutoff too:
+// each is a candidate the issuer opens on its own.
 
 import { acceptsPeriodKeyResponseCoordinate } from "./periodKeyResponseCoordinate.js";
 import { DcaData } from "../../../core-client/DcaData.js";
@@ -15,16 +17,18 @@ import { chainMemberLimit } from "../../../core-shared/chainMemberLimit.js";
 import { MAX_CHAIN_MEMBERS_PER_FAMILY } from "../../../core-shared/geometryBounds.js";
 import { invalidChainGeometry, resolveChainGeometry } from "../core-shared/chainKeyConstruction.js";
 import { own, setOwn } from "../../../core-shared/wire.js";
+import { recordsByName } from "../../../core-shared--client-publisher/deliveryRecords.js";
 import { ChainKeyRequest } from "../core-shared--client-issuer/ChainKeyRequest.js";
 import {
   MAX_REQUESTED_PERIODS_PER_FAMILY,
   MAX_REQUESTED_PERIODS_PER_REQUEST,
   normalizeRequestedPeriodKeys,
+  requestedPeriodKeyRecords,
 } from "../core-shared--client-issuer/requestedPeriodKeys.js";
 
 /** @typedef {{ build: Function,
- * keyFamilies?: (request: any) => import("../../../adapter-client/routeAttempts.js").ExtensionKeyFamilies,
- * routeProjection?: import("../../../adapter-client/routeAttempts.js").RouteProjection }} InnerRequestBuilder */
+ * keyFamilies?: (request: any) => import("../../../core-client/requestBuilderContracts.js").ExtensionKeyFamilies,
+ * routeProjection?: import("../../../core-client/requestBuilderContracts.js").RouteProjection }} InnerRequestBuilder */
 
 const OPTIONS = ["clientPublicKey", "relayPeriodKeys", "innerBuilder", "maxChainMembersPerMessage"];
 
@@ -49,30 +53,32 @@ function selectedContext(context) {
 }
 
 /**
- * Raw member counts of the selected issuer's received `sealed.chainKeys`
- * collection, read off the parsed page before any value is filtered or any
- * family projected. Every level is an own-member read; another issuer's block
- * is a separate collection and is not read. A family value that is not a
- * non-array object holds no members.
+ * Raw record counts of the selected issuer's received `sealed.chainKeys`
+ * collection, read off the parsed page before any value is filtered, any
+ * rival deduplicated or any family projected. The issuer block is the last
+ * whole block for the name; another issuer's block is a separate collection
+ * and is not read. An element that is not a record, or names no string access
+ * group, names no family and counts toward neither bound, as in the carrier
+ * reader.
  *
  * @param {DcaData} page
  * @param {string} issuerName
  * @returns {{ total: number, byFamily: Map<string, number> }}
  */
 function rawChainMemberCounts(page, issuerName) {
-  const collection = own(
-    own(own(own(page.toObject(), "issuerData"), issuerName), "sealed"),
-    "chainKeys",
+  const block = recordsByName(own(page.toObject(), "issuerData"), "issuerName", () => true)?.get(
+    issuerName,
   );
+  const collection = own(own(block, "sealed"), "chainKeys");
   /** @type {Map<string, number>} */
   const byFamily = new Map();
   let total = 0;
-  if (record(collection)) {
-    for (const accessGroup of Object.keys(collection)) {
-      const family = own(collection, accessGroup);
-      const count = record(family) ? Object.keys(family).length : 0;
-      byFamily.set(accessGroup, count);
-      total += count;
+  if (Array.isArray(collection)) {
+    for (const element of collection) {
+      const accessGroup = own(element, "accessGroup");
+      if (!record(element) || typeof accessGroup !== "string") continue;
+      byFamily.set(accessGroup, (byFamily.get(accessGroup) ?? 0) + 1);
+      total++;
     }
   }
   return { total, byFamily };
@@ -174,8 +180,8 @@ export class ChainKeyRequestBuilder {
     const raw = rawChainMemberCounts(page, issuerName);
     if (raw.total > this.#maxChainMembersPerMessage) return request;
 
-    /** @type {Record<string, Record<string, string>>} */
-    const chainKeys = {};
+    /** @type {Record<string, unknown>[]} */
+    const chainKeys = [];
     /** @type {string[]} */
     const selectedGroups = [];
     /** @type {Record<string, Set<string>>} */
@@ -184,13 +190,13 @@ export class ChainKeyRequestBuilder {
     for (const contentName of needed) {
       for (const accessGroup of page.accessGroupsFor(contentName)) {
         const chains = page.sealedChainKeysFor(issuerName, accessGroup);
-        if (chains === null || typeof chains !== "object" || Array.isArray(chains)) continue;
+        if (!Array.isArray(chains) || chains.length === 0) continue;
         if ((raw.byFamily.get(accessGroup) ?? 0) > MAX_CHAIN_MEMBERS_PER_FAMILY) continue;
-        const admittedChains = Object.fromEntries(Object.entries(chains));
-        if (Object.keys(admittedChains).length === 0) continue;
         if (!seen.has(accessGroup)) {
           seen.add(accessGroup);
-          setOwn(chainKeys, accessGroup, admittedChains);
+          // Relay defined members of every candidate without selecting a rival.
+          for (const { accessGroup, cutoff, key } of chains)
+            chainKeys.push({ accessGroup, cutoff, key });
           selectedGroups.push(accessGroup);
         }
         let labels = own(requestedByGroup, accessGroup);
@@ -203,7 +209,7 @@ export class ChainKeyRequestBuilder {
         for (const entry of page.sealedEntriesFor(contentName, accessGroup)) {
           if (typeof entry?.t !== "string") continue;
           try {
-            normalizeRequestedPeriodKeys({ [accessGroup]: [entry.t] }, () => family);
+            normalizeRequestedPeriodKeys([{ accessGroup, periods: [entry.t] }], () => family);
             labels.add(entry.t);
           } catch {
             // A malformed or off-grid cached wrap label cannot become an
@@ -215,8 +221,8 @@ export class ChainKeyRequestBuilder {
     }
 
     if (selectedGroups.length === 0) return request;
-    /** @type {Record<string, string[]>} */
-    const rawRequestedPeriodKeys = {};
+    /** @type {{ accessGroup: string, periods: string[] }[]} */
+    const rawRequestedPeriodKeys = [];
     // The selector is bounded independently of the authored wraps. A caller
     // needing more targets may make another request; this attempt chooses a
     // deterministic subset without enlarging the protocol input maxima.
@@ -227,16 +233,19 @@ export class ChainKeyRequestBuilder {
       const selected = [...labels]
         .sort()
         .slice(0, Math.min(MAX_REQUESTED_PERIODS_PER_FAMILY, remaining));
-      setOwn(rawRequestedPeriodKeys, accessGroup, selected);
+      rawRequestedPeriodKeys.push({ accessGroup, periods: selected });
       remaining -= selected.length;
     }
-    const requestedPeriodKeys = normalizeRequestedPeriodKeys(rawRequestedPeriodKeys, () => ({
-      kind: "absent",
-    }));
+    const requestedPeriodKeys =
+      rawRequestedPeriodKeys.length === 0
+        ? []
+        : requestedPeriodKeyRecords(
+            normalizeRequestedPeriodKeys(rawRequestedPeriodKeys, () => ({ kind: "absent" })),
+          );
     return ChainKeyRequest.fromRequest(request, {
       periodGeometry: selectedContext(context),
       chainKeys,
-      ...(Object.keys(requestedPeriodKeys).length === 0 ? {} : { requestedPeriodKeys }),
+      ...(requestedPeriodKeys.length === 0 ? {} : { requestedPeriodKeys }),
     });
   }
 }

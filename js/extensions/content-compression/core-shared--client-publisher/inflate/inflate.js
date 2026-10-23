@@ -522,6 +522,7 @@ function codedBlock(reader, output, sets) {
  * block boundaries, which is why one `Output` runs through all of them.
  *
  * @param {BitReader} reader
+ * @param {number} maxOutputBytes
  * @returns {Output}
  */
 function inflate(reader, maxOutputBytes) {

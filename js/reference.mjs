@@ -30,6 +30,8 @@ export { PERIOD_KEY_PROFILE, periodKeyProfile } from "./core-shared/periodKeyPro
 export { AAD_DELIMITER } from "./core-shared--client-publisher/names.js";
 // The content AAD both roles build: a port checks its transcript bytes against this.
 export { contentAad } from "./core-shared--client-publisher/contentAad.js";
+// The period-key wrap nonce every role derives: a port checks its nonce bytes against this.
+export { contentKeyWrapNonce } from "./core-shared/contentKeyWrapNonce.js";
 export { writeJsonDelivery } from "./adapter-publisher/writeJsonDelivery.js";
 export { JsonDeliveryReader } from "./adapter-client/JsonDeliveryReader.js";
 export { MarkupDeliveryReader } from "./adapter-client/MarkupDeliveryReader.js";

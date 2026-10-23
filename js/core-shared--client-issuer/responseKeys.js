@@ -2,59 +2,83 @@
 //
 // This module walks the `keys` section of an unlock response in one place.
 //
-// A response carries key material in three sections that nest differently:
-// `contentKeys[contentName]` holds one key, `periodKeys[accessGroup][t]` holds
-// one a level deeper, and `chainKeys` has the same keyed depth. Every
-// reader of a whole response reaches the same values. The client reads them to
-// tell which transport answered, and the issuer reads them to wrap each one for
-// the client that asked. The descent lives here once rather than in each
-// reader, because a per-reader descent would have to be found again in every
-// reader when a section moves.
+// A response carries key material in three sections, each an array of named
+// records: `contentKeys` holds `{contentName, key}`, `periodKeys` holds
+// `{accessGroup, period, key}` and `chainKeys` holds `{accessGroup, cutoff,
+// key}`. Every reader of a whole response reaches the same values. The client
+// reads them to tell which transport answered, and the issuer reads them to
+// wrap each one for the client that asked. The walk lives here once rather
+// than in each reader, so a section that gains a field changes its field list
+// here instead of a loop somewhere else.
 //
-// This module records each section's nesting as a depth number, so a section
-// that gains a level changes that number here instead of needing another loop
-// somewhere else.
+// No code here inspects the value a record carries. A key is a base64url
+// string under direct transport and a `{ key, nonce }` pair under
+// client-bound, and the caller works out which of the two arrived. The walk
+// tells the record and its carried value apart by position: the array element
+// is the record and its own `key` member is the value, whatever that holds.
+// Several records at one coordinate are candidate alternatives, so the walk
+// yields each one and never lets a later record overwrite an earlier one.
 //
-// No code here inspects the value at the bottom. A key is a base64url string
-// under direct transport and a `{ key, nonce }` pair under client-bound, and
-// the caller works out which of the two arrived. This walk stops at each
-// position and yields whatever it holds, including a value that is neither.
-//
-// All three sections are keyed by names the page or the issuer chose, so the section
-// lookups are own-property like every other read of something off the wire.
+// Every field is read as an own member, like every other read off the wire.
 
 import { own, setOwn } from "../core-shared/wire.js";
 import { dcaError } from "../core-shared/errors.js";
 
 /**
- * Every key-bearing response section of `keys`, how many names stand between
- * it and one key, and the key kind the section fixes for each of its keys.
+ * Every key-bearing response section of `keys`, the coordinate fields of its
+ * records, and the key kind the section fixes for each of its keys.
  * `section` names the wire field (`contentKeys`, `periodKeys`, `chainKeys`);
  * `keyKind` names the meaning assigned to each key entry. contentKeys
  * first, which is the order a response lists them in and the order an issuer
  * wraps them in.
  *
- * @type {[string, number, 'contentKey'|'periodKey'|'chainKey'][]}
+ * @type {[string, readonly string[], 'contentKey'|'periodKey'|'chainKey'][]}
  */
 const SECTIONS = [
-  ["contentKeys", 1, "contentKey"],
-  ["periodKeys", 2, "periodKey"],
-  ["chainKeys", 2, "chainKey"],
+  ["contentKeys", ["contentName"], "contentKey"],
+  ["periodKeys", ["accessGroup", "period"], "periodKey"],
+  ["chainKeys", ["accessGroup", "cutoff"], "chainKey"],
 ];
 
 /**
- * @param {any} node
- * @param {number} depth
- * @param {string[]} [path]
- * @returns {Generator<{ path: string[], key: any }>}
+ * The member of every key record that holds its key value.
  */
-function* keyEntries(node, depth, path = []) {
-  if (depth === 0) {
-    yield { path, key: node };
-    return;
+const KEY = "key";
+
+/**
+ * The coordinate a key record names, as its field values in `fields` order,
+ * or null when the value is not a non-array object with a string at every
+ * field and an own `key` member.
+ *
+ * @param {unknown} record
+ * @param {readonly string[]} fields
+ * @param {string} [valueMember]
+ * @returns {string[]|null}
+ */
+export function recordPath(record, fields, valueMember = KEY) {
+  if (record === null || typeof record !== "object" || Array.isArray(record)) return null;
+  if (!Object.hasOwn(record, valueMember)) return null;
+  /** @type {string[]} */
+  const path = [];
+  for (const field of fields) {
+    const value = own(record, field);
+    if (typeof value !== "string") return null;
+    path.push(value);
   }
-  if (node === null || typeof node !== "object") return;
-  for (const name of Object.keys(node)) yield* keyEntries(node[name], depth - 1, [...path, name]);
+  return path;
+}
+
+/**
+ * @param {any} collection
+ * @param {readonly string[]} fields
+ * @returns {Generator<{ path: string[], key: any, record: any }>}
+ */
+function* keyEntries(collection, fields) {
+  if (!Array.isArray(collection)) return;
+  for (const record of collection) {
+    const path = recordPath(record, fields);
+    if (path !== null) yield { path, key: own(record, KEY), record };
+  }
 }
 
 /**
@@ -62,16 +86,18 @@ function* keyEntries(node, depth, path = []) {
  * @returns {Generator<{ section: string, path: string[], key: any }>}
  */
 function* entries(keys) {
-  for (const [section, depth] of SECTIONS) {
-    for (const entry of keyEntries(own(keys, section), depth)) yield { section, ...entry };
+  for (const [section, fields] of SECTIONS) {
+    for (const { path, key } of keyEntries(own(keys, section), fields))
+      yield { section, path, key };
   }
 }
 
 /**
  * Every key a response delivers, in the order it lists them.
  *
- * A section that is missing, or that did not arrive as an object, delivers
- * nothing rather than throwing: a malformed response is the caller's to answer
+ * A section that is missing, or that did not arrive as an array, delivers
+ * nothing rather than throwing, and so does a record that does not name its
+ * coordinate: a malformed response is the caller's to answer
  * for, and it cannot answer for one from a TypeError three frames down.
  *
  * @param {any} keys
@@ -104,19 +130,30 @@ export function* deliveredCoordinates(keys) {
 }
 
 /**
- * @param {any} node
- * @param {number} depth
+ * A copy of one record collection with the `key` member of every well-formed
+ * record replaced by `await fn(key)`, in array order. A record keeps its other
+ * members; an element that names no coordinate stays as it arrived and is
+ * never handed to `fn`.
+ *
+ * @param {any} collection
+ * @param {readonly string[]} fields
  * @param {(key: any) => any} fn
  * @returns {Promise<any>}
  */
-async function mapKeyEntries(node, depth, fn) {
-  if (depth === 0) return fn(node);
-  if (node === null || typeof node !== "object") return node;
-
-  /** @type {Record<string, any>} */
-  const mapped = {};
-  for (const name of Object.keys(node))
-    setOwn(mapped, name, await mapKeyEntries(node[name], depth - 1, fn));
+async function mapRecords(collection, fields, fn) {
+  if (!Array.isArray(collection)) return collection;
+  const mapped = [];
+  for (const record of collection) {
+    if (recordPath(record, fields) === null) {
+      mapped.push(record);
+      continue;
+    }
+    /** @type {Record<string, any>} */
+    const copy = {};
+    for (const name of Object.keys(record)) setOwn(copy, name, record[name]);
+    setOwn(copy, KEY, await fn(own(record, KEY)));
+    mapped.push(copy);
+  }
   return mapped;
 }
 
@@ -146,10 +183,10 @@ export async function mapDeliveredKeys(keys, fn) {
 
   const mapped = { ...keys };
 
-  for (const [section, depth, keyKind] of SECTIONS) {
+  for (const [section, fields, keyKind] of SECTIONS) {
     const delivered = own(keys, section);
     if (delivered === undefined) continue;
-    mapped[section] = await mapKeyEntries(delivered, depth, (key) => fn(key, keyKind));
+    mapped[section] = await mapRecords(delivered, fields, (key) => fn(key, keyKind));
   }
 
   return mapped;
@@ -158,45 +195,53 @@ export async function mapDeliveredKeys(keys, fn) {
 /**
  * A key-bearing response section a selected extension composes beside `keys`,
  * as trusted composition declares it. `path` names its member from the
- * response root, `depth` the names between it and one key position, and
- * `keyKind` the kind its entries bind under client-bound transport. With
- * `leafKey`, each position holds a record and the key entry is that record's
- * `leafKey` member, for example a metadata record can declare `leafKey: "key"`.
- * With `errorPath`, the section also reports a retired opening key per
- * coordinate in a map at that path, nested at the same `depth`, whose every
- * leaf is exactly `{ error: "key_retired" }` (`isRetirementLeaf`). An error
- * leaf is never a key entry and is never wrapped.
+ * response root, which holds an array of records. `fields` names the
+ * coordinate fields of each record in order, and the record's `key` member is
+ * its key entry. `keyKind` names the kind its entries bind under client-bound
+ * transport. With `errorPath`, the section also reports a retired opening key
+ * per coordinate in an array of records at that path, each carrying the same
+ * `fields` and exactly `error: "key_retired"` (`isRetirementLeaf`). An error
+ * record is never a key entry and is never wrapped.
  *
  * @typedef {object} ComposedSection
  * @property {readonly string[]} path
- * @property {number} depth
+ * @property {readonly string[]} fields
  * @property {string} keyKind
- * @property {string} [leafKey]
  * @property {readonly string[]} [errorPath]
  */
 
-/** The one error a composed section's error map may carry. */
+/** The one error a composed section's error records may carry. */
 const RETIREMENT_ERROR = "key_retired";
 
+/** The most coordinate fields a composed record may name. */
+const MAX_FIELDS = 4;
+
 /**
- * Whether `value` is the fixed retirement leaf `{ error: "key_retired" }`,
- * with no other member: a free-form record could carry key bytes past a guard
- * that does not wrap error records.
+ * Whether `value` is a retirement record of a composed section with these
+ * coordinate `fields`: a non-array object holding each field as a string and
+ * `error: "key_retired"`, with no other member. A free-form record could carry
+ * key bytes past a guard that does not wrap error records.
  *
  * @param {unknown} value
+ * @param {readonly string[]} fields
  * @returns {boolean}
  */
-export function isRetirementLeaf(value) {
+export function isRetirementLeaf(value, fields) {
   if (value === null || typeof value !== "object" || Array.isArray(value)) return false;
   const names = Object.keys(value);
-  return names.length === 1 && names[0] === "error" && own(value, "error") === RETIREMENT_ERROR;
+  return (
+    names.length === fields.length + 1 &&
+    own(value, "error") === RETIREMENT_ERROR &&
+    fields.every((field) => typeof own(value, field) === "string")
+  );
 }
 
 /**
  * Admit composed sections once, at composition. A path or error path is one or
  * more member names and never starts at `keys`, `transport`, `errors` or
  * `notDelivered`; no two of the declared paths and error paths are equal or
- * contain one another.
+ * contain one another. `fields` lists one to four distinct member names, none
+ * of them `key` or `error`, which the record itself uses.
  *
  * @param {unknown} sections
  * @returns {readonly Readonly<ComposedSection>[]}
@@ -208,6 +253,15 @@ export function settleComposedSections(sections) {
     path.length > 0 &&
     path.every((name) => typeof name === "string" && name.length > 0) &&
     !["keys", "transport", "errors", "notDelivered"].includes(path[0]);
+  /** @param {unknown} fields */
+  const recordFields = (fields) =>
+    Array.isArray(fields) &&
+    fields.length > 0 &&
+    fields.length <= MAX_FIELDS &&
+    fields.every(
+      (name) => typeof name === "string" && name.length > 0 && name !== KEY && name !== "error",
+    ) &&
+    new Set(fields).size === fields.length;
   const bad = (/** @type {string} */ why) =>
     dcaError("bad_config", `composed response sections: ${why}`);
   if (!Array.isArray(sections)) throw bad("a list");
@@ -216,15 +270,14 @@ export function settleComposedSections(sections) {
   const paths = [];
   return Object.freeze(
     sections.map((section) => {
-      const { path, depth, keyKind, leafKey, errorPath, ...rest } = section ?? {};
+      const { path, fields, keyKind, errorPath, ...rest } = section ?? {};
       if (Object.keys(rest).length > 0 || !memberPath(path))
         throw bad("each names a non-base member path");
       if (errorPath !== undefined && !memberPath(errorPath))
         throw bad("an errorPath is a non-base member path");
-      if (!Number.isSafeInteger(depth) || depth < 1 || depth > 4) throw bad("depth is 1 to 4");
+      if (!recordFields(fields))
+        throw bad("fields are one to four distinct member names other than key and error");
       if (typeof keyKind !== "string" || keyKind.length === 0) throw bad("each names its key kind");
-      if (leafKey !== undefined && (typeof leafKey !== "string" || leafKey.length === 0))
-        throw bad("leafKey is a member name");
       for (const declared of errorPath === undefined ? [path] : [path, errorPath]) {
         const id = JSON.stringify(declared);
         if (seen.has(id)) throw bad(`two sections at ${declared.join(".")}`);
@@ -241,9 +294,8 @@ export function settleComposedSections(sections) {
       }
       return Object.freeze({
         path: Object.freeze([...path]),
-        depth,
+        fields: Object.freeze([...fields]),
         keyKind,
-        ...(leafKey === undefined ? {} : { leafKey }),
         ...(errorPath === undefined ? {} : { errorPath: Object.freeze([...errorPath]) }),
       });
     }),
@@ -251,58 +303,28 @@ export function settleComposedSections(sections) {
 }
 
 /**
- * @param {any} node
- * @param {number} depth
- * @param {string|undefined} leafKey
- * @param {(key: any) => any} fn
- * @returns {Promise<any>}
- */
-async function mapComposedEntries(node, depth, leafKey, fn) {
-  if (depth === 0) {
-    if (leafKey === undefined) return fn(node);
-    if (node === null || typeof node !== "object" || own(node, leafKey) === undefined) return node;
-    /** @type {Record<string, any>} */
-    const leaf = {};
-    for (const name of Object.keys(node)) setOwn(leaf, name, node[name]);
-    setOwn(leaf, leafKey, await fn(own(node, leafKey)));
-    return leaf;
-  }
-  if (node === null || typeof node !== "object") return node;
-  /** @type {Record<string, any>} */
-  const mapped = {};
-  for (const name of Object.keys(node))
-    setOwn(mapped, name, await mapComposedEntries(node[name], depth - 1, leafKey, fn));
-  return mapped;
-}
-
-/**
- * Every key entry of the composed sections, in declaration order, with the
- * kind its section fixes.
+ * Every key entry of the composed sections, in declaration order and then
+ * array order, with the kind its section fixes and the record it came from.
+ * Several records at one coordinate each yield an entry.
  *
  * @param {any} response
  * @param {readonly Readonly<ComposedSection>[]} sections - settled
- * @returns {Generator<{ section: Readonly<ComposedSection>, path: string[], key: any }>}
+ * @returns {Generator<{ section: Readonly<ComposedSection>, path: string[], key: any, record: any }>}
  */
 export function* composedKeys(response, sections) {
   for (const section of sections) {
     let node = response;
     for (const name of section.path) node = own(node, name);
-    for (const { path, key: position } of keyEntries(node, section.depth)) {
-      if (section.leafKey === undefined) yield { section, path, key: position };
-      else if (position !== null && typeof position === "object") {
-        const key = own(position, section.leafKey);
-        if (key !== undefined) yield { section, path, key };
-      }
-    }
+    for (const entry of keyEntries(node, section.fields)) yield { section, ...entry };
   }
 }
 
 /**
  * Returns a copy of `response` with every key entry of the composed sections
  * replaced by `fn(key, keyKind)`, awaited one at a time in declaration order,
- * the way `mapDeliveredKeys` treats `keys`. A leaf record keeps its other
- * members; only its `leafKey` member is replaced. Members outside the declared
- * paths are copied unchanged.
+ * the way `mapDeliveredKeys` treats `keys`. A record keeps its other members;
+ * only its `key` member is replaced. Members outside the declared paths are
+ * copied unchanged.
  *
  * @param {any} response
  * @param {readonly Readonly<ComposedSection>[]} sections - settled
@@ -331,9 +353,7 @@ export async function mapComposedSections(response, sections, fn) {
     setOwn(
       parent,
       last,
-      await mapComposedEntries(delivered, section.depth, section.leafKey, (key) =>
-        fn(key, section.keyKind),
-      ),
+      await mapRecords(delivered, section.fields, (key) => fn(key, section.keyKind)),
     );
   }
   return mapped;

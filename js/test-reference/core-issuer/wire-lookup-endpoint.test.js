@@ -23,6 +23,7 @@ import { AllowAllPolicy } from "../../demo/support/AllowAllPolicy.js";
 import { ISSUER_NAME, KEY_ID, RESOURCE_ID, SIGNING_KID } from "../../demo/scenarios/fixtures.js";
 import { makeRenderId } from "../../test-lib/fixtures/renderId.js";
 import { unlockThroughAdmission } from "../../test-lib/harnesses/unlockThroughAdmission.js";
+import { errorMap } from "../support/namedRecords.js";
 
 /** The origin this render is delivered from, and every blob bound under. */
 const ORIGIN = "https://www.news-site.example";
@@ -88,7 +89,11 @@ test("a missing sealed section is a typed refusal, not a crash", async () => {
   assert.equal(status, 400);
   assert.equal(body.error, "binding_failed");
   assert.equal(body.keys, undefined, "nothing partial comes back");
-  assert.equal(body.errors, undefined, "and no coordinate the request never sent is answered for");
+  assert.equal(
+    errorMap(body.errors),
+    undefined,
+    "and no coordinate the request never sent is answered for",
+  );
   assert.equal(keyStore.reachCount, 0, "an empty ask reaches no opening key");
 });
 
@@ -110,8 +115,11 @@ test("unsupported chain-only and malformed period-key families stop before priva
   );
   const endpoint = new UnlockEndpoint(endpointProcessor);
   const cases = [
-    { contentKeys: {}, chainKeys: { premium: { "251023T1400": "AAAA" } } },
-    { contentKeys: {}, periodKeys: { premium: ["AAAA"] } },
+    {
+      contentKeys: [],
+      chainKeys: [{ accessGroup: "premium", cutoff: "251023T1400", key: "AAAA" }],
+    },
+    { contentKeys: [], periodKeys: ["AAAA"] },
   ];
 
   for (const sealed of cases) {
@@ -124,13 +132,13 @@ test("unsupported chain-only and malformed period-key families stop before priva
     assert.equal(status, 400);
     assert.equal(body.error, "binding_failed");
     assert.equal(body.keys, undefined);
-    assert.equal(body.errors, undefined);
+    assert.equal(errorMap(body.errors), undefined);
   }
   assert.equal(policyCalls, 0, "neither refused shape reaches policy");
   assert.equal(keyStore.reachCount, 0, "neither refused shape reaches an opening key");
 });
 
-test("a top-level sealed section that is not a keyed map fails the whole request", async () => {
+test("a top-level sealed section that is not a record array fails the whole request", async () => {
   const { keyStore, publisherRegistration, signingKeys } = await directWorld();
   let policyCalls = 0;
   const engine = new IssuerEngine({
@@ -151,32 +159,35 @@ test("a top-level sealed section that is not a keyed map fails the whole request
   });
   const endpoint = new UnlockEndpoint(endpointProcessor);
 
-  // 'abc' has member names '0', '1', '2' and a one-character member behind
-  // each; [blob] has '0'. None of these is a map, and a named request map that
-  // is not a non-array object is a whole-request admission failure, so the
-  // well-formed sibling in the other section is not answered either.
+  // None of these is a record array, and a request collection that is not an
+  // array is a whole-request admission failure, so the well-formed sibling in
+  // the other section is not answered either. The old keyed map is one of
+  // them.
   const arms = [
-    { section: "contentKeys", sibling: { periodKeys: { premium: { "251023T1400": "AAAA" } } } },
-    { section: "periodKeys", sibling: { contentKeys: { bodytext: "AAAA" } } },
+    {
+      section: "contentKeys",
+      sibling: { periodKeys: [{ accessGroup: "premium", period: "251023T1400", key: "AAAA" }] },
+    },
+    { section: "periodKeys", sibling: { contentKeys: [{ contentName: "bodytext", key: "AAAA" }] } },
   ];
   for (const { section, sibling } of arms) {
-    for (const notAMap of ["abc", "x".repeat(50), ["AAAA"], 7, true]) {
+    for (const notAnArray of ["abc", "x".repeat(50), { bodytext: "AAAA" }, 7, true]) {
       const { status, body } = await unlockThroughAdmission(
         endpointProcessor,
         endpoint,
-        await signedRequest(signingKeys.privateKey, { ...sibling, [section]: notAMap }),
+        await signedRequest(signingKeys.privateKey, { ...sibling, [section]: notAnArray }),
         publisherRegistration,
       );
 
-      const arm = `sealed.${section} = ${JSON.stringify(notAMap)}`;
+      const arm = `sealed.${section} = ${JSON.stringify(notAnArray)}`;
       assert.equal(status, 400, arm);
       assert.equal(body.error, "binding_failed", arm);
       assert.equal(body.keys, undefined, arm);
-      assert.equal(body.errors, undefined, arm);
+      assert.equal(errorMap(body.errors), undefined, arm);
     }
   }
 
-  assert.equal(policyCalls, 0, "a malformed named map never reaches policy");
+  assert.equal(policyCalls, 0, "a malformed collection never reaches policy");
   assert.equal(keyStore.reachCount, 0, "and never reaches an opening key");
 });
 
@@ -189,7 +200,7 @@ test("the endpoint reads a raw JSON string the same as a parsed object", async (
     }),
   );
   const endpoint = new UnlockEndpoint(endpointProcessor);
-  const request = await signedRequest(signingKeys.privateKey, { contentKeys: {} });
+  const request = await signedRequest(signingKeys.privateKey, { contentKeys: [] });
 
   const parsed = await unlockThroughAdmission(
     endpointProcessor,

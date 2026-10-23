@@ -8,6 +8,8 @@ import { ISSUER_NAME } from "../../demo/scenarios/fixtures.js";
 import { requestFor } from "../../test-lib/harnesses/issuer-endpoint.js";
 import { unlockThroughAdmission } from "../../test-lib/harnesses/unlockThroughAdmission.js";
 import { BODYTEXT, PUB, T_NOW, T_NEXT, world } from "../../test-lib/fixtures/wire-policy-world.js";
+import { issuerBlockOf, periodsOn, wrapGroupsOn } from "../../test-lib/helpers/inspect.js";
+import { contentKeyMap, keyAt, periodKeyMap } from "../support/namedRecords.js";
 
 /**
  * A cache that records which exact coordinates were asked for, so a test can
@@ -68,7 +70,7 @@ async function contentKeyFor(w, page, contentName) {
     200,
     "the reference unlock has to succeed, or the comparison below means nothing",
   );
-  return base64urlDecode(body.keys.contentKeys[contentName]);
+  return base64urlDecode(keyAt(body.keys.contentKeys, { contentName }));
 }
 
 describe("first-accessGroup-wins", () => {
@@ -83,14 +85,8 @@ describe("first-accessGroup-wins", () => {
 
     // Two groups, two periods each: four entries the walk could have asked
     // about, and two families it may ask about.
-    assert.deepEqual(
-      page.contentData.bodytext.keys.subscriber.map((/** @type {any} */ e) => e.t),
-      [T_NOW, T_NEXT],
-    );
-    assert.deepEqual(
-      page.contentData.bodytext.keys.premium.map((/** @type {any} */ e) => e.t),
-      [T_NOW, T_NEXT],
-    );
+    assert.deepEqual(periodsOn(page, "bodytext", "subscriber"), [T_NOW, T_NEXT]);
+    assert.deepEqual(periodsOn(page, "bodytext", "premium"), [T_NOW, T_NEXT]);
 
     const backing = new PeriodKeyCache();
     // Only the second group's key is held, so the walk has to pass through the
@@ -194,9 +190,10 @@ test("a cached slot key opens another article offering that slot even when its i
     publisherRegistration,
   );
   assert.equal(granted.status, 200);
-  assert.deepEqual(granted.body.keys.contentKeys, {}, "no per-item content key was granted");
-  assert.deepEqual(Object.keys(granted.body.keys.periodKeys), ["slot-1"]);
-  assert.deepEqual(Object.keys(granted.body.keys.periodKeys["slot-1"]), [T_NOW]);
+  assert.deepEqual(granted.body.keys.contentKeys, [], "no per-item content key was granted");
+  const grantedPeriods = periodKeyMap(granted.body.keys.periodKeys);
+  assert.deepEqual(Object.keys(grantedPeriods), ["slot-1"]);
+  assert.deepEqual(Object.keys(grantedPeriods["slot-1"]), [T_NOW]);
   await client.applyResponse(first, ISSUER_NAME, granted.body);
 
   permitGrant = false;
@@ -208,7 +205,7 @@ test("a cached slot key opens another article offering that slot even when its i
     publisherRegistration,
   );
   assert.deepEqual(
-    Object.keys(refused.body.keys?.periodKeys ?? {}),
+    refused.body.keys?.periodKeys ?? [],
     [],
     "the issuer returned no new period capability for article B",
   );
@@ -256,9 +253,9 @@ test("each render's bodytext assignment bounds cached reach, and either assigned
     [articleB, ["slot-2"]],
     [articleC, ["slot-1", "slot-2"]],
   ]) {
-    assert.deepEqual(Object.keys(rendered.page.contentData.bodytext.keys), expected);
+    assert.deepEqual(wrapGroupsOn(rendered.page, "bodytext"), expected);
     assert.deepEqual(
-      Object.keys(rendered.page.issuerData[ISSUER_NAME].sealed.periodKeys),
+      Object.keys(periodKeyMap(issuerBlockOf(rendered.page, ISSUER_NAME).sealed.periodKeys)),
       expected,
       "the configured but unassigned slot-3 has no issuer envelope either",
     );
@@ -296,8 +293,8 @@ test("each render's bodytext assignment bounds cached reach, and either assigned
     publisherRegistration,
   );
   assert.equal(grantA.status, 200);
-  assert.deepEqual(grantA.body.keys.contentKeys, {});
-  assert.deepEqual(Object.keys(grantA.body.keys.periodKeys), ["slot-1"]);
+  assert.deepEqual(grantA.body.keys.contentKeys, []);
+  assert.deepEqual(Object.keys(periodKeyMap(grantA.body.keys.periodKeys)), ["slot-1"]);
   await slotOneClient.applyResponse(pageA, ISSUER_NAME, grantA.body);
   assert.deepEqual((await slotOneClient.resolve(pageA, ["bodytext"])).covered, ["bodytext"]);
   assert.equal(
@@ -353,7 +350,7 @@ test("each render's bodytext assignment bounds cached reach, and either assigned
     slotTwoClient.buildRequest(pageBForSlotTwo, ISSUER_NAME, ["bodytext"]),
     publisherRegistration,
   );
-  assert.deepEqual(Object.keys(grantB.body.keys.periodKeys), ["slot-2"]);
+  assert.deepEqual(Object.keys(periodKeyMap(grantB.body.keys.periodKeys)), ["slot-2"]);
   await slotTwoClient.applyResponse(pageBForSlotTwo, ISSUER_NAME, grantB.body);
   assert.deepEqual((await slotTwoClient.resolve(pageBForSlotTwo, ["bodytext"])).covered, [
     "bodytext",
@@ -385,10 +382,7 @@ test("each render's bodytext assignment bounds cached reach, and either assigned
   await unassignedCache.put("slot-3", T_NOW, new Uint8Array(16), { publisher: PUB });
   const unassignedClient = new Client({ publisherOrigin: PUB, cache: unassignedCache });
   const pageCFromUnassignedGroup = unassignedClient.parse(articleC.page);
-  assert.deepEqual(Object.keys(pageCFromUnassignedGroup.contentData.bodytext.keys), [
-    "slot-1",
-    "slot-2",
-  ]);
+  assert.deepEqual(wrapGroupsOn(pageCFromUnassignedGroup, "bodytext"), ["slot-1", "slot-2"]);
   assert.equal(
     await unassignedClient.contentKeyFor(pageCFromUnassignedGroup, "bodytext"),
     null,
@@ -443,8 +437,8 @@ test("one sealed item serves full-group subscribers by cache and occasional read
     subscriber.buildRequest(subscriberPage, ISSUER_NAME, ["bodytext"]),
     publisherRegistration,
   );
-  assert.deepEqual(subscriberGrant.body.keys.contentKeys, {});
-  assert.deepEqual(Object.keys(subscriberGrant.body.keys.periodKeys), ["premium"]);
+  assert.deepEqual(subscriberGrant.body.keys.contentKeys, []);
+  assert.deepEqual(Object.keys(periodKeyMap(subscriberGrant.body.keys.periodKeys)), ["premium"]);
   await subscriber.applyResponse(subscriberPage, ISSUER_NAME, subscriberGrant.body);
   assert.deepEqual((await subscriber.resolve(subscriberPage, ["bodytext"])).covered, ["bodytext"]);
   const subscriberContentKey = await subscriber.contentKeyFor(subscriberPage, "bodytext");
@@ -503,7 +497,7 @@ test("one sealed item serves full-group subscribers by cache and occasional read
     occasional.buildRequest(occasionalPage, ISSUER_NAME, ["bodytext"]),
     publisherRegistration,
   );
-  assert.deepEqual(Object.keys(occasionalGrant.body.keys.contentKeys), ["bodytext"]);
+  assert.deepEqual(Object.keys(contentKeyMap(occasionalGrant.body.keys.contentKeys)), ["bodytext"]);
   assert.equal(occasionalGrant.body.keys.periodKeys, undefined);
   await occasional.applyResponse(occasionalPage, ISSUER_NAME, occasionalGrant.body);
   assert.deepEqual((await occasional.resolve(occasionalPage, ["bodytext"])).covered, ["bodytext"]);

@@ -99,11 +99,13 @@ describe("KeyDelivery", () => {
     assert.equal(view.isDirect(), false);
 
     const raw = base64urlEncode(new Uint8Array(16).fill(7));
-    const body = { keys: { contentKeys: { "news/a": raw } } };
+    const body = { keys: { contentKeys: [{ contentName: "news/a", key: raw }] } };
     const finalBody = await delivery.prepare(body, view);
 
     assert.equal(Object.hasOwn(finalBody.transport, "mode"), false);
-    const delivered = finalBody.keys.contentKeys["news/a"];
+    const [record] = finalBody.keys.contentKeys;
+    assert.equal(record.contentName, "news/a");
+    const delivered = record.key;
     assert.deepEqual(Object.keys(delivered).sort(), ["key", "nonce"]);
     assert.notEqual(delivered.key, raw);
     assert.equal(JSON.stringify(finalBody).includes(raw), false);
@@ -124,7 +126,11 @@ describe("KeyDelivery", () => {
     const delivery = new KeyDelivery({ profile });
     const view = await delivery.preflight("client-bound", new DcaRequest({ clientPublicKey: {} }));
     const body = await delivery.prepare(
-      { keys: { contentKeys: { premium: base64urlEncode(new Uint8Array(16)) } } },
+      {
+        keys: {
+          contentKeys: [{ contentName: "premium", key: base64urlEncode(new Uint8Array(16)) }],
+        },
+      },
       view,
     );
 
@@ -159,26 +165,56 @@ describe("KeyDelivery", () => {
     for (const [body, message] of [
       [{ keys: "AAAA" }, "client-bound delivery needs a keys object"],
       [
-        { keys: { contentKeys: { "news/a": { raw: "must-not-leak" } } } },
+        { keys: { contentKeys: [{ contentName: "news/a", key: { raw: "must-not-leak" } }] } },
         "client-bound delivery needs string key entries",
       ],
       [
         { keys: { periodKeys: { premium: "must-not-leak" } } },
-        "client-bound delivery needs correctly nested key sections",
+        "client-bound delivery needs key record arrays",
       ],
       [
-        { keys: { contentKeys: { "news/a": base64urlEncode(new Uint8Array(32)) } } },
+        { keys: { periodKeys: ["must-not-leak"] } },
+        "client-bound delivery needs key records with their coordinate fields",
+      ],
+      [
+        // The record names no period, so it has no coordinate a client
+        // could bind; its key must not leave raw beside wrapped siblings.
+        { keys: { periodKeys: [{ accessGroup: "premium", key: "must-not-leak" }] } },
+        "client-bound delivery needs key records with their coordinate fields",
+      ],
+      [
+        {
+          keys: {
+            contentKeys: [{ contentName: "news/a", key: base64urlEncode(new Uint8Array(32)) }],
+          },
+        },
         "client-bound delivery needs 16-byte contentKey values",
       ],
       [
         {
-          keys: { periodKeys: { premium: { "251023T1700": base64urlEncode(new Uint8Array(32)) } } },
+          keys: {
+            periodKeys: [
+              {
+                accessGroup: "premium",
+                period: "251023T1700",
+                key: base64urlEncode(new Uint8Array(32)),
+              },
+            ],
+          },
         },
         "client-bound delivery needs 16-byte periodKey values",
       ],
       [
         {
-          keys: { chainKeys: { premium: { "251023T1700": base64urlEncode(new Uint8Array(17)) } } },
+          keys: {
+            chainKeys: [
+              {
+                accessGroup: "premium",
+                cutoff: "251023T1700",
+                key: base64urlEncode(new Uint8Array(17)),
+              },
+            ],
+          },
         },
         "client-bound delivery needs 16-byte chainKey values",
       ],
@@ -190,11 +226,14 @@ describe("KeyDelivery", () => {
         // allowed to have carried.
         {
           keys: {
-            contentKeys: {
-              "news/a": base64urlEncode(new Uint8Array(16).fill(0xfb))
-                .replace(/-/g, "+")
-                .replace(/_/g, "/"),
-            },
+            contentKeys: [
+              {
+                contentName: "news/a",
+                key: base64urlEncode(new Uint8Array(16).fill(0xfb))
+                  .replace(/-/g, "+")
+                  .replace(/_/g, "/"),
+              },
+            ],
           },
         },
         "client-bound delivery needs canonical base64url key entries",
@@ -262,9 +301,13 @@ describe("KeyDelivery", () => {
       const prepared = await delivery.prepare(
         {
           keys: {
-            contentKeys: { bodytext: base64urlEncode(raw[0]) },
-            periodKeys: { premium: { "251023T1700": base64urlEncode(raw[1]) } },
-            chainKeys: { premium: { "251023T1700": base64urlEncode(raw[2]) } },
+            contentKeys: [{ contentName: "bodytext", key: base64urlEncode(raw[0]) }],
+            periodKeys: [
+              { accessGroup: "premium", period: "251023T1700", key: base64urlEncode(raw[1]) },
+            ],
+            chainKeys: [
+              { accessGroup: "premium", cutoff: "251023T1700", key: base64urlEncode(raw[2]) },
+            ],
           },
           periodGeometry: geometry,
         },
@@ -274,21 +317,20 @@ describe("KeyDelivery", () => {
       assert.equal(prepared.transport.method, profile.METHOD);
       assert.deepEqual(prepared.periodGeometry, geometry);
       const opener = await capability.openDeliveredKeys(prepared.transport);
+      // Each record keeps its coordinate fields; only its `key` became the
+      // client-bound carrier, so the opener reads `record.key`.
+      assert.deepEqual(
+        [prepared.keys.periodKeys[0].accessGroup, prepared.keys.periodKeys[0].period],
+        ["premium", "251023T1700"],
+      );
+      assert.equal(prepared.keys.chainKeys[0].cutoff, "251023T1700");
       const content = await opener.open(
-        prepared.keys.contentKeys.bodytext,
+        prepared.keys.contentKeys[0].key,
         ["decrypt"],
         "contentKey",
       );
-      const period = await opener.open(
-        prepared.keys.periodKeys.premium["251023T1700"],
-        ["unwrapKey"],
-        "periodKey",
-      );
-      const chain = await opener.open(
-        prepared.keys.chainKeys.premium["251023T1700"],
-        [],
-        "chainKey",
-      );
+      const period = await opener.open(prepared.keys.periodKeys[0].key, ["unwrapKey"], "periodKey");
+      const chain = await opener.open(prepared.keys.chainKeys[0].key, [], "chainKey");
       for (const handle of [content, period]) {
         assert.ok(handle instanceof globalThis.CryptoKey);
         assert.equal(handle.extractable, false);
@@ -337,29 +379,61 @@ describe("KeyDelivery", () => {
       "client-bound",
       new DcaRequest({ clientPublicKey: await clientPublicKey() }),
     );
-    const notDelivered = {
-      premium: { reason: "denied" },
-      archive: { reason: "unavailable" },
-    };
-    const errors = {
-      summary: { error: "unseal_failed", message: "sealed value could not be opened" },
-    };
+    const notDelivered = [
+      { accessGroup: "premium", reason: "denied" },
+      { accessGroup: "archive", reason: "unavailable" },
+    ];
+    const errors = [
+      {
+        coordinate: "summary",
+        error: "unseal_failed",
+        message: "sealed value could not be opened",
+      },
+    ];
     const prepared = await delivery.prepare(
       {
-        keys: { contentKeys: { bodytext: base64urlEncode(new Uint8Array(16).fill(3)) } },
+        keys: {
+          contentKeys: [
+            { contentName: "bodytext", key: base64urlEncode(new Uint8Array(16).fill(3)) },
+          ],
+        },
         errors,
         notDelivered,
       },
       view,
     );
     assert.equal(Object.hasOwn(prepared.transport, "mode"), false);
-    assert.deepEqual(Object.keys(prepared.keys.contentKeys.bodytext).sort(), ["key", "nonce"]);
+    assert.deepEqual(Object.keys(prepared.keys.contentKeys[0].key).sort(), ["key", "nonce"]);
     assert.deepEqual(prepared.errors, errors);
     assert.deepEqual(prepared.notDelivered, notDelivered);
 
     // The no-key result keeps its report too.
-    const noKey = await delivery.prepare({ keys: { contentKeys: {} }, notDelivered }, view);
+    const noKey = await delivery.prepare({ keys: { contentKeys: [] }, notDelivered }, view);
     assert.deepEqual(noKey.notDelivered, notDelivered);
+  });
+
+  test("rival records at one coordinate are each wrapped and keep their order", async () => {
+    const delivery = new KeyDelivery({ random, profile: ecdhProfile });
+    const view = await delivery.preflight(
+      "client-bound",
+      new DcaRequest({ clientPublicKey: await clientPublicKey() }),
+    );
+    const rivals = [5, 6].map((fill) => base64urlEncode(new Uint8Array(16).fill(fill)));
+    const prepared = await delivery.prepare(
+      {
+        keys: {
+          contentKeys: rivals.map((key) => ({ contentName: "bodytext", key })),
+          periodKeys: rivals.map((key) => ({ accessGroup: "premium", period: "251023T1700", key })),
+        },
+      },
+      view,
+    );
+    for (const section of ["contentKeys", "periodKeys"]) {
+      assert.equal(prepared.keys[section].length, 2, section);
+      const [first, second] = prepared.keys[section];
+      assert.notDeepEqual(first.key, second.key, `${section} keeps two distinct carriers`);
+      assert.equal(JSON.stringify(prepared).includes(rivals[0]), false);
+    }
   });
 
   test("an unknown option is refused", () => {
@@ -385,7 +459,13 @@ describe("KeyDelivery", () => {
       delivery.prepare(
         {
           keys: {
-            chainKeys: { premium: { "251023T1700": base64urlEncode(new Uint8Array(17)) } },
+            chainKeys: [
+              {
+                accessGroup: "premium",
+                cutoff: "251023T1700",
+                key: base64urlEncode(new Uint8Array(17)),
+              },
+            ],
           },
         },
         view,

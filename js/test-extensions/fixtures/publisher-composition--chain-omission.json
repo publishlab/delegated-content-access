@@ -1,7 +1,7 @@
 {
   "format": "publisher-composition-record-v1",
   "scenario": "chain-key supply nested by hand into OmittingSealer, one issuer active",
-  "recordedFrom": "shared-period-geometry migration of the original hand-nested record; re-recorded 2026-10-15 for the derived content AAD, which drops item aad and reseals each item: signing input, keys, nonces and envelopes are unchanged; re-recorded 2026-10-19 via js/test-lib/fixtures/record-publisher-composition.js for fixed content nonce and renderId/name AAD; seeded key/wrap/envelope draws shift after removing item nonce draws",
+  "recordedFrom": "shared-period-geometry migration of the original hand-nested record; re-recorded 2026-10-15 for the derived content AAD, which drops item aad and reseals each item: signing input, keys, nonces and envelopes are unchanged; re-recorded 2026-10-19 via js/test-lib/fixtures/record-publisher-composition.js for fixed content nonce and renderId/name AAD; seeded key/wrap/envelope draws shift after removing item nonce draws; re-recorded 2026-10-20 via js/test-lib/fixtures/record-publisher-composition.js for the derived period-wrap nonce and { t, key } entries; seeded envelope draws shift after removing wrap nonce draws; re-recorded 2026-10-22 via js/test-lib/fixtures/record-publisher-composition.js for named-record wire collections and 97-byte ordinary ECDH envelopes with an implicit zero IV; recorded ECDH pairs are unchanged, and the IV draws were the last draws of each render, so no other draw moved",
   "input": {
     "origin": "https://www.news-site.example",
     "clockIso": "2025-10-23T14:20:00Z",
@@ -340,91 +340,127 @@
         "data": { "section": "politics" }
       },
       "periodGeometry": { "chainsPerDay": 2, "periodMinutes": 15 },
-      "contentData": {
-        "bodytext": {
+      "contentData": [
+        {
+          "contentName": "bodytext",
           "contentType": "text/html",
-          "keys": {
-            "premium": [
-              {
-                "t": "251023T1415",
-                "nonce": "Hi2AIl4pF-DnXa2r",
-                "key": "8DWP9wV3VDRYbCBjeOSMi3VxjhDySUjXrUTgF79i1UU",
-                "bind": "dca-bind-seal-omission"
-              },
-              {
-                "t": "251023T1430",
-                "nonce": "_ItgXdXJuxrs-Sdt",
-                "key": "KraiFdIGtpgAEpoRmqdxklW4k7Mzdhqj2SP0UEHaCfQ",
-                "bind": "dca-bind-seal-omission"
-              }
-            ]
-          }
+          "keys": [
+            {
+              "accessGroup": "premium",
+              "period": "251023T1415",
+              "key": "mLLv5nNBrt2sHJ1cerNMYOd7cB523EBZW-1ZVEplV-A",
+              "bind": "dca-bind-seal-omission"
+            },
+            {
+              "accessGroup": "premium",
+              "period": "251023T1430",
+              "key": "IbIfnDBmjMCqo1iZqJD0j_BDAZvIOhuBNMIv5d9CgpE",
+              "bind": "dca-bind-seal-omission"
+            }
+          ]
         },
-        "sidebar": {
+        {
+          "contentName": "sidebar",
           "contentType": "text/html",
-          "keys": {
-            "free": [
-              {
-                "t": "251023T1415",
-                "nonce": "QM7PpAgjbbbLYkZr",
-                "key": "4rIcbgrcl3b7L5gfvZphh24JFUiBrv-TaO3OGBzVJWs",
-                "bind": "dca-bind-seal-omission"
-              },
-              {
-                "t": "251023T1430",
-                "nonce": "2UXgpqe93uKrlEtw",
-                "key": "2RG7D2yZfDAxrkNz6JOujnT1U1dXbfu5B7Prz_Y9Lr8",
-                "bind": "dca-bind-seal-omission"
-              }
-            ]
-          }
+          "keys": [
+            {
+              "accessGroup": "free",
+              "period": "251023T1415",
+              "key": "JpI4YPgpzgL1s4rxbZhyvsA0cpRDU7UrpWmXb1VF5MU",
+              "bind": "dca-bind-seal-omission"
+            },
+            {
+              "accessGroup": "free",
+              "period": "251023T1430",
+              "key": "ReNvlz3QFbUaUPJIacPgexi18bmtLycZhbuOIexTpd4",
+              "bind": "dca-bind-seal-omission"
+            }
+          ]
         }
-      },
-      "issuerData": {
-        "issuer_a": {
+      ],
+      "issuerData": [
+        {
+          "issuerName": "issuer_a",
           "extensions": ["content-key-seal-omission"],
           "sealed": {
-            "periodKeys": {
-              "premium": {
-                "251023T1415": "BA7vdbttbe-f4cvGCsA9Oc1KFQfXVV4_m78l6bLS7sjdaWOHnB68jZJAPcWogfiuQZqPcVe5R4ww83NLwyX-Tlg-dfYUcVlWlutgKvTlN92zypKMBiJnPcQ1Pu-eh2JtoDJ1ddQFtY-SAg3HeQ",
-                "251023T1430": "BGoFI3nmigLXA4lFSNc3TTcNmPIhsmtZpjzFF0N5M5i-sdt3WepIIlae9y3hEFJOLU-BKYxXvtqZeJgf78ZdDcqmWHRgnPF2hAbweZ1ZvwTNkJ1qBOlifGceEwDTym-WIyDNibLfQ5pRL3_7bQ"
+            "periodKeys": [
+              {
+                "accessGroup": "premium",
+                "period": "251023T1415",
+                "key": "BA7vdbttbe-f4cvGCsA9Oc1KFQfXVV4_m78l6bLS7sjdaWOHnB68jZJAPcWogfiuQZqPcVe5R4ww83NLwyX-TlglYfAOehP14N1SHnSHeVvxjFfioyitJiIBU9ja2yi1UA"
+              },
+              {
+                "accessGroup": "premium",
+                "period": "251023T1430",
+                "key": "BGoFI3nmigLXA4lFSNc3TTcNmPIhsmtZpjzFF0N5M5i-sdt3WepIIlae9y3hEFJOLU-BKYxXvtqZeJgf78ZdDcr31SIR2pCWsSCpjUcw1E7mcyluhCRcqUdHnxivt81pSQ"
               }
-            },
-            "chainKeys": {
-              "premium": {
-                "251023T2345": "BC58aGRDtyUxVz2Bjq7AXZW2Sswc4P9Vgf6DNlzbo_tlerXaKa9MZIe1o-CrSTFSuz8Di1US8M-wiVAiD3gSnh-ia2TMsS22QzQfKGPF3LPk--7DsRS0RagAdojou8rZkuBF8JIDXlhRO_TeYQ",
-                "251024T1145": "BJn_jNKFxR3Q09siRd1QS0WGYNH3cMWld-a-kz3F6FveIfPCDVBxNNshaBeg7VwAFxC2iZkoznfwdnx3-9d9tj4vRWwgsCo3ztxuz0eGISGG5bgj8mrGmFzGbalHBF41O6PYzq3rdmD5BWfsdg"
+            ],
+            "chainKeys": [
+              {
+                "accessGroup": "premium",
+                "cutoff": "251023T2345",
+                "key": "BC58aGRDtyUxVz2Bjq7AXZW2Sswc4P9Vgf6DNlzbo_tlerXaKa9MZIe1o-CrSTFSuz8Di1US8M-wiVAiD3gSnh9QOCJWg68xjf5y-LbN_z4iZPwkstBKWDCIEib-GCCxkw"
+              },
+              {
+                "accessGroup": "premium",
+                "cutoff": "251024T1145",
+                "key": "BJn_jNKFxR3Q09siRd1QS0WGYNH3cMWld-a-kz3F6FveIfPCDVBxNNshaBeg7VwAFxC2iZkoznfwdnx3-9d9tj7PAnAHn05m-fAW3zACuOzPj89dz62aADoqQZbHBG-_KQ"
               }
-            }
+            ]
           },
           "keyId": "2025-10"
         },
-        "issuer_b": {
+        {
+          "issuerName": "issuer_b",
           "sealed": {
-            "contentKeys": {
-              "bodytext": "BLEPDgHJkm90jvy0LzoOStFb8Ey8tDa81ZeQIN8ob9CUMVOIv955nPMNE0U7jm7wvvtf9SI6J4CpPD4ITZpaBuqoLRoszziE-CeMNxfCOmgEFIUQrxH6EJKhwcsTk72hzsLwqH1K-EGgtAPeow",
-              "sidebar": "BI5Aqz7ep4MHeQEhoqLJ1OmW8qkrlogGvMZKWKmI2JRJOR-WAc6DZdAA6Pfd4Shn-v7D05ebHUW383zxJjNfohSUnWL9XH0qQ7MC3ZbJkLvDZ41ui8plQvjpTBzKo12Hl9MRyqZGiibUuckaCQ"
-            },
-            "periodKeys": {
-              "premium": {
-                "251023T1415": "BAnSO6V_qngZGIqEimCvrSRkUy_VUVEW5u-aoEpt7GsDsgMlQCLMAFkTJEiI3cnKLET2ld1pU_AtLpFVNYcqZzKUr_wXVnwdYsHhWVRCxcc_WJPkpLgE5jgZpYESHU-dBF6DePF-oKV63m0GAQ",
-                "251023T1430": "BAJd8RgctZbgY-ICyXRprOj3w83Ia9VCvDiQ7MLoQYaGPRFlSOyaPrkwb2BugWfqEZc54-7QnbOVPHzqfGefQhxjgTJjeiOoXhw1J9VJ5SZJ-YbQ08BXGma3aivfuUn_qEVRJxuBaxbJRl_tYw"
+            "contentKeys": [
+              {
+                "contentName": "bodytext",
+                "key": "BLEPDgHJkm90jvy0LzoOStFb8Ey8tDa81ZeQIN8ob9CUMVOIv955nPMNE0U7jm7wvvtf9SI6J4CpPD4ITZpaBurLN9BOG72jLKtjdFrpNQ5XJgsNqrBHrfaEpyRMgsOyyg"
               },
-              "free": {
-                "251023T1415": "BOhpBSBltpbvVJzvQXD25-TTvmvKSDpxyb92lsiH73VZ64YCj4FG-MX3P0WX-3Fs_gXtvRMaS-rYltl5zvyiDtlBzNaXACiuYBYPuEoR2sbYuiAFNjRxAemU_tuz9gDgwTdw4b_aq-ovUw9Crg",
-                "251023T1430": "BBCVIIjZz_iENEc6uI52JlkC8iCvg9XZ_bWFXfuMEgmqcXSzshxgSCNb6x99VvhX5EaGTtcU7GXSj_VMEPoj3z2zGma8sYl7xc9UMb2It1swPg2m9fdnEhCQQ2_lEIHXiiWNqQJSslkQg3B46A"
+              {
+                "contentName": "sidebar",
+                "key": "BI5Aqz7ep4MHeQEhoqLJ1OmW8qkrlogGvMZKWKmI2JRJOR-WAc6DZdAA6Pfd4Shn-v7D05ebHUW383zxJjNfohQ3ASgWfMUSAKlB61rrjCpjwaK2SI_o55Fy67LUWxx5ZA"
               }
-            },
-            "chainKeys": {
-              "premium": {
-                "251023T2345": "BM2lfdH_Of-h4_kdWI5KWjfzlUbPL-gmopGhy3rfAykGcTIA4dHxUhRfCwSCKZR6MCjjCs-mArLEQk7G2WGy4sNmsAVuSNj3N-utNmzdZp36xUvmZ8SGADtGFzdw6YZ7KLd52SXPPeZ59BpsFw",
-                "251024T1145": "BDHsrgIdX-2gn7OkTm9MxcrCctkT9Ivcjd7WExiKmrbg0jkfJh11eeEM1-juSb5cRFEy-tSUCrCLjvDuyHdgLdeaRTa4qQoD9JYQUqjlktcawwAsuSW7E7jO_TwhQHYJgxbr4MhPmBgQF9F1vg"
+            ],
+            "periodKeys": [
+              {
+                "accessGroup": "premium",
+                "period": "251023T1415",
+                "key": "BAnSO6V_qngZGIqEimCvrSRkUy_VUVEW5u-aoEpt7GsDsgMlQCLMAFkTJEiI3cnKLET2ld1pU_AtLpFVNYcqZzL211mbVCen4-uwQXlPJ6baNFVQA8D9V-oqiwt7zDFuBw"
+              },
+              {
+                "accessGroup": "premium",
+                "period": "251023T1430",
+                "key": "BAJd8RgctZbgY-ICyXRprOj3w83Ia9VCvDiQ7MLoQYaGPRFlSOyaPrkwb2BugWfqEZc54-7QnbOVPHzqfGefQhxx4EFjAhEW3PNACtMICphP1a5kgzBI5Z5Khaqph52j8w"
+              },
+              {
+                "accessGroup": "free",
+                "period": "251023T1415",
+                "key": "BOhpBSBltpbvVJzvQXD25-TTvmvKSDpxyb92lsiH73VZ64YCj4FG-MX3P0WX-3Fs_gXtvRMaS-rYltl5zvyiDtn3MErJjfWTiZGyFZjylOSKeGzbKqaD39Eku-G-U60X8g"
+              },
+              {
+                "accessGroup": "free",
+                "period": "251023T1430",
+                "key": "BBCVIIjZz_iENEc6uI52JlkC8iCvg9XZ_bWFXfuMEgmqcXSzshxgSCNb6x99VvhX5EaGTtcU7GXSj_VMEPoj3z31EJn6m4RTkJ2VWAn3h9QjVxmyO_XUY2gAiUmcfLvBhA"
               }
-            }
+            ],
+            "chainKeys": [
+              {
+                "accessGroup": "premium",
+                "cutoff": "251023T2345",
+                "key": "BM2lfdH_Of-h4_kdWI5KWjfzlUbPL-gmopGhy3rfAykGcTIA4dHxUhRfCwSCKZR6MCjjCs-mArLEQk7G2WGy4sOGYMNQz9fLGJtFTDEgyYdYr5M7WgB2Cz23kqv39ROI-Q"
+              },
+              {
+                "accessGroup": "premium",
+                "cutoff": "251024T1145",
+                "key": "BDHsrgIdX-2gn7OkTm9MxcrCctkT9Ivcjd7WExiKmrbg0jkfJh11eeEM1-juSb5cRFEy-tSUCrCLjvDuyHdgLddzNbfsW8HxbZOZiPr8ggRecjerXrfRez8YhhvKZR1MIw"
+              }
+            ]
           },
           "keyId": "2025-10"
         }
-      }
+      ]
     },
     "sealedContent": {
       "bodytext": "W3VhkGXwN20kZd7heaf0OBl9Jj49aax1uZLNUmXIZ_jM99xbEC6eIUldFCjtWFVwUBdNjffQFdpKJA2Fxj3UTm7sEQ",

@@ -79,16 +79,17 @@ test("a call ends only on the driver's clock, and its timeout always breaks the 
   const { pidFile, script } = hangingAdapter(directory);
   const binding = new ProcessBinding(
     defineBridge({ id: "hanging", command: process.execPath, arguments: [script] }),
-    { timeout: 1000 },
+    { timeout: 10_000 },
   );
   try {
     await binding.start();
-    // The worker started while the binding's timeout was 1000 ms.
-    binding.timeout = 2500;
+    // The startup budget also tolerates a loaded integration runner. Raising
+    // the call budget still exposes any stale worker-side startup clock.
+    binding.timeout = 11_500;
     binding.operations.set("op-1", { id: "op-1", sourceExport: "stuck", callShape: "sync" });
     const started = performance.now();
     assert.throws(() => binding.call("op-1", [1]), /timeout/);
-    assert.ok(performance.now() - started >= 2400, "the driver's wait decided the timeout");
+    assert.ok(performance.now() - started >= 11_400, "the driver's wait decided the timeout");
     assert.throws(() => binding.call("op-1", [1]), /broken/);
     const pid = Number(readFileSync(pidFile, "utf8"));
     for (let attempt = 0; attempt < 50 && alive(pid); attempt += 1) await delay(20);

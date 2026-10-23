@@ -23,11 +23,28 @@ import {
   settleComposedSections,
 } from "../../../core-shared--client-issuer/responseKeys.js";
 import { KIND_DESCRIPTORS, RESPONSE_SECTIONS } from "../core-shared--client-issuer/request.js";
+import { sealSeed } from "../core-shared/seed-envelope.js";
+import { contentNameSeedAad } from "../core-shared/construction.js";
+import {
+  connectorOf,
+  connectorsOf,
+  contentKeyRecords,
+  cutoffRecords,
+  find,
+  groupRecords,
+  issuerBlock,
+  itemRecords,
+  keysAt,
+  sealedContentKey,
+  seedOf,
+  seedRecords,
+} from "./_lib/records.js";
 
 const subtle = globalThis.crypto.subtle;
 const ORIGIN = "https://news.example";
 const GEOMETRY = Object.freeze({ chainsPerDay: 2, periodMinutes: 60 });
 const SECRET = Uint8Array.from({ length: 32 }, (_, i) => i);
+const RIVAL_SECRET = Uint8Array.from({ length: 32 }, (_, i) => 255 - i);
 const AT = "2026-10-14T14:20:00Z";
 const W12 = "261014T1200";
 const W00 = "261015T0000";
@@ -121,43 +138,91 @@ async function world() {
       },
     },
   };
+  const renderId = JSON.parse(
+    Buffer.from(dcaData.resourceJWT.split(".")[1], "base64url").toString(),
+  ).renderId;
+  /**
+   * A seed envelope for issuerA at a real coordinate, sealed from another
+   * retained secret: it opens under the same AAD and derives different keys.
+   * @param {string} contentName @param {string} window
+   */
+  const rivalSeed = async (contentName, window) => {
+    const seed = await contentNameSeed(
+      RIVAL_SECRET,
+      ORIGIN,
+      GEOMETRY,
+      contentName,
+      window,
+      DERIVING_CHAIN,
+    );
+    const aad = await contentNameSeedAad(
+      {
+        publisher: ORIGIN,
+        renderId,
+        issuerName: "issuerA",
+        contentName,
+        windowStartLabel: window,
+        periodGeometry: GEOMETRY,
+      },
+      DERIVING_CHAIN,
+    );
+    return sealSeed(seed, keys.issuerA.publicKey, aad);
+  };
   return {
     page: /** @type {any} */ (dcaData),
     sealedContent,
     registration,
+    renderId,
+    rivalSeed,
     verifierReads: () => verifierReads,
   };
 }
 
-/** A relayed request for one issuer, written out as the wire carries it. */
+/**
+ * A relayed request for one issuer, written out as the wire carries it. Short
+ * literal maps become the request's records; an array passes through as the
+ * records it already is.
+ */
 function request(
   /** @type {any} */ page,
   issuerName,
   extra = /** @type {Record<string, any>} */ ({}),
 ) {
-  const issuer = page.issuerData[issuerName];
-  const { seeds, contentKeys, ...rest } = extra;
+  const issuer = issuerBlock(page, issuerName);
+  const {
+    seeds,
+    contentKeys,
+    requestedContentGroups,
+    requestedContentKeys,
+    requestedChainCutoffs,
+    ...rest
+  } = extra;
+  /** @param {any} value @param {(map: any) => any[]} records */
+  const asRecords = (value, records) =>
+    value === undefined ? undefined : Array.isArray(value) ? value : records(value);
+  const groups = asRecords(requestedContentGroups, groupRecords);
+  const items = asRecords(requestedContentKeys, itemRecords);
+  const cutoffs = asRecords(requestedChainCutoffs, cutoffRecords);
+  const asked = new Set([...(groups ?? []), ...(items ?? [])].map((r) => r.contentName));
   return {
     version: "1",
     issuerName,
     keyId: issuer.keyId,
     resourceJWT: page.resourceJWT,
     sealed: {
-      contentKeys: contentKeys ?? {},
+      contentKeys: contentKeyRecords(contentKeys ?? {}),
       // By default the request carries exactly the seeds of the names it
-      // requests, as the client builds it.
+      // requests, as the client builds it. A copy, so a test that edits a
+      // request record leaves the page intact for the next request.
       contentWindowSeeds:
         seeds ??
-        Object.fromEntries(
-          Object.entries(issuer.sealed.contentWindowSeeds).filter(
-            ([name]) =>
-              Object.hasOwn(rest.requestedContentGroups ?? {}, name) ||
-              Object.hasOwn(rest.requestedContentKeys ?? {}, name),
-          ),
-        ),
+        structuredClone(seedRecords(page, issuerName).filter((r) => asked.has(r.contentName))),
     },
     renderPeriod: page.renderPeriod,
     periodGeometry: page.periodGeometry,
+    ...(groups === undefined ? {} : { requestedContentGroups: groups }),
+    ...(items === undefined ? {} : { requestedContentKeys: items }),
+    ...(cutoffs === undefined ? {} : { requestedChainCutoffs: cutoffs }),
     ...rest,
   };
 }
@@ -206,8 +271,8 @@ async function send(w, core, body) {
 }
 
 /** @param {string} contentName @param {string} window */
-async function handleOf(contentName, window) {
-  const seed = await contentNameSeed(SECRET, ORIGIN, GEOMETRY, contentName, window, DERIVING_CHAIN);
+async function handleOf(contentName, window, secret = SECRET) {
+  const seed = await contentNameSeed(secret, ORIGIN, GEOMETRY, contentName, window, DERIVING_CHAIN);
   return seedHandle(seed, GEOMETRY, window, DERIVING_CHAIN);
 }
 
@@ -222,8 +287,8 @@ async function refusalSecrets(/** @type {any} */ page, contentName, group) {
       Buffer.from(page.resourceJWT.split(".")[1], "base64url").toString(),
     ).renderId;
     const pad = await itemPad(periodKey, { renderId, contentName });
-    const recovered = Object.values(page.contentData[contentName].connectors).map((connector) =>
-      xor16(base64urlDecode(/** @type {string} */ (connector)), pad),
+    const recovered = connectorsOf(page, contentName).map(({ connector }) =>
+      xor16(base64urlDecode(connector), pad),
     );
     return [SECRET, seed, periodKey, chainKey, pad, ...recovered];
   } finally {
@@ -241,6 +306,17 @@ function assertNoSecretText(text, secrets) {
       Array.from(bytes).join(","),
     ])
       assert.ok(!text.includes(spelling), "a refusal disclosed secret or derived key bytes");
+}
+
+/** The one content-group candidate for one item. @param {any} body @param {string} contentName */
+function groupItemKey(body, contentName) {
+  const keys = keysAt(body?.contentGroupKeys?.contentKeys, { contentName });
+  assert.equal(keys.length, 1, `one candidate for ${contentName}`);
+  return keys[0];
+}
+/** The base content key for one item. @param {any} body @param {string} contentName */
+function baseItemKey(body, contentName) {
+  return find(body?.keys?.contentKeys, { contentName })?.key;
 }
 
 /** Open the genuine body with the candidate returned for one item. */
@@ -265,28 +341,33 @@ test("one exchange answers chain, period and item grants under the annex member 
   const body = request(w.page, "issuerA", {
     requestedContentGroups: { bodytext: ["politics"], headline: ["politics"] },
     requestedContentKeys: {
-      bodytext: { group: "sports", connector: w.page.contentData.bodytext.connectors.sports },
+      bodytext: { group: "sports", connector: connectorOf(w.page, "bodytext", "sports") },
     },
-    contentKeys: { purchase: w.page.issuerData.issuerA.sealed.contentKeys.purchase },
+    contentKeys: { purchase: sealedContentKey(w.page, "issuerA", "purchase") },
   });
   const { response } = await send(w, core, body);
   assert.equal(response.status, 200);
   const answer = /** @type {any} */ (response.body);
-  assert.deepEqual(Object.keys(answer), ["keys", "contentGroups"]);
+  assert.deepEqual(Object.keys(answer), ["keys", "contentGroupKeys"]);
   assert.equal(Object.hasOwn(answer, "periodGeometry"), false);
-  assert.ok(answer.keys.contentKeys.purchase);
+  assert.ok(baseItemKey(answer, "purchase"));
 
   const bodytext = await handleOf("bodytext", W12);
   const headline = await handleOf("headline", W12);
   const chain = await bodytext.chainKey("politics", T18);
-  assert.deepEqual(answer.contentGroups.chainKeys, {
-    bodytext: { politics: { [T18]: base64urlEncode(chain.key) } },
-  });
-  assert.deepEqual(answer.contentGroups.periodKeys, {
-    headline: { politics: { [T15]: base64urlEncode(await headline.periodKey("politics", T15)) } },
-  });
+  assert.deepEqual(answer.contentGroupKeys.chainKeys, [
+    { contentName: "bodytext", group: "politics", cutoff: T18, key: base64urlEncode(chain.key) },
+  ]);
+  assert.deepEqual(answer.contentGroupKeys.periodKeys, [
+    {
+      contentName: "headline",
+      group: "politics",
+      period: T15,
+      key: base64urlEncode(await headline.periodKey("politics", T15)),
+    },
+  ]);
   // The recovered item key opens the body under its derived content AAD.
-  const key = base64urlDecode(answer.contentGroups.contentKeys.bodytext);
+  const key = base64urlDecode(groupItemKey(answer, "bodytext"));
   const aad = /** @type {Uint8Array} */ (contentAadOctets(w.page, "bodytext"));
   const plain = await decrypt(
     key,
@@ -376,36 +457,34 @@ test("response source methods keep their original receiver and captured function
 
     const body = request(w.page, "issuerA", {
       requestedContentKeys: {
-        bodytext: { group: "sports", connector: w.page.contentData.bodytext.connectors.sports },
+        bodytext: { group: "sports", connector: connectorOf(w.page, "bodytext", "sports") },
       },
-      contentKeys: { purchase: w.page.issuerData.issuerA.sealed.contentKeys.purchase },
+      contentKeys: { purchase: sealedContentKey(w.page, "issuerA", "purchase") },
     });
     if (route === "direct") {
       const result = await core.unlock(new DcaRequest(body), w.registration);
-      assert.ok(result.contentKeys.purchase);
-      assert.equal(
-        new TextDecoder().decode(await openCandidate(w, "purchase", result.contentKeys.purchase)),
-        "buy",
-      );
+      const purchase = find(result.contentKeys, { contentName: "purchase" })?.key;
+      assert.ok(purchase);
+      assert.equal(new TextDecoder().decode(await openCandidate(w, "purchase", purchase)), "buy");
       assert.equal(
         new TextDecoder().decode(
-          await openCandidate(w, "bodytext", result.sections.contentGroups.contentKeys.bodytext),
+          await openCandidate(w, "bodytext", groupItemKey(result.sections, "bodytext")),
         ),
         "body text",
       );
     } else {
       const { response } = await core.endpoint.handleDocument(JSON.stringify(body), w.registration);
       assert.equal(response.status, 200);
-      assert.ok(response.body.keys.contentKeys.purchase);
+      assert.ok(baseItemKey(response.body, "purchase"));
       assert.equal(
         new TextDecoder().decode(
-          await openCandidate(w, "purchase", response.body.keys.contentKeys.purchase),
+          await openCandidate(w, "purchase", baseItemKey(response.body, "purchase")),
         ),
         "buy",
       );
       assert.equal(
         new TextDecoder().decode(
-          await openCandidate(w, "bodytext", response.body.contentGroups.contentKeys.bodytext),
+          await openCandidate(w, "bodytext", groupItemKey(response.body, "bodytext")),
         ),
         "body text",
       );
@@ -453,17 +532,20 @@ test("a captured contribution predicate admits and opens content without an ordi
   };
   const body = request(w.page, "issuerA", {
     requestedContentKeys: {
-      bodytext: { group: "sports", connector: w.page.contentData.bodytext.connectors.sports },
+      bodytext: { group: "sports", connector: connectorOf(w.page, "bodytext", "sports") },
     },
   });
-  assert.deepEqual(body.sealed.contentKeys, {}, "ordinary admission must not mask the predicate");
+  assert.deepEqual(body.sealed.contentKeys, [], "ordinary admission must not mask the predicate");
   const { response } = await core.endpoint.handleDocument(JSON.stringify(body), w.registration);
   assert.equal(response.status, 200);
-  assert.deepEqual(response.body.keys.contentKeys, {});
-  assert.deepEqual(Object.keys(response.body.contentGroups.contentKeys), ["bodytext"]);
+  assert.deepEqual(response.body.keys.contentKeys, []);
+  assert.deepEqual(
+    response.body.contentGroupKeys.contentKeys.map((/** @type {any} */ r) => r.contentName),
+    ["bodytext"],
+  );
   assert.equal(
     new TextDecoder().decode(
-      await openCandidate(w, "bodytext", response.body.contentGroups.contentKeys.bodytext),
+      await openCandidate(w, "bodytext", groupItemKey(response.body, "bodytext")),
     ),
     "body text",
   );
@@ -528,9 +610,9 @@ test("a requested cutoff lowers the policy cutoff and caps period grants", async
     }),
   );
   const chain = await (await handleOf("bodytext", W12)).chainKey("politics", T14);
-  assert.deepEqual(/** @type {any} */ (response.body).contentGroups.chainKeys.bodytext.politics, {
-    [T14]: base64urlEncode(chain.key),
-  });
+  assert.deepEqual(/** @type {any} */ (response.body).contentGroupKeys.chainKeys, [
+    { contentName: "bodytext", group: "politics", cutoff: T14, key: base64urlEncode(chain.key) },
+  ]);
   const beyond = issuer({
     grants: () => [{ kind: "period", contentName: "bodytext", group: "politics", t: T15 }],
   });
@@ -550,35 +632,35 @@ test("an authorized changed connector returns a candidate that cannot open the g
   const core = issuer({ grants: () => [{ kind: "item", contentName: "bodytext" }] });
   const body = request(w.page, "issuerA", {
     requestedContentKeys: {
-      bodytext: { group: "sports", connector: w.page.contentData.bodytext.connectors.sports },
+      bodytext: { group: "sports", connector: connectorOf(w.page, "bodytext", "sports") },
     },
   });
   const genuine = await send(w, core, body);
   assert.equal(genuine.response.status, 200);
   assert.equal(
     new TextDecoder().decode(
-      await openCandidate(w, "bodytext", genuine.response.body.contentGroups.contentKeys.bodytext),
+      await openCandidate(w, "bodytext", groupItemKey(genuine.response.body, "bodytext")),
     ),
     "body text",
   );
   for (const connector of [
-    w.page.contentData.bodytext.connectors.politics,
+    connectorOf(w.page, "bodytext", "politics"),
     base64urlEncode(new Uint8Array(16)),
   ]) {
     const changed = structuredClone(body);
-    changed.requestedContentKeys.bodytext.connector = connector;
+    changed.requestedContentKeys[0].connector = connector;
     const result = await send(w, core, changed);
     assert.equal(result.response.status, 200);
     await assert.rejects(
-      openCandidate(w, "bodytext", result.response.body.contentGroups.contentKeys.bodytext),
+      openCandidate(w, "bodytext", groupItemKey(result.response.body, "bodytext")),
       { name: "OperationError" },
     );
   }
   const denied = await send(w, issuer(), body);
   assert.equal(denied.code, "denied");
-  assert.equal(Object.hasOwn(denied.response.body, "contentGroups"), false);
+  assert.equal(Object.hasOwn(denied.response.body, "contentGroupKeys"), false);
   const malformed = structuredClone(body);
-  malformed.requestedContentKeys.bodytext.connector = base64urlEncode(new Uint8Array(15));
+  malformed.requestedContentKeys[0].connector = base64urlEncode(new Uint8Array(15));
   assert.equal((await send(w, core, malformed)).code, "binding_failed");
 });
 
@@ -592,22 +674,21 @@ test("a wrong candidate for one item does not suppress an authorized sibling can
   });
   const body = request(w.page, "issuerA", {
     requestedContentKeys: {
-      bodytext: { group: "sports", connector: w.page.contentData.bodytext.connectors.sports },
-      headline: { group: "politics", connector: w.page.contentData.bodytext.connectors.politics },
+      bodytext: { group: "sports", connector: connectorOf(w.page, "bodytext", "sports") },
+      headline: { group: "politics", connector: connectorOf(w.page, "bodytext", "politics") },
     },
   });
   const { response } = await send(w, core, body);
   assert.equal(response.status, 200);
   assert.equal(
     new TextDecoder().decode(
-      await openCandidate(w, "bodytext", response.body.contentGroups.contentKeys.bodytext),
+      await openCandidate(w, "bodytext", groupItemKey(response.body, "bodytext")),
     ),
     "body text",
   );
-  await assert.rejects(
-    openCandidate(w, "headline", response.body.contentGroups.contentKeys.headline),
-    { name: "OperationError" },
-  );
+  await assert.rejects(openCandidate(w, "headline", groupItemKey(response.body, "headline")), {
+    name: "OperationError",
+  });
 });
 
 test("client-bound delivery wraps every content-group key the processor answered", async () => {
@@ -625,7 +706,7 @@ test("client-bound delivery wraps every content-group key the processor answered
     request(w.page, "issuerA", {
       requestedContentGroups: { bodytext: ["politics"], headline: ["politics"] },
       requestedContentKeys: {
-        bodytext: { group: "sports", connector: w.page.contentData.bodytext.connectors.sports },
+        bodytext: { group: "sports", connector: connectorOf(w.page, "bodytext", "sports") },
       },
     }),
   );
@@ -653,7 +734,7 @@ test("client-bound delivery wraps every content-group key the processor answered
     version: "1",
     issuerName: "issuerA",
     clientPublicKey: { kty: "EC", crv: "P-256", x: "x", y: "y" },
-    sealed: { contentKeys: {} },
+    sealed: { contentKeys: [] },
   });
   const view = await delivery.preflight("client-bound", clientRequest);
   const out = /** @type {any} */ (await delivery.prepare(/** @type {any} */ (response.body), view));
@@ -662,7 +743,7 @@ test("client-bound delivery wraps every content-group key the processor answered
   for (const { key } of keys)
     assert.equal(typeof key, "object", "a content-group key went unwrapped");
   assert.deepEqual(wraps.sort(), ["contentGroupChainKey", "contentGroupPeriodKey", "contentKey"]);
-  assert.equal(typeof out.contentGroups.chainKeys.bodytext.politics[T18], "object");
+  assert.equal(typeof find(out.contentGroupKeys.chainKeys, { cutoff: T18 })?.key, "object");
 });
 
 test("every opened seed copy is zeroed when the unlock ends, answered or refused", async () => {
@@ -679,7 +760,7 @@ test("every opened seed copy is zeroed when the unlock ends, answered or refused
   const body = request(w.page, "issuerA", {
     requestedContentGroups: { bodytext: ["politics"], headline: ["politics"] },
     requestedContentKeys: {
-      bodytext: { group: "sports", connector: w.page.contentData.bodytext.connectors.sports },
+      bodytext: { group: "sports", connector: connectorOf(w.page, "bodytext", "sports") },
     },
   });
   const { response } = await send(w, core, body);
@@ -689,9 +770,10 @@ test("every opened seed copy is zeroed when the unlock ends, answered or refused
   // A later seed fails authentication; earlier opened copies are zeroed as well.
   recorded.secrets.length = 0;
   const swapped = structuredClone(body);
-  const corrupted = base64urlDecode(swapped.sealed.contentWindowSeeds.headline[W12]);
+  const seed = find(swapped.sealed.contentWindowSeeds, { contentName: "headline" });
+  const corrupted = base64urlDecode(seed.key);
   corrupted[80] ^= 1;
-  swapped.sealed.contentWindowSeeds.headline[W12] = base64urlEncode(corrupted);
+  seed.key = base64urlEncode(corrupted);
   const refused = await send(w, core, swapped);
   assert.equal(refused.code, "binding_failed");
   assert.ok(allZeroed(recorded.secrets), "a refused unlock left a seed copy");
@@ -705,13 +787,20 @@ test("a seed envelope that does not open after another opened refuses the whole 
       { kind: "chain", contentName: "headline", group: "politics", windowStart: W12, cutoffT: T14 },
     ],
   });
-  const seeds = structuredClone(w.page.issuerData.issuerA.sealed.contentWindowSeeds);
+  const seeds = structuredClone(seedRecords(w.page, "issuerA")).filter(
+    (r) => r.contentName === "bodytext" || r.contentName === "headline",
+  );
   // issuerB's envelope for headline is bound to issuerB and does not open here.
-  seeds.headline[W12] = w.page.issuerData.issuerB.sealed.contentWindowSeeds.headline[W12];
+  /** @type {any} */ (find(seeds, { contentName: "headline", windowStart: W12 })).key = seedOf(
+    w.page,
+    "issuerB",
+    "headline",
+    W12,
+  );
   const body = request(w.page, "issuerA", {
     seeds,
     requestedContentGroups: { bodytext: ["politics"], headline: ["politics"] },
-    contentKeys: { purchase: w.page.issuerData.issuerA.sealed.contentKeys.purchase },
+    contentKeys: { purchase: sealedContentKey(w.page, "issuerA", "purchase") },
   });
   const secrets = [
     ...(await refusalSecrets(w.page, "bodytext", "politics")),
@@ -764,9 +853,9 @@ test("a retired opening key answers 200 with key_retired at every authorized sco
     requestedContentGroups: { bodytext: ["politics"], headline: ["politics"] },
     requestedChainCutoffs: { [W12]: T15, [W00]: "261015T0300" },
     requestedContentKeys: {
-      bodytext: { group: "sports", connector: w.page.contentData.bodytext.connectors.sports },
+      bodytext: { group: "sports", connector: connectorOf(w.page, "bodytext", "sports") },
     },
-    contentKeys: { purchase: w.page.issuerData.issuerA.sealed.contentKeys.purchase },
+    contentKeys: { purchase: sealedContentKey(w.page, "issuerA", "purchase") },
   });
   const { response } = await core.endpoint.handleDocument(
     JSON.stringify(body),
@@ -774,13 +863,19 @@ test("a retired opening key answers 200 with key_retired at every authorized sco
   );
   assert.equal(response.status, 200);
   const answer = /** @type {any} */ (response.body);
-  assert.equal(answer.errors.purchase.error, "key_retired");
+  assert.equal(find(answer.errors, { coordinate: "purchase" })?.error, "key_retired");
   // The chain error is named by the served cutoff: the request's T15 ceiling.
-  assert.deepEqual(answer.contentGroups, {
+  assert.deepEqual(answer.contentGroupKeys, {
     errors: {
-      chainKeys: { bodytext: { politics: { [T15]: RETIRED, "261015T0300": RETIRED } } },
-      periodKeys: { headline: { politics: { [T13]: RETIRED, [T15]: RETIRED } } },
-      contentKeys: { bodytext: RETIRED },
+      chainKeys: [
+        { contentName: "bodytext", group: "politics", cutoff: T15, ...RETIRED },
+        { contentName: "bodytext", group: "politics", cutoff: "261015T0300", ...RETIRED },
+      ],
+      periodKeys: [
+        { contentName: "headline", group: "politics", period: T13, ...RETIRED },
+        { contentName: "headline", group: "politics", period: T15, ...RETIRED },
+      ],
+      contentKeys: [{ contentName: "bodytext", ...RETIRED }],
     },
   });
 });
@@ -796,8 +891,10 @@ test("a seed-only request under a retired key keeps its scoped retirement", asyn
     /** @type {any} */ (retiredRegistration(w)),
   );
   assert.equal(response.status, 200);
-  assert.deepEqual(/** @type {any} */ (response.body).contentGroups, {
-    errors: { periodKeys: { headline: { politics: { [T14]: RETIRED } } } },
+  assert.deepEqual(/** @type {any} */ (response.body).contentGroupKeys, {
+    errors: {
+      periodKeys: [{ contentName: "headline", group: "politics", period: T14, ...RETIRED }],
+    },
   });
   // A denied request stays a denial; retirement is reported only for grants.
   const denying = issuer({ grants: () => [] });
@@ -813,7 +910,7 @@ test("a retired seed opening reports its coordinates while sibling grants keep t
   // retires together. This drives the source directly with an opener that
   // retires two seeds and opens the third, to show the siblings survive.
   const w = await world();
-  const seeds = w.page.issuerData.issuerA.sealed.contentWindowSeeds;
+  const bodytextW12 = seedOf(w.page, "issuerA", "bodytext", W12);
   const contribution = contentGroupsIssuerContribution({
     chain: DERIVING_CHAIN,
     policy: {
@@ -847,8 +944,8 @@ test("a retired seed opening reports its coordinates while sibling grants keep t
     request(w.page, "issuerA", {
       requestedContentGroups: { bodytext: ["politics"], headline: ["politics"] },
       requestedContentKeys: {
-        bodytext: { group: "sports", connector: w.page.contentData.bodytext.connectors.sports },
-        headline: { group: "politics", connector: w.page.contentData.headline.connectors.politics },
+        bodytext: { group: "sports", connector: connectorOf(w.page, "bodytext", "sports") },
+        headline: { group: "politics", connector: connectorOf(w.page, "headline", "politics") },
       },
     }),
   );
@@ -859,25 +956,26 @@ test("a retired seed opening reports its coordinates while sibling grants keep t
       policyInput: { publisher: { origin: ORIGIN } },
       invocation: {},
       openAuxiliary: async (/** @type {unknown} */ sealed) =>
-        sealed === seeds.bodytext[W12]
+        sealed === bodytextW12
           ? { bytes: Uint8Array.from(opened) }
           : { error: { error: "key_retired", message: "retired" } },
     })
   );
   const bodytext = await handleOf("bodytext", W12);
-  assert.deepEqual(answer.contentGroups.chainKeys, {
-    bodytext: {
-      politics: {
-        [T18]: base64urlEncode((await bodytext.chainKey("politics", T18)).key),
-      },
+  assert.deepEqual(answer.contentGroupKeys.chainKeys, [
+    {
+      contentName: "bodytext",
+      group: "politics",
+      cutoff: T18,
+      key: base64urlEncode((await bodytext.chainKey("politics", T18)).key),
     },
-  });
-  assert.ok(answer.contentGroups.contentKeys.bodytext);
-  assert.equal(Object.hasOwn(answer.contentGroups, "periodKeys"), false);
-  assert.deepEqual(answer.contentGroups.errors, {
-    chainKeys: { bodytext: { politics: { "261015T0300": RETIRED } } },
-    periodKeys: { headline: { politics: { [T15]: RETIRED } } },
-    contentKeys: { headline: RETIRED },
+  ]);
+  assert.ok(groupItemKey(answer, "bodytext"));
+  assert.equal(Object.hasOwn(answer.contentGroupKeys, "periodKeys"), false);
+  assert.deepEqual(answer.contentGroupKeys.errors, {
+    chainKeys: [{ contentName: "bodytext", group: "politics", cutoff: "261015T0300", ...RETIRED }],
+    periodKeys: [{ contentName: "headline", group: "politics", period: T15, ...RETIRED }],
+    contentKeys: [{ contentName: "headline", ...RETIRED }],
   });
   // Another failure under the same opener still refuses the whole exchange.
   await assert.rejects(
@@ -895,22 +993,24 @@ test("a retired seed opening reports its coordinates while sibling grants keep t
 test("a requested name without a seed, or a seed nothing requests, refuses before the verifier runs", async () => {
   const w = await world();
   const core = issuer({ grants: () => [] });
-  const seeds = w.page.issuerData.issuerA.sealed.contentWindowSeeds;
+  /** @param {string[]} names */
+  const seeds = (names) =>
+    seedRecords(w.page, "issuerA").filter((r) => names.includes(r.contentName));
   for (const body of [
     request(w.page, "issuerA", {
       requestedContentGroups: { bodytext: ["politics"], headline: ["politics"] },
-      seeds: { headline: seeds.headline },
+      seeds: seeds(["headline"]),
     }),
     request(w.page, "issuerA", {
       requestedContentGroups: { bodytext: ["politics"] },
-      seeds: { bodytext: seeds.bodytext, headline: seeds.headline },
+      seeds: seeds(["bodytext", "headline"]),
     }),
   ]) {
     const refused = await send(w, core, body);
     assert.equal(
       refused.code,
       "binding_failed",
-      JSON.stringify(Object.keys(body.sealed.contentWindowSeeds)),
+      JSON.stringify(body.sealed.contentWindowSeeds.map((r) => r.contentName)),
     );
   }
   assert.equal(w.verifierReads(), 0);
@@ -1015,7 +1115,7 @@ for (const [label, extra, grants, code] of /** @type {[string, any, any, string]
       requestedContentKeys: {
         headline: { group: "politics", connector: "AAAAAAAAAAAAAAAAAAAAAA" },
       },
-      seeds: {},
+      seeds: [],
     },
     [],
     "binding_failed",
@@ -1077,36 +1177,30 @@ test("item-only requests admit every supplied seed window before policy", async 
   for (const label of [T15, "not-a-window"]) {
     const core = issuer({ grants: () => [{ kind: "item", contentName: "bodytext" }] });
     const body = request(w.page, "issuerA", {
-      seeds: structuredClone({
-        bodytext: w.page.issuerData.issuerA.sealed.contentWindowSeeds.bodytext,
-      }),
       requestedContentKeys: {
-        bodytext: { group: "sports", connector: w.page.contentData.bodytext.connectors.sports },
+        bodytext: { group: "sports", connector: connectorOf(w.page, "bodytext", "sports") },
       },
     });
-    const windows = body.sealed.contentWindowSeeds.bodytext;
-    windows[label] = windows[W00];
-    delete windows[W00];
+    find(body.sealed.contentWindowSeeds, { windowStart: W00 }).windowStart = label;
     const result = await send(w, core, body);
     assert.equal(result.code, "binding_failed", label);
     assert.equal(core.calls.decide.length, 0, "malformed unused windows refuse before policy");
   }
   const core = issuer({ grants: () => [{ kind: "item", contentName: "bodytext" }] });
   const body = request(w.page, "issuerA", {
-    seeds: structuredClone({
-      bodytext: w.page.issuerData.issuerA.sealed.contentWindowSeeds.bodytext,
-    }),
     requestedContentKeys: {
-      bodytext: { group: "sports", connector: w.page.contentData.bodytext.connectors.sports },
+      bodytext: { group: "sports", connector: connectorOf(w.page, "bodytext", "sports") },
     },
   });
   // An aligned unused alternative is admitted without opening its ciphertext.
-  body.sealed.contentWindowSeeds.bodytext[W00] = base64urlEncode(new Uint8Array(125));
+  find(body.sealed.contentWindowSeeds, { windowStart: W00 }).key = base64urlEncode(
+    new Uint8Array(113),
+  );
   const result = await send(w, core, body);
   assert.equal(result.response.status, 200);
   assert.equal(
     new TextDecoder().decode(
-      await openCandidate(w, "bodytext", result.response.body.contentGroups.contentKeys.bodytext),
+      await openCandidate(w, "bodytext", groupItemKey(result.response.body, "bodytext")),
     ),
     "body text",
   );
@@ -1116,7 +1210,7 @@ test("content-group policy decisions require the declared authorizer even for it
   const w = await world();
   const body = request(w.page, "issuerA", {
     requestedContentKeys: {
-      bodytext: { group: "politics", connector: w.page.contentData.bodytext.connectors.politics },
+      bodytext: { group: "politics", connector: connectorOf(w.page, "bodytext", "politics") },
     },
   });
   for (const decision of [null, {}, { grants: [{ kind: "item", contentName: "bodytext" }] }]) {
@@ -1144,18 +1238,25 @@ test("content-group response accepts exactly the configured member limit", async
     }),
   );
   assert.equal(answer.response.status, 200);
-  assert.deepEqual(Object.keys(answer.response.body.contentGroups.periodKeys).sort(), [
-    "bodytext",
-    "headline",
-  ]);
+  assert.deepEqual(
+    answer.response.body.contentGroupKeys.periodKeys
+      .map((/** @type {any} */ r) => r.contentName)
+      .sort(),
+    ["bodytext", "headline"],
+  );
 });
 
 test("unused malformed seed envelopes and absent render-window seeds refuse before policy", async () => {
   for (const malformedEnvelope of [true, false]) {
     const w = await world();
-    const seeds = structuredClone(w.page.issuerData.issuerA.sealed.contentWindowSeeds.bodytext);
-    if (malformedEnvelope) seeds[W00] = base64urlEncode(new Uint8Array(124));
-    else delete seeds[W12];
+    const seeds = structuredClone(seedRecords(w.page, "issuerA")).filter(
+      (r) => r.contentName === "bodytext",
+    );
+    if (malformedEnvelope)
+      /** @type {any} */ (find(seeds, { windowStart: W00 })).key = base64urlEncode(
+        new Uint8Array(124),
+      );
+    else seeds.splice(seeds.indexOf(/** @type {any} */ (find(seeds, { windowStart: W12 }))), 1);
     const core = issuer({ grants: () => [] });
     const extra = malformedEnvelope
       ? { requestedContentGroups: { bodytext: ["politics"] } }
@@ -1163,7 +1264,7 @@ test("unused malformed seed envelopes and absent render-window seeds refuse befo
           requestedContentKeys: {
             bodytext: {
               group: "politics",
-              connector: w.page.contentData.bodytext.connectors.politics,
+              connector: connectorOf(w.page, "bodytext", "politics"),
             },
           },
         };
@@ -1172,11 +1273,336 @@ test("unused malformed seed envelopes and absent render-window seeds refuse befo
       core,
       request(w.page, "issuerA", {
         ...extra,
-        seeds: { bodytext: seeds },
+        seeds,
       }),
     );
     assert.equal(answer.code, "binding_failed");
     if (malformedEnvelope) assert.equal(w.verifierReads(), 0);
     assert.equal(core.calls.decide.length, 0);
+  }
+});
+
+test("rival seed records at one window each open and give distinct candidates under one logical grant", async () => {
+  const w = await world();
+  const core = issuer({
+    grants: () => [
+      { kind: "chain", contentName: "bodytext", group: "politics", windowStart: W12, cutoffT: T15 },
+      { kind: "period", contentName: "bodytext", group: "sports", t: T14 },
+      { kind: "item", contentName: "bodytext" },
+    ],
+  });
+  const rival = {
+    contentName: "bodytext",
+    windowStart: W12,
+    key: await w.rivalSeed("bodytext", W12),
+  };
+  const genuine = /** @type {any} */ (
+    find(seedRecords(w.page, "issuerA"), {
+      contentName: "bodytext",
+      windowStart: W12,
+    })
+  );
+  const route = { group: "sports", connector: connectorOf(w.page, "bodytext", "sports") };
+  for (const seeds of [
+    [rival, genuine],
+    [genuine, rival],
+  ]) {
+    core.calls.decide.length = 0;
+    core.calls.authorize.length = 0;
+    const body = request(w.page, "issuerA", {
+      seeds,
+      requestedContentGroups: { bodytext: ["politics", "sports"] },
+      requestedContentKeys: { bodytext: route },
+    });
+    const { response } = await send(w, core, JSON.parse(JSON.stringify(body)));
+    assert.equal(response.status, 200);
+    const answer = /** @type {any} */ (response.body).contentGroupKeys;
+    const real = await handleOf("bodytext", W12);
+    const other = await handleOf("bodytext", W12, RIVAL_SECRET);
+    // Both candidates sit at the one selected cutoff and the one period.
+    assert.deepEqual(
+      keysAt(answer.chainKeys, { contentName: "bodytext", group: "politics", cutoff: T15 }).sort(),
+      [
+        base64urlEncode((await real.chainKey("politics", T15)).key),
+        base64urlEncode((await other.chainKey("politics", T15)).key),
+      ].sort(),
+    );
+    assert.equal(answer.chainKeys.length, 2);
+    assert.deepEqual(
+      keysAt(answer.periodKeys, { contentName: "bodytext", group: "sports", period: T14 }).sort(),
+      [
+        base64urlEncode(await real.periodKey("sports", T14)),
+        base64urlEncode(await other.periodKey("sports", T14)),
+      ].sort(),
+    );
+    // The genuine body opens with one item candidate and not the other.
+    const items = keysAt(answer.contentKeys, { contentName: "bodytext" });
+    assert.equal(items.length, 2);
+    const opened = await Promise.allSettled(items.map((key) => openCandidate(w, "bodytext", key)));
+    assert.deepEqual(
+      opened.map((result) => result.status),
+      seeds[0] === rival ? ["rejected", "fulfilled"] : ["fulfilled", "rejected"],
+    );
+    // Policy answers the logical grants once; the chain reach is authorized
+    // once, not once per candidate.
+    assert.equal(core.calls.decide.length, 1);
+    assert.deepEqual(
+      core.calls.authorize.filter(([, group]) => group === "politics").map(([, , t]) => t),
+      [T12, T13, T14, T15],
+    );
+  }
+});
+
+test("item routes for different groups each recover a candidate, in either order", async () => {
+  const w = await world();
+  const core = issuer({ grants: () => [{ kind: "item", contentName: "bodytext" }] });
+  const working = { group: "sports", connector: connectorOf(w.page, "bodytext", "sports") };
+  // A connector that is valid but belongs to another item: admissible, wrong.
+  const wrong = { group: "politics", connector: connectorOf(w.page, "headline", "politics") };
+  for (const routes of [
+    [wrong, working],
+    [working, wrong],
+  ]) {
+    const body = request(w.page, "issuerA", { requestedContentKeys: { bodytext: routes } });
+    const { response } = await send(w, core, body);
+    assert.equal(response.status, 200);
+    const items = keysAt(/** @type {any} */ (response.body).contentGroupKeys.contentKeys, {
+      contentName: "bodytext",
+    });
+    assert.equal(items.length, 2);
+    const opened = await Promise.allSettled(items.map((key) => openCandidate(w, "bodytext", key)));
+    assert.deepEqual(
+      opened.map((result) => result.status),
+      routes[0] === wrong ? ["rejected", "fulfilled"] : ["fulfilled", "rejected"],
+    );
+    // The routes grant the item only: no reusable key of either group.
+    assert.equal(Object.hasOwn(response.body.contentGroupKeys, "chainKeys"), false);
+    assert.equal(Object.hasOwn(response.body.contentGroupKeys, "periodKeys"), false);
+  }
+  // Two routes through the same group and connector are one candidate.
+  const twice = request(w.page, "issuerA", {
+    requestedContentKeys: { bodytext: [working, working] },
+  });
+  const { response } = await send(w, core, twice);
+  assert.equal(
+    keysAt(/** @type {any} */ (response.body).contentGroupKeys.contentKeys, {
+      contentName: "bodytext",
+    }).length,
+    1,
+  );
+});
+
+test("a seed record for one item cannot authorize another item", async () => {
+  const w = await world();
+  const core = issuer({
+    grants: () => [{ kind: "period", contentName: "headline", group: "politics", t: T14 }],
+  });
+  // bodytext's genuine envelope relabelled as headline's: its AAD names bodytext.
+  const body = request(w.page, "issuerA", {
+    requestedContentGroups: { headline: ["politics"] },
+    seeds: [
+      {
+        contentName: "headline",
+        windowStart: W12,
+        key: seedOf(w.page, "issuerA", "bodytext", W12),
+      },
+    ],
+  });
+  const refused = await send(w, core, body);
+  assert.equal(refused.code, "binding_failed");
+  assert.equal(Object.hasOwn(refused.response.body, "contentGroupKeys"), false);
+});
+
+test("repeated cutoff records cap a window at their lowest cutoff, in either order", async () => {
+  const w = await world();
+  const core = issuer({
+    grants: () => [
+      { kind: "chain", contentName: "bodytext", group: "politics", windowStart: W12, cutoffT: T18 },
+    ],
+  });
+  const records = [
+    { windowStart: W12, cutoff: T18 },
+    { windowStart: W12, cutoff: T14 },
+  ];
+  for (const cutoffs of [records, [...records].reverse()]) {
+    const { response } = await send(
+      w,
+      core,
+      request(w.page, "issuerA", {
+        requestedContentGroups: { bodytext: ["politics"] },
+        requestedChainCutoffs: cutoffs,
+      }),
+    );
+    assert.deepEqual(
+      /** @type {any} */ (response.body).contentGroupKeys.chainKeys.map(
+        (/** @type {any} */ r) => r.cutoff,
+      ),
+      [T14],
+    );
+  }
+  // Every label is admitted before the lowest is taken: a higher label in
+  // another window refuses even though a lower one would cap this window.
+  const beforePolicy = core.calls.decide.length;
+  const refused = await send(
+    w,
+    core,
+    request(w.page, "issuerA", {
+      requestedContentGroups: { bodytext: ["politics"] },
+      requestedChainCutoffs: [...records, { windowStart: W12, cutoff: "261015T0100" }],
+    }),
+  );
+  assert.equal(refused.code, "binding_failed");
+  assert.equal(core.calls.decide.length, beforePolicy);
+});
+
+test("raw candidate records count against the response bounds before the issuer answers", async () => {
+  const w = await world();
+  const rival = {
+    contentName: "bodytext",
+    windowStart: W12,
+    key: await w.rivalSeed("bodytext", W12),
+  };
+  const seeds = [
+    /** @type {any} */ (
+      find(seedRecords(w.page, "issuerA"), { contentName: "bodytext", windowStart: W12 })
+    ),
+    rival,
+  ];
+  const grants = () => [
+    { kind: "period", contentName: "bodytext", group: "politics", t: T14 },
+    { kind: "period", contentName: "bodytext", group: "politics", t: T15 },
+  ];
+  const body = request(w.page, "issuerA", {
+    seeds,
+    requestedContentGroups: { bodytext: ["politics"] },
+  });
+  // Two grants fit a bound of two; their four candidate records do not.
+  for (const limits of [{ maxResponseMembers: 3 }, { maxPeriodKeysPerContentGroup: 3 }]) {
+    const refused = await send(w, issuer({ grants, limits }), body);
+    assert.equal(refused.code, "too_many_entries", JSON.stringify(limits));
+  }
+  const fits = await send(w, issuer({ grants, limits: { maxResponseMembers: 4 } }), body);
+  assert.equal(fits.response.status, 200);
+  assert.equal(fits.response.body.contentGroupKeys.periodKeys.length, 4);
+  // Candidates at one window are one window, not two, for maxWindowsPerGroup.
+  const chain = await send(
+    w,
+    issuer({
+      limits: { maxWindowsPerGroup: 1 },
+      grants: () => [
+        {
+          kind: "chain",
+          contentName: "bodytext",
+          group: "politics",
+          windowStart: W12,
+          cutoffT: T15,
+        },
+      ],
+    }),
+    body,
+  );
+  assert.equal(chain.response.status, 200);
+  assert.equal(chain.response.body.contentGroupKeys.chainKeys.length, 2);
+});
+
+test("extensible request record members preserve a successful issuer exchange", async () => {
+  const w = await world();
+  const core = issuer({
+    grants: () => [
+      { kind: "chain", contentName: "bodytext", group: "politics", windowStart: W12, cutoffT: T18 },
+    ],
+  });
+  const body = request(w.page, "issuerA", {
+    requestedContentGroups: [{ contentName: "bodytext", groups: ["politics"], future: true }],
+    requestedChainCutoffs: [{ windowStart: W12, cutoff: T14, future: "ignored" }],
+  });
+  for (const seed of body.sealed.contentWindowSeeds) seed.future = { ignored: true };
+  const { response } = await send(w, core, body);
+  assert.equal(response.status, 200);
+  assert.equal(core.calls.decide.length, 1);
+  assert.deepEqual(
+    response.body.contentGroupKeys.chainKeys.map((record) => record.cutoff),
+    [T14],
+  );
+});
+
+test("unsupplied cutoff windows and closed item-route extras refuse before policy or key access", async () => {
+  const w = await world();
+  let openingKeyReads = 0;
+  const registration = {
+    ...w.registration,
+    openingKeys: {
+      get() {
+        openingKeyReads++;
+        throw new Error("key lookup must not precede admission");
+      },
+    },
+  };
+  for (const extra of [
+    {
+      requestedContentGroups: { bodytext: ["politics"] },
+      requestedChainCutoffs: [
+        { windowStart: W12, cutoff: T14 },
+        { windowStart: "261016T0000", cutoff: "261016T0300" },
+      ],
+    },
+    {
+      requestedContentKeys: [
+        {
+          contentName: "bodytext",
+          group: "politics",
+          connector: connectorOf(w.page, "bodytext", "politics"),
+          future: true,
+        },
+      ],
+    },
+  ]) {
+    const core = issuer();
+    const result = await core.endpoint.handleDocument(
+      JSON.stringify(request(w.page, "issuerA", extra)),
+      registration,
+    );
+    assert.equal(result.code, "binding_failed");
+    assert.equal(core.calls.decide.length, 0);
+    assert.equal(openingKeyReads, 0);
+  }
+});
+
+test("seed opening preserves configured-key faults while wrong valid keys remain generic refusals", async () => {
+  const w = await world();
+  const wrongCurve = await subtle.generateKey({ name: "ECDH", namedCurve: "P-384" }, false, [
+    "deriveBits",
+  ]);
+  const wrongValid = await subtle.generateKey({ name: "ECDH", namedCurve: "P-256" }, false, [
+    "deriveBits",
+  ]);
+  const wrongUsage = await subtle.generateKey({ name: "ECDH", namedCurve: "P-256" }, false, [
+    "deriveKey",
+  ]);
+  const body = request(w.page, "issuerA", { requestedContentGroups: { bodytext: ["politics"] } });
+  for (const [privateKey, status, code] of [
+    [wrongCurve.privateKey, 500, "internal_error"],
+    [wrongUsage.privateKey, 500, "internal_error"],
+    [wrongValid.privateKey, 400, "binding_failed"],
+  ]) {
+    const core = issuer({
+      grants: () => [
+        {
+          kind: "chain",
+          contentName: "bodytext",
+          group: "politics",
+          windowStart: W12,
+          cutoffT: T18,
+        },
+      ],
+    });
+    const result = await core.endpoint.handleDocument(JSON.stringify(body), {
+      ...w.registration,
+      openingKeys: { get: () => ({ algorithm: "ecdh-p256", privateKey }) },
+    });
+    assert.equal(result.response.status, status);
+    assert.equal(result.code, code);
+    assert.equal(result.response.body.contentGroupKeys, undefined);
+    assert.equal(result.response.body.keys, undefined);
   }
 });

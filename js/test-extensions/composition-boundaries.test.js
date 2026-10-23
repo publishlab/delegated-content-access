@@ -23,6 +23,7 @@ import { createBrowserClient } from "../integration-client/createBrowserClient.j
 import { DcaRequest } from "../core-shared--client-issuer/DcaRequest.js";
 import { utf8Decode } from "../core-shared/codec.js";
 import { domOver } from "../test-lib/helpers/domOver.js";
+import { issuerBlockOf } from "../test-lib/helpers/inspect.js";
 import { CompressingSealer } from "../extensions/content-compression/core-publisher/CompressingSealer.js";
 import { decoders } from "../extensions/content-compression/core-shared--client-publisher/gzipCodec.js";
 import { ChainKeyCache } from "../extensions/chain-keys/core-client/ChainKeyCache.js";
@@ -325,13 +326,15 @@ async function assertFirstLoad(/** @type {any} */ client) {
 test("gzip items open by three routes, a later render reuses two, a reset closes a denied successor", async () => {
   const w = await setup(false);
   const first = await w.render("story1");
-  for (const item of Object.values(first.dcaData.contentData))
+  for (const item of first.dcaData.contentData)
     assert.deepEqual(/** @type {any} */ (item).contentEncodings, ["gzip"]);
   // Only the two ordinary items hold a sealed item key: bodytext and sportsNews need their own routes.
-  assert.deepEqual(Object.keys(first.dcaData.issuerData.issuerA.sealed.contentKeys).sort(), [
-    "headline",
-    "lockedAd",
-  ]);
+  assert.deepEqual(
+    issuerBlockOf(first.dcaData, "issuerA")
+      .sealed.contentKeys.map((/** @type {any} */ record) => record.contentName)
+      .sort(),
+    ["headline", "lockedAd"],
+  );
   const client = w.clientFor(first);
   await assertFirstLoad(client);
 
@@ -372,11 +375,15 @@ test("client-bound ECDH: no raw key leaves, three items open and two stay closed
   // Every raw key of the direct answer is absent from what the client received.
   const received = JSON.stringify(w.answers.bodies);
   const raw = w.answers.raw[0];
+  /** @type {(record: any) => boolean} */
+  const premium = (record) => record.accessGroup === "premium";
+  /** @type {(record: any) => boolean} */
+  const sports = (record) => record.contentName === "sportsNews" && record.group === "sports";
   const keys = [
-    ...Object.values(raw.keys.contentKeys),
-    ...Object.values(raw.keys.chainKeys.premium),
-    ...Object.values(raw.contentGroups.chainKeys.sportsNews.sports).map((entry) => entry.key),
-  ];
+    ...raw.keys.contentKeys,
+    ...raw.keys.chainKeys.filter(premium),
+    ...raw.contentGroupKeys.chainKeys.filter(sports),
+  ].map((record) => record.key);
   assert.ok(keys.length >= 3);
   for (const key of keys)
     assert.ok(!received.includes(/** @type {string} */ (key)), "a raw key left");

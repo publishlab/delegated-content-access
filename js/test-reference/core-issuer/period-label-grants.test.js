@@ -25,6 +25,14 @@ import { Random } from "../../demo/actors/Random.js";
 import { Clock } from "../../demo/actors/Clock.js";
 import { base64urlDecode, utf8Decode } from "../../core-shared/codec.js";
 import { wholeRenderIssuerSupplyPlan } from "../../core-publisher/issuerSupplyPlan.js";
+import {
+  contentKeyMap,
+  errorMap,
+  notDeliveredMap,
+  periodKeyMap,
+  keyAt,
+  recordAt,
+} from "../support/namedRecords.js";
 
 const { subtle } = globalThis.crypto;
 
@@ -170,11 +178,7 @@ function endpointGranting(publisherRegistration, periods) {
  * @returns {any}
  */
 function periodsListedNewestFirst(request) {
-  const periods = request.sealed.periodKeys[GROUP];
-  /** @type {Record<string, string>} */
-  const reversed = {};
-  for (const t of Object.keys(periods).reverse()) reversed[t] = periods[t];
-  request.sealed.periodKeys[GROUP] = reversed;
+  request.sealed.periodKeys = [...request.sealed.periodKeys].reverse();
   return request;
 }
 
@@ -190,7 +194,9 @@ describe("an explicit ordinary period-label grant", () => {
       unsealer.buildRequest(first, ISSUER_NAME, ["bodytext"]),
     );
     assert.deepEqual(
-      Object.keys(request.sealed.periodKeys[GROUP]),
+      request.sealed.periodKeys
+        .filter((/** @type {any} */ record) => record.accessGroup === GROUP)
+        .map((/** @type {any} */ record) => record.period),
       [T2, T1, T0],
       "the request lists the periods newest first, so request order does not select the granted label",
     );
@@ -200,15 +206,19 @@ describe("an explicit ordinary period-label grant", () => {
 
     // Exactly the lexicographically-first period, whatever order the request
     // carried, and not T2, which the request listed first.
-    assert.deepEqual(Object.keys(body.keys.periodKeys[GROUP]), [T0]);
-    assert.equal(body.keys.periodKeys[GROUP][T1], undefined, "an ungranted period is withheld");
-    assert.equal(body.keys.periodKeys[GROUP][T2], undefined);
+    assert.deepEqual(Object.keys(periodKeyMap(body.keys.periodKeys)[GROUP]), [T0]);
+    assert.equal(
+      periodKeyMap(body.keys.periodKeys)[GROUP][T1],
+      undefined,
+      "an ungranted period is withheld",
+    );
+    assert.equal(periodKeyMap(body.keys.periodKeys)[GROUP][T2], undefined);
 
     // The one key delivered is the family's periodKey for T0, the same
     // bytes every article of premium@T0 is wrapped under, which is why the
     // next one opens with no further unlock.
     assert.deepEqual(
-      base64urlDecode(body.keys.periodKeys[GROUP][T0]),
+      base64urlDecode(periodKeyMap(body.keys.periodKeys)[GROUP][T0]),
       await periodKeySupply.derive(GROUP, T0),
     );
 
@@ -256,19 +266,19 @@ describe("an explicit ordinary period-label grant", () => {
     const { status, body } = await endpoint.unlock(request);
     assert.equal(status, 200);
 
-    assert.deepEqual(Object.keys(body.keys.periodKeys[GROUP]).sort(), [T0, T1]);
+    assert.deepEqual(Object.keys(periodKeyMap(body.keys.periodKeys)[GROUP]).sort(), [T0, T1]);
     assert.equal(
-      body.keys.periodKeys[GROUP][T2],
+      periodKeyMap(body.keys.periodKeys)[GROUP][T2],
       undefined,
       "the third presented period was not granted",
     );
 
     assert.deepEqual(
-      base64urlDecode(body.keys.periodKeys[GROUP][T0]),
+      base64urlDecode(periodKeyMap(body.keys.periodKeys)[GROUP][T0]),
       await periodKeySupply.derive(GROUP, T0),
     );
     assert.deepEqual(
-      base64urlDecode(body.keys.periodKeys[GROUP][T1]),
+      base64urlDecode(periodKeyMap(body.keys.periodKeys)[GROUP][T1]),
       await periodKeySupply.derive(GROUP, T1),
     );
   });
@@ -282,11 +292,14 @@ describe("an explicit ordinary period-label grant", () => {
     const { render } = await world();
     const page = await render("123456", ARTICLE_A);
 
-    assert.deepEqual(Object.keys(page.issuerData[ISSUER_NAME].sealed.periodKeys[GROUP]).sort(), [
-      T0,
-      T1,
-      T2,
-    ]);
+    assert.deepEqual(
+      Object.keys(
+        periodKeyMap(recordAt(page.issuerData, { issuerName: ISSUER_NAME }).sealed.periodKeys)[
+          GROUP
+        ],
+      ).sort(),
+      [T0, T1, T2],
+    );
     assert.equal(formatT(new Date(AT)), T0, "and the first of them is the render instant");
   });
 });
@@ -306,7 +319,11 @@ describe("a period grant at the edge counts", () => {
 
     // An empty label list grants nothing: the presented group is answered
     // with no period field at all.
-    assert.equal(body.keys.periodKeys, undefined, "a zero count delivers no period material");
+    assert.equal(
+      periodKeyMap(body.keys.periodKeys),
+      undefined,
+      "a zero count delivers no period material",
+    );
 
     await unsealer.applyResponse(first, ISSUER_NAME, body);
     assert.equal((await cache.entries()).length, 0, "no period key was cached");
@@ -383,8 +400,8 @@ describe("a period grant at the edge counts", () => {
     );
 
     assert.equal(status, 200);
-    assert.equal(body.keys.periodKeys, undefined);
-    assert.equal(body.errors, undefined);
+    assert.equal(periodKeyMap(body.keys.periodKeys), undefined);
+    assert.equal(errorMap(body.errors), undefined);
   });
 });
 
@@ -436,10 +453,10 @@ describe("a composed period-capability source", () => {
     const ordinary = await unlockWith(publisherRegistration, render);
     const missed = await unlockWith(publisherRegistration, render, missingEverywhere);
 
-    assert.deepEqual(Object.keys(ordinary.periodKeys[GROUP]), [T0, T1]);
+    assert.deepEqual(Object.keys(periodKeyMap(ordinary.periodKeys)[GROUP]), [T0, T1]);
     assert.deepEqual(
-      missed.periodKeys,
-      ordinary.periodKeys,
+      periodKeyMap(missed.periodKeys),
+      periodKeyMap(ordinary.periodKeys),
       "the ordinary period-key grant is preserved",
     );
     assert.deepEqual(missed.capabilities, []);
@@ -467,12 +484,16 @@ describe("a composed period-capability source", () => {
       {
         kind: "test-capability",
         accessGroup: GROUP,
-        entries: { [T0]: "AQID" },
+        entries: [{ t: T0, key: "AQID" }],
         interpretation: TEST_INTERPRETATION,
       },
     ]);
-    assert.deepEqual(result.periodKeys, {}, "no period key is opened beside the representation");
-    assert.deepEqual(result.errors, {
+    assert.deepEqual(
+      periodKeyMap(result.periodKeys),
+      {},
+      "no period key is opened beside the representation",
+    );
+    assert.deepEqual(errorMap(result.errors), {
       [`${GROUP}|${T1}`]: { error: "unseal_failed", message: "sealed value could not be opened" },
     });
   });
@@ -645,7 +666,7 @@ describe("a composed period-capability source", () => {
         ...missingEverywhere,
       },
     });
-    assert.deepEqual(Object.keys(result.periodKeys[GROUP]), [T0, T1]);
+    assert.deepEqual(Object.keys(periodKeyMap(result.periodKeys)[GROUP]), [T0, T1]);
     assert.equal(lookups.count, 1, "the period-key route opens only the granted labels");
   });
 
@@ -667,8 +688,16 @@ describe("a composed period-capability source", () => {
         },
       },
     });
-    assert.deepEqual(result.periodKeys, {}, "authorized but unavailable supply returns no key");
-    assert.deepEqual(result.notDelivered, {}, "the unavailable route supplies no reason");
+    assert.deepEqual(
+      periodKeyMap(result.periodKeys),
+      {},
+      "authorized but unavailable supply returns no key",
+    );
+    assert.deepEqual(
+      notDeliveredMap(result.notDelivered),
+      {},
+      "the unavailable route supplies no reason",
+    );
     assert.equal(lookups.count, 0, "the no-key result reads no opening key");
     assert.equal(represented, 0, "an unavailable route is never asked to represent anything");
   });
@@ -710,11 +739,18 @@ describe("a composed period-capability source", () => {
       {
         kind: "test-capability",
         accessGroup: "ghost",
-        entries: { [T0]: "AQID", [T1]: "AQID" },
+        entries: [
+          { t: T0, key: "AQID" },
+          { t: T1, key: "AQID" },
+        ],
         interpretation: TEST_INTERPRETATION,
       },
     ]);
-    assert.deepEqual(result.periodKeys, {}, "the selected representation answers the group alone");
+    assert.deepEqual(
+      periodKeyMap(result.periodKeys),
+      {},
+      "the selected representation answers the group alone",
+    );
   });
 
   test("a selected coordinate that fails reports under its own label beside its siblings", async () => {
@@ -739,16 +775,16 @@ describe("a composed period-capability source", () => {
       {
         kind: "test-capability",
         accessGroup: GROUP,
-        entries: { [T0]: "AQID" },
+        entries: [{ t: T0, key: "AQID" }],
         interpretation: TEST_INTERPRETATION,
       },
     ]);
     assert.deepEqual(
-      result.periodKeys,
+      periodKeyMap(result.periodKeys),
       {},
       "the group was represented, so no period key opens beside it",
     );
-    assert.deepEqual(result.errors, {
+    assert.deepEqual(errorMap(result.errors), {
       [`${GROUP}|${T1}`]: { error: "unseal_failed", message: "sealed value could not be opened" },
     });
   });
@@ -766,8 +802,8 @@ describe("a composed period-capability source", () => {
       },
     });
 
-    assert.equal(base64urlDecode(result.contentKeys.bodytext).length, 16);
-    assert.deepEqual(result.errors, {});
+    assert.equal(base64urlDecode(contentKeyMap(result.contentKeys).bodytext).length, 16);
+    assert.deepEqual(errorMap(result.errors), {});
     assert.equal(lookups, 0, "constructing the lookup does not ask it for this content key");
   });
 
@@ -839,7 +875,7 @@ describe("a composed period-capability source", () => {
 
     assert.equal(asked, 0, "a let-go key ends this issuer reach into the render on both seams");
     assert.deepEqual(result.capabilities, []);
-    assert.deepEqual(result.errors, {
+    assert.deepEqual(errorMap(result.errors), {
       [`${GROUP}|${T0}`]: {
         error: "key_retired",
         message: `keyId "${KEY_ID}" is retired and this issuer no longer holds it`,
@@ -911,8 +947,11 @@ describe("a composed period-capability source", () => {
         capabilities:
           ({ request, open }) =>
           async (/** @type {string} */ accessGroup) => {
-            const family = /** @type {any} */ (request).sealedPeriodKeys[accessGroup];
-            const opened = await open(family[T0], {
+            const sealed = keyAt(/** @type {any} */ (request).sealedPeriodKeys, {
+              accessGroup,
+              period: T0,
+            });
+            const opened = await open(sealed, {
               accessGroup,
               t: T0,
               renderId: "AAAAAAAAAAAAAAAAAAAAAA",
@@ -930,13 +969,13 @@ describe("a composed period-capability source", () => {
         {
           kind: "test-capability",
           accessGroup: GROUP,
-          entries: { [T0]: ordinary.periodKeys[GROUP][T0] },
+          entries: [{ t: T0, key: periodKeyMap(ordinary.periodKeys)[GROUP][T0] }],
           interpretation: TEST_INTERPRETATION,
         },
       ],
       "the genuine blob opens under the signed renderId, not the source-supplied property",
     );
-    assert.deepEqual(result.errors, {});
+    assert.deepEqual(errorMap(result.errors), {});
   });
 
   test("presented coordinates are lists of names before policy or key lookup", async () => {
@@ -1090,9 +1129,9 @@ describe("a composed period-capability source", () => {
         outcomes.push({
           label,
           filed: {
-            periodKeys: result.periodKeys,
+            periodKeys: periodKeyMap(result.periodKeys),
             entries: result.capabilities.map((/** @type {any} */ c) => c.entries),
-            errors: Object.keys(result.errors),
+            errors: Object.keys(errorMap(result.errors)),
           },
         });
       } catch (error) {

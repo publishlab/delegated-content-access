@@ -22,6 +22,7 @@ import { directWorld } from "../../demo/scenarios/world.js";
 import { AllowAllPolicy } from "../../demo/support/AllowAllPolicy.js";
 import { ISSUER_NAME, KEY_ID, RESOURCE_ID, SIGNING_KID } from "../../demo/scenarios/fixtures.js";
 import { makeRenderId } from "../../test-lib/fixtures/renderId.js";
+import { contentKeyMap, errorMap } from "../support/namedRecords.js";
 
 /** The origin this render is delivered from, and every blob bound under. */
 const ORIGIN = "https://www.news-site.example";
@@ -71,14 +72,14 @@ test("an empty sealed.contentKeys map needs no opening-key lookup", async () => 
   });
 
   const result = await engine.unlock(
-    new DcaRequest(await signedRequest(signingKeys.privateKey, { contentKeys: {} })),
+    new DcaRequest(await signedRequest(signingKeys.privateKey, { contentKeys: [] })),
     publisherRegistration,
   );
 
   // An empty sealed map asks for no coordinate, so no authorized operation
   // needs the registration's opening-key view.
   assert.equal(keyStore.reachCount, 0);
-  assert.deepEqual(result.contentKeys, {});
-  assert.deepEqual(result.errors, {});
-  assert.equal(Object.getPrototypeOf(result.contentKeys), Object.prototype);
+  assert.deepEqual(contentKeyMap(result.contentKeys), {});
+  assert.deepEqual(errorMap(result.errors), {});
+  assert.equal(Object.getPrototypeOf(contentKeyMap(result.contentKeys)), Object.prototype);
 });

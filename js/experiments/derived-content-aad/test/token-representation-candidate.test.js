@@ -27,10 +27,10 @@ const makeRenderId = (byte) => base64urlEncode(new Uint8Array(RENDER_ID_BYTES).f
 function delivery() {
   return {
     resourceJWT: "a.b.c",
-    contentData: {
-      bodytext: { contentType: "text/é", contentEncodings: ["gzip", "br"] },
-      other: { contentType: "text/é", contentEncodings: ["gzip", "br"] },
-    },
+    contentData: [
+      { contentName: "bodytext", contentType: "text/é", contentEncodings: ["gzip", "br"] },
+      { contentName: "other", contentType: "text/é", contentEncodings: ["gzip", "br"] },
+    ],
   };
 }
 
@@ -220,21 +220,21 @@ test("historical signing-input and full-token transcripts reject changes to sign
       [
         "type",
         (d) => {
-          d.contentData.bodytext.contentType = "text/html";
+          d.contentData[0].contentType = "text/html";
         },
         "bodytext",
       ],
       [
         "encoding order",
         (d) => {
-          d.contentData.bodytext.contentEncodings = ["br", "gzip"];
+          d.contentData[0].contentEncodings = ["br", "gzip"];
         },
         "bodytext",
       ],
       [
         "encoding omission",
         (d) => {
-          delete d.contentData.bodytext.contentEncodings;
+          delete d.contentData[0].contentEncodings;
         },
         "bodytext",
       ],
@@ -273,8 +273,8 @@ test("old-format control: the carried AAD did not authenticate type or encoding 
   const nonce = nonceFor(0x47);
   const ciphertext = await encrypt(key, nonce, plaintext, carried);
   const changed = delivery();
-  changed.contentData.bodytext.contentType = "application/javascript";
-  changed.contentData.bodytext.contentEncodings = ["br"];
+  changed.contentData[0].contentType = "application/javascript";
+  changed.contentData[0].contentEncodings = ["br"];
   assert.equal(
     utf8Decode(await decrypt(key, nonce, ciphertext, carried)),
     "a protected representation",
@@ -306,17 +306,47 @@ test("old-format control: the carried AAD did not authenticate type or encoding 
 
 test("absent encodings differ from malformed encodings", () => {
   const absent = delivery();
-  delete absent.contentData.bodytext.contentEncodings;
+  delete absent.contentData[0].contentEncodings;
   assert.ok(tokenRepresentationAad(absent, "bodytext").length > 0);
   const sparse = Array(3);
   sparse[0] = "gzip";
   sparse[2] = "br";
   for (const bad of [[], [""], sparse, "gzip", ["gzip", 3]]) {
     const malformed = delivery();
-    malformed.contentData.bodytext.contentEncodings = bad;
+    malformed.contentData[0].contentEncodings = bad;
     assert.throws(() => tokenRepresentationAad(malformed, "bodytext"));
   }
   const unpaired = delivery();
-  unpaired.contentData.bodytext.contentType = "text/\uD800";
+  unpaired.contentData[0].contentType = "text/\uD800";
   assert.throws(() => tokenRepresentationAad(unpaired, "bodytext"));
+});
+
+test("candidate readers select the last whole descriptor and reject hidden invalid identities", () => {
+  const original = delivery();
+  const changed = structuredClone(original);
+  changed.contentData[0].contentType = "text/plain";
+  delete changed.contentData[0].contentEncodings;
+  const repeated = { ...original, contentData: [...original.contentData, changed.contentData[0]] };
+  assert.deepEqual(
+    tokenRepresentationAad(repeated, "bodytext"),
+    tokenRepresentationAad(changed, "bodytext"),
+  );
+  const reversed = { ...original, contentData: [changed.contentData[0], ...original.contentData] };
+  assert.deepEqual(
+    tokenRepresentationAad(reversed, "bodytext"),
+    tokenRepresentationAad(original, "bodytext"),
+  );
+  assert.notDeepEqual(
+    tokenRepresentationAad(repeated, "bodytext"),
+    tokenRepresentationAad(reversed, "bodytext"),
+  );
+  for (const contentData of [
+    { bodytext: original.contentData[0] },
+    [{ contentName: 7 }, ...original.contentData],
+    [...original.contentData, {}],
+  ])
+    assert.throws(
+      () => tokenRepresentationAad({ ...original, contentData }, "bodytext"),
+      /selected item is absent/,
+    );
 });

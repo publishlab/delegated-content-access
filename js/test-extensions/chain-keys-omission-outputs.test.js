@@ -29,6 +29,21 @@ import { EXTENSION_NAME } from "../extensions/content-key-seal-omission/core-sha
 
 const { subtle } = globalThis.crypto;
 
+/**
+ * The ciphertext a page carries for one item, read from its
+ * `[{contentName, content}]` records.
+ *
+ * @param {any[]} sealedContent
+ * @param {string} contentName
+ * @returns {string|null}
+ */
+function ciphertextOf(sealedContent, contentName) {
+  return (
+    sealedContent.find((/** @type {any} */ record) => record.contentName === contentName)
+      ?.content ?? null
+  );
+}
+
 const ISSUER_NAME = "paywall_subscription_service";
 const KEY_ID = "2025-10";
 const SIGNING_KID = "sign-2025-10";
@@ -130,7 +145,14 @@ async function world() {
   sealer.content(NAME, ARTICLE, "text/html", { accessGroups: [GROUP] });
   const sealed = await sealer.seal();
   const page = JSON.parse(
-    JSON.stringify({ ...sealed.dcaData, sealedContent: sealed.sealedContent }),
+    JSON.stringify({
+      ...sealed.dcaData,
+      // The page carries ciphertexts as named records; the sealer hands a map.
+      sealedContent: Object.entries(sealed.sealedContent).map(([contentName, content]) => ({
+        contentName,
+        content,
+      })),
+    }),
   );
 
   const keyStore = {
@@ -213,13 +235,47 @@ function combinedEngine(registration, generation, sourcePeriods, config = {}) {
   });
 }
 
-/** @param {any} result */
+/**
+ * The content names a result delivers keys for, one per record.
+ *
+ * @param {any} result
+ */
+function contentNames(result) {
+  return result.contentKeys.map((/** @type {any} */ record) => record.contentName);
+}
+
+/**
+ * The key a result delivers for `NAME`.
+ *
+ * @param {any} result
+ */
+function contentKey(result) {
+  const record = result.contentKeys.find((/** @type {any} */ entry) => entry.contentName === NAME);
+  assert.ok(record, `the result delivers a content key for ${NAME}`);
+  return record.key;
+}
+
+/**
+ * The capability's chain entries as the candidate set at each cutoff `t`.
+ * Several entries may share one `t` as rival candidates, so each cutoff maps to
+ * its sorted distinct keys, and entry order means nothing.
+ * @param {any} result
+ * @returns {Record<string, string[]>}
+ */
 function chainEntries(result) {
   assert.equal(result.capabilities.length, 1);
   const [capability] = result.capabilities;
   assert.equal(capability.kind, "chain-keys");
   assert.equal(capability.accessGroup, GROUP);
-  return capability.entries;
+  assert.ok(Array.isArray(capability.entries), "chain entries are records");
+  /** @type {Record<string, string[]>} */
+  const candidates = {};
+  for (const { t, key } of capability.entries) {
+    const keys = (candidates[t] ??= []);
+    if (!keys.includes(key)) keys.push(key);
+  }
+  for (const keys of Object.values(candidates)) keys.sort();
+  return candidates;
 }
 
 test("both halves answer in one unlock: the chain cutoff and the omitted content key", async () => {
@@ -232,16 +288,16 @@ test("both halves answer in one unlock: the chain cutoff and the omitted content
   const result = await engine.unlock(requestFor(page), registration);
 
   assert.deepEqual(chainEntries(result), {
-    "251023T1430": cutoffKey("251023T1430"),
+    "251023T1430": [cutoffKey("251023T1430")],
   });
-  assert.deepEqual(result.errors, {});
+  assert.deepEqual(result.errors, []);
   assert.deepEqual(result.policyData, { plan: "monthly" });
-  assert.deepEqual(result.periodKeys, {}, "the period key a candidate opened under is not a grant");
+  assert.deepEqual(result.periodKeys, [], "the period key a candidate opened under is not a grant");
 
   const plaintext = await openContent(
-    base64urlDecode(result.contentKeys[NAME]),
+    base64urlDecode(contentKey(result)),
     NAME,
-    page.sealedContent[NAME],
+    ciphertextOf(page.sealedContent, NAME),
     contentAadOctets(page, NAME),
   );
   assert.equal(utf8Decode(plaintext), ARTICLE);
@@ -270,9 +326,9 @@ test("the application instant selects the chain start for the combined issuer to
   );
 
   assert.deepEqual(chainEntries(result), {
-    "251023T1630": cutoffKey("251023T1630"),
+    "251023T1630": [cutoffKey("251023T1630")],
   });
-  assert.deepEqual(Object.keys(result.contentKeys), [NAME]);
+  assert.deepEqual(contentNames(result), [NAME]);
   assert.equal(clockReads, 0, "an application-owned instant leaves the injected clock unread");
 });
 
@@ -290,9 +346,9 @@ test("a registration with no period-key lookup held reaches no content key, and 
 
   const result = await engine.unlock(requestFor(page), registration);
 
-  assert.deepEqual(result.contentKeys, {}, "no capability is selected for this registration");
+  assert.deepEqual(result.contentKeys, [], "no capability is selected for this registration");
   assert.deepEqual(chainEntries(result), {
-    "251023T1430": cutoffKey("251023T1430"),
+    "251023T1430": [cutoffKey("251023T1430")],
   });
 });
 
@@ -314,16 +370,16 @@ test("chain-required output leaves sealed period keys available to the omission 
   // from the shared admitted request.
   const result = await engine.unlock(requestFor(page, { keepPeriodKeys: true }), registration);
 
-  assert.deepEqual(result.periodKeys, {}, "no period-key capability is returned");
+  assert.deepEqual(result.periodKeys, [], "no period-key capability is returned");
   assert.deepEqual(chainEntries(result), {
-    "251023T1430": cutoffKey("251023T1430"),
+    "251023T1430": [cutoffKey("251023T1430")],
   });
-  assert.deepEqual(result.errors, {});
+  assert.deepEqual(result.errors, []);
 
   const plaintext = await openContent(
-    base64urlDecode(result.contentKeys[NAME]),
+    base64urlDecode(contentKey(result)),
     NAME,
-    page.sealedContent[NAME],
+    ciphertextOf(page.sealedContent, NAME),
     contentAadOctets(page, NAME),
   );
   assert.equal(utf8Decode(plaintext), ARTICLE);
@@ -375,11 +431,7 @@ test("a policy granting nothing refuses the combined request whole", async () =>
     periodKeyLookup,
   }).unlock(requestFor(page), countedRegistration);
 
-  assert.deepEqual(
-    Object.keys(allowed.contentKeys),
-    [NAME],
-    "the same counted source answers when granted",
-  );
+  assert.deepEqual(contentNames(allowed), [NAME], "the same counted source answers when granted");
   assert.deepEqual(
     { openingLookups, lookupSelections, periodKeyCalls },
     { openingLookups: 1, lookupSelections: 1, periodKeyCalls: 1 },

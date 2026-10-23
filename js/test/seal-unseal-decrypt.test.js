@@ -51,6 +51,13 @@ import {
 } from "../demo/scenarios/fixtures.js";
 import { issuerKeypair, seededRandom, signingKeypair } from "../test-reference/support/keys.js";
 import { wholeRenderIssuerSupplyPlan } from "../core-publisher/issuerSupplyPlan.js";
+import {
+  contentRecordOf,
+  issuerBlockOf,
+  sealedContentByName,
+  sealedContentOf,
+} from "../test-lib/helpers/inspect.js";
+import { errorMap, keyAt } from "../test-reference/support/namedRecords.js";
 
 const ARTICLE = ARTICLES.A;
 
@@ -71,13 +78,14 @@ const SEED = 20251023;
  * The delivery form, split back into the two halves the render produced. A page
  * carries them joined; every assertion here is about one side or the other, and
  * saying which is what keeps a claim about the dca-data off the ciphertext.
+ * The ciphertext half comes back as the Sealer returns it, by contentName.
  *
  * @param {any} page
- * @returns {{ dcaData: any, sealedContent: any }}
+ * @returns {{ dcaData: any, sealedContent: Record<string, string> }}
  */
 function halves(page) {
-  const { sealedContent, ...dcaData } = page;
-  return { dcaData, sealedContent };
+  const { sealedContent: _records, ...dcaData } = page;
+  return { dcaData, sealedContent: sealedContentByName(page) };
 }
 
 /**
@@ -157,7 +165,7 @@ test("seal, unlock, decrypt", async () => {
   const request = unsealer.buildRequest(dcaData, ISSUER_NAME, ["bodytext"]);
   assert.equal(request.issuerName, ISSUER_NAME);
   assert.equal(request.keyId, KEY_ID);
-  assert.equal(typeof request.sealed.contentKeys.bodytext, "string");
+  assert.equal(typeof keyAt(request.sealed.contentKeys, { contentName: "bodytext" }), "string");
 
   // The one hop. An HTTP body is a raw JSON string.
   const { status, body } = await unlockThroughAdmission(
@@ -167,7 +175,7 @@ test("seal, unlock, decrypt", async () => {
     stage.publisherRegistration,
   );
   assert.equal(status, 200);
-  assert.equal(typeof body.keys.contentKeys.bodytext, "string");
+  assert.equal(typeof keyAt(body.keys.contentKeys, { contentName: "bodytext" }), "string");
   assert.equal(body.errors, undefined);
 
   await unsealer.applyResponse(dcaData, ISSUER_NAME, body);
@@ -185,7 +193,9 @@ test("seal, unlock, decrypt", async () => {
 test("a Sealer renders to an RSA-OAEP issuer without ECDH-only options", async () => {
   const { page } = await rsaRender();
 
-  const sealed = page.issuerData[ISSUER_NAME].sealed.contentKeys[CONTENT_NAME];
+  const sealed = keyAt(issuerBlockOf(page, ISSUER_NAME).sealed.contentKeys, {
+    contentName: CONTENT_NAME,
+  });
   assert.equal(typeof sealed, "string");
   assert.equal(sealed.length, 342, "one 2048-bit RSA-OAEP ciphertext");
 });
@@ -224,7 +234,7 @@ test("an RSA-OAEP IssuerEngine opens a bound RSA blob with a 200 response", asyn
   );
 
   assert.equal(status, 200);
-  assert.equal(typeof body.keys.contentKeys[CONTENT_NAME], "string");
+  assert.equal(typeof keyAt(body.keys.contentKeys, { contentName: CONTENT_NAME }), "string");
   assert.equal(body.errors, undefined);
 });
 
@@ -239,7 +249,10 @@ test("the page carries nothing but JSON values", async () => {
     "version",
   ]);
   assert.equal(typeof rendered.dcaData.resourceJWT, "string");
-  assert.deepEqual(Object.keys(rendered.dcaData.contentData.bodytext).sort(), ["contentType"]);
+  assert.deepEqual(Object.keys(contentRecordOf(rendered.dcaData, "bodytext")).sort(), [
+    "contentName",
+    "contentType",
+  ]);
   assert.equal(rendered.dcaData.resource.issuedAt, "2025-10-23T14:20:00.000Z");
   assert.equal(rendered.dcaData.resource.resourceId, "123456");
   assert.equal(
@@ -247,13 +260,13 @@ test("the page carries nothing but JSON values", async () => {
     22,
     "exactly 16 bytes in unpadded base64url",
   );
-  assert.equal(Object.hasOwn(rendered.dcaData.issuerData[ISSUER_NAME], "unlockUrl"), false);
+  assert.equal(Object.hasOwn(issuerBlockOf(rendered.dcaData, ISSUER_NAME), "unlockUrl"), false);
   assert.equal(typeof rendered.sealedContent.bodytext, "string");
 });
 
 test("the sealed content on the page is opaque without an unlock", async () => {
   const { page } = await render();
-  assert.ok(!page.sealedContent.bodytext.includes("council"));
+  assert.ok(!sealedContentOf(page, "bodytext").includes("council"));
 
   const unsealer = new Client({ publisherOrigin: ORIGIN });
   const dcaData = unsealer.parse(page);
@@ -290,12 +303,16 @@ test("one publisher rendering the same article twice shares no key material", as
   const secondContentKey = await openContentKey(second);
 
   assert.notEqual(first.dcaData.resource.renderId, second.dcaData.resource.renderId);
-  assert.equal(Object.hasOwn(first.dcaData.contentData.bodytext, "nonce"), false);
-  assert.equal(Object.hasOwn(second.dcaData.contentData.bodytext, "nonce"), false);
+  assert.equal(Object.hasOwn(contentRecordOf(first.dcaData, "bodytext"), "nonce"), false);
+  assert.equal(Object.hasOwn(contentRecordOf(second.dcaData, "bodytext"), "nonce"), false);
   assert.notEqual(first.sealedContent.bodytext, second.sealedContent.bodytext);
   assert.notEqual(
-    first.dcaData.issuerData[ISSUER_NAME].sealed.contentKeys.bodytext,
-    second.dcaData.issuerData[ISSUER_NAME].sealed.contentKeys.bodytext,
+    keyAt(issuerBlockOf(first.dcaData, ISSUER_NAME).sealed.contentKeys, {
+      contentName: "bodytext",
+    }),
+    keyAt(issuerBlockOf(second.dcaData, ISSUER_NAME).sealed.contentKeys, {
+      contentName: "bodytext",
+    }),
   );
   assert.ok(firstContentKey instanceof Uint8Array);
   assert.ok(secondContentKey instanceof Uint8Array);
@@ -347,7 +364,12 @@ test("a seeded byte stream replays a render byte for byte", async () => {
   const second = await publisherAt(stage, 5).seal();
 
   assert.equal(first.dcaData.resource.renderId, second.dcaData.resource.renderId);
-  assert.equal(first.dcaData.contentData.bodytext.nonce, second.dcaData.contentData.bodytext.nonce);
+  assert.equal(Object.hasOwn(contentRecordOf(first.dcaData, "bodytext"), "nonce"), false);
+  assert.equal(Object.hasOwn(contentRecordOf(second.dcaData, "bodytext"), "nonce"), false);
+  assert.deepEqual(
+    contentRecordOf(first.dcaData, "bodytext"),
+    contentRecordOf(second.dcaData, "bodytext"),
+  );
   assert.equal(first.sealedContent.bodytext, second.sealedContent.bodytext);
 });
 
@@ -386,8 +408,8 @@ test("the issuer reports an unseal failure per item and still answers 200", asyn
   );
 
   assert.equal(status, 200);
-  assert.deepEqual(body.keys.contentKeys, {});
-  assert.equal(body.errors.bodytext.error, "unseal_failed");
+  assert.deepEqual(body.keys.contentKeys, []);
+  assert.equal(errorMap(body.errors).bodytext.error, "unseal_failed");
 });
 
 test("a page with no envelope builds a request the wire will carry, and the issuer says why it fails", async () => {
@@ -433,7 +455,7 @@ test("a page with no envelope builds a request the wire will carry, and the issu
   // format derives no request from a block with no keyId, so the client asks
   // that issuer nothing instead of sending a request with the member absent.
   const noKeyId = JSON.parse(JSON.stringify(page));
-  delete noKeyId.issuerData[ISSUER_NAME].keyId;
+  delete issuerBlockOf(noKeyId, ISSUER_NAME).keyId;
 
   assert.throws(
     () => unsealer.buildRequest(unsealer.parse(noKeyId), ISSUER_NAME, ["bodytext"]),
@@ -464,9 +486,8 @@ test("absent or malformed carried nonce and aad do not affect opening", async ()
     return copy;
   };
 
-  const noNonce = mangled((p) => {
-    delete p.contentData.bodytext.nonce;
-  });
+  assert.equal(Object.hasOwn(contentRecordOf(page, "bodytext"), "nonce"), false);
+  const noNonce = page;
   assert.ok(
     (
       await unsealer.decrypt(
@@ -479,8 +500,8 @@ test("absent or malformed carried nonce and aad do not affect opening", async ()
 
   for (const aad of [42, "123456|1|bodytext", { a: 1 }, null]) {
     const carried = mangled((p) => {
-      p.contentData.bodytext.aad = aad;
-      p.contentData.bodytext.nonce = aad;
+      contentRecordOf(p, "bodytext").aad = aad;
+      contentRecordOf(p, "bodytext").nonce = aad;
     });
     const bytes = await unsealer.decrypt(
       unsealer.parse(carried),

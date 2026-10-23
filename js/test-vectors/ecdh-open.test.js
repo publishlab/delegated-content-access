@@ -88,12 +88,12 @@ for (const name of names) {
       if (name === "open-ecdh-p256-hybrid.json") {
         const positive = JSON.parse(readFileSync(`${directory}open-ecdh-p256.json`, "utf8"));
         const positiveBlob = base64urlDecode(positive.expected.blob);
-        assert.equal(blob.length, 109);
+        assert.equal(blob.length, 97);
         assert.equal(blob[0], 6, "the valid even-y point uses the hybrid marker");
         assert.equal(positiveBlob[64] & 1, 0, "the recorded point has even y parity");
         assert.deepEqual(blob.subarray(1), positiveBlob.subarray(1));
       } else if (name === "open-ecdh-p256-off-curve.json") {
-        assert.equal(blob.length, 109);
+        assert.equal(blob.length, 97);
         assert.equal(blob[0], 4, "the invalid point still uses uncompressed form");
         const positive = JSON.parse(readFileSync(`${directory}open-ecdh-p256.json`, "utf8"));
         assert.equal(
@@ -102,10 +102,39 @@ for (const name of names) {
           "control: the recorded valid point satisfies the curve equation",
         );
         assert.equal(onP256(blob.subarray(0, 65)), false, "the recorded point is off P-256");
+        // Independently derived by a deliberately nonvalidating arithmetic
+        // control; strict opening must not reach this successful GCM path.
+        const controlKey = await crypto.subtle.importKey(
+          "raw",
+          Buffer.from(vector.nonvalidatingControl.sharedXHex, "hex"),
+          "AES-GCM",
+          false,
+          ["decrypt"],
+        );
+        const controlOpen = (bind) =>
+          crypto.subtle.decrypt(
+            {
+              name: "AES-GCM",
+              iv: new Uint8Array(12),
+              additionalData: utf8Encode(bind),
+              tagLength: 128,
+            },
+            controlKey,
+            blob.subarray(65),
+          );
+        assert.equal(
+          base64urlEncode(new Uint8Array(await controlOpen(expected.bind))),
+          input.contentKeyBase64url,
+          "the nonvalidating agreement authenticates this payload; a preserved positive tail would not",
+        );
+        await assert.rejects(
+          controlOpen(`${expected.bind}-other`),
+          "the control still authenticates BIND",
+        );
       } else if (name === "open-ecdh-p256-compressed.json") {
         const positive = JSON.parse(readFileSync(`${directory}open-ecdh-p256.json`, "utf8"));
         const positiveBlob = base64urlDecode(positive.expected.blob);
-        assert.equal(blob.length, 77, "33-byte compressed point plus the original 44-byte tail");
+        assert.equal(blob.length, 65, "33-byte compressed point plus the original 32-byte tail");
         assert.equal(blob[0], 2, "the compressed point encodes even y parity");
         assert.deepEqual(blob.subarray(1, 33), positiveBlob.subarray(1, 33));
         assert.deepEqual(blob.subarray(33), positiveBlob.subarray(65));
@@ -120,7 +149,7 @@ for (const name of names) {
     }
 
     assert.deepEqual(Object.keys(expected).sort(), ["bind", "blob"]);
-    assert.equal(blob.length, 109, "65-byte point, 12-byte nonce, 16-byte key and tag");
+    assert.equal(blob.length, 97, "65-byte point, 16-byte key and tag, implicit zero nonce");
     assert.equal(blob[0], 4, "the ephemeral point uses uncompressed P-256 form");
     const ephemeral = await crypto.subtle.importKey(
       "raw",
@@ -144,12 +173,12 @@ for (const name of names) {
       crypto.subtle.decrypt(
         {
           name: "AES-GCM",
-          iv: blob.subarray(65, 77),
+          iv: new Uint8Array(12),
           additionalData: utf8Encode(additionalData),
           tagLength: 128,
         },
         aes,
-        blob.subarray(77),
+        blob.subarray(65),
       );
     const raw = await operation(expected.bind);
     assert.equal(base64urlEncode(new Uint8Array(raw)), input.contentKeyBase64url);

@@ -81,12 +81,12 @@ wraps use the family; the issuer decides whether the reader receives capability
 for it.
 
 Readable names and request fields do not grant access. The unsigned
-`issuerName`, `keyId`, request maps, and readable resource mirror
+`issuerName`, `keyId`, request collections, and readable resource mirror
 only select or describe work; the issuer still makes the access decision.
 
-The compact period label remains `t` because it is an established coordinate
-repeated in maps and wrap candidates, while its meaning is defined by the
-selected period profile. The publisher supplies the label as a coordinate;
+Records carry the period label in a `period` field, or `cutoff` for a chain
+position; the specifications write the label as `t`. Its meaning is defined by
+the selected period profile. The publisher supplies the label as a coordinate;
 profiles may also use it as construction input. A label is never entitlement
 by itself.
 
@@ -97,13 +97,13 @@ cryptographic API.
 ## Publisher delivery
 
 The baseline publisher delivery is one serialized UTF-8 JSON document containing
-the metadata and optional `sealedContent` ciphertext map. Under the optional
+the metadata and optional `sealedContent` ciphertext collection. Under the optional
 `dca-profile-html-carrier` profile, publisher markup carries one inert JSON
 metadata carrier and may carry a second for inline ciphertext:
 
 - `dca-data` contains signed resource context, issuer routes, item metadata,
   and key envelopes or wraps; and
-- `dca-sealed-content`, when present, contains ciphertext keyed by
+- `dca-sealed-content`, when present, contains ciphertext records named by
   `contentName` for content delivered with the page.
 
 Separating ciphertext keeps large opaque values away from the metadata the
@@ -212,17 +212,26 @@ contact it. A holder of a content key can create another valid tuple; source
 retrieval and placement remain host responsibilities.
 
 The fixed content nonce depends on one encryption per fresh independent key.
-It changes no wrap or envelope nonce. This procedure is mandatory baseline
+This content-encryption procedure does not select the wrap or envelope nonce
+procedures. It is mandatory baseline
 publisher/client behavior and adds no issuer nonce duty or runtime toggle.
 Readers and deliveries using random content nonces need a separately selected
 old reader; no fallback is selected here.
 
 A period key wraps content keys for one publisher, access group, and
-period. The wrap has no additional data: its authenticated ciphertext and the
-period key's coordinate determine whether it opens. The client does not invent
-wrap AAD from the entry coordinate.
+period. The wrap has no additional data. A wrap entry is
+`{accessGroup, period, key}` and
+carries no nonce: publisher and client derive it as the first 12 octets of
+SHA-256 over a domain string, the 16 render-ID octets, and the
+length-prefixed item name, access group, period label and selected wrap AAD
+([content protection Section 4.1](spec--content-protection.md#41-wrap-nonce)).
+The client does not invent wrap AAD from the entry coordinate; the coordinate
+enters only the nonce. A wrap moved to another render, item or coordinate
+therefore derives another nonce and does not open.
 
-Random 96-bit nonces make collisions improbable, not impossible. A reused
+The derived nonce relies on a fresh random render ID per render and one
+content key per render and item. A 96-bit truncated digest makes a nonce
+repeat across different wraps improbable, not impossible. A reused
 period key accumulates its AES-GCM invocation count across every render,
 node, restart, and backfill that uses those bytes. The publisher's key supplier
 and operations must enforce the selected profile's bound.

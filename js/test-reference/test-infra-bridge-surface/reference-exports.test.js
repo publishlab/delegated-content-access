@@ -43,6 +43,7 @@ const REFERENCE_EXPORTS = [
   "bindValue",
   "checkEnvelopes",
   "contentAad",
+  "contentKeyWrapNonce",
   "dcaTestBinding",
   "decrypt",
   "encrypt",

@@ -20,10 +20,10 @@
 // why this sits on the publisher's side and off the issuer's path.
 //
 // The scan tracks which object encloses each name. DCA reuses member names across
-// sibling objects on purpose: every wrap record carries `nonce`, `t` and `key`, every
+// sibling objects on purpose: every wrap record carries `t` and `key`, every
 // content item carries `contentType`, and a contentName reappears as an accessGroup name
 // one level down. A scan that only counts names reports every one of those as a
-// duplicate. On the v1 render fixture that is eleven names, all false, none of them a
+// duplicate. On the v1 render fixture that is nine names, all false, none of them a
 // duplicate member anywhere. A publisher switches off a check that noisy, and the real
 // duplicate then gets through.
 //

@@ -84,14 +84,14 @@ function oneItemRender(data, accessGroups) {
 
 /**
  * The origin case's setup: a content-key-only render, with no period-key supply,
- * on the 44-byte stream `label` names (keys.js, `labelStream`).
+ * on the 32-byte stream `label` names (keys.js, `labelStream`).
  *
  * @param {string} instant
  * @param {string} label
  */
 export function sealerOriginSetup(instant, label) {
   return {
-    ...setupWith(instant, labelStream(label, 44)),
+    ...setupWith(instant, labelStream(label, 32)),
     // Content-key-only: the render wraps nothing, so no group can be supplied.
     issuerSupplyPlans: {
       [ISSUER_NAME]: { contentKeyNames: [CONTENT_NAME], suppliedAccessGroups: [] },
@@ -108,13 +108,14 @@ export function sealerOriginRender() {
 }
 
 /**
- * The period-key case's setup: the 92-byte stream "sealer-period-keys" and a
+ * The period-key case's setup: the 32-byte stream "sealer-period-keys" and a
  * fixed key for each of the two periods the render seals, 0xa1 and 0xa2
- * repeated.
+ * repeated. The stream holds the render id and one content key. Ordinary
+ * envelopes use implicit zero nonces; the two wraps derive theirs and draw nothing.
  */
 export function sealerPeriodKeysSetup() {
   return {
-    ...setupWith(AT, labelStream("sealer-period-keys", 92)),
+    ...setupWith(AT, labelStream("sealer-period-keys", 32)),
     issuerSupplyPlans: {
       [ISSUER_NAME]: { contentKeyNames: [CONTENT_NAME], suppliedAccessGroups: [ACCESS_GROUP] },
     },
@@ -131,14 +132,14 @@ export function sealerPeriodKeysRender() {
 
 /**
  * The mixed-issuer case's setup: the ECDH issuer, then an RSA-OAEP issuer
- * when `withRsaIssuer` is true, over the 144-byte stream "sealer-issuers" and a fixed key for
+ * when `withRsaIssuer` is true, over the 48-byte stream "sealer-issuers" and a fixed key for
  * each of the two periods. The RSA issuer draws nothing from the stream, so
  * both variants read the same bytes.
  *
  * @param {boolean} withRsaIssuer
  */
 export function sealerIssuersSetup(withRsaIssuer) {
-  const setup = setupWith(AT, labelStream("sealer-issuers", 144));
+  const setup = setupWith(AT, labelStream("sealer-issuers", 48));
   return {
     ...setup,
     issuers: [
@@ -495,7 +496,7 @@ export function sealerRefusalCases() {
       },
       {
         name: "a read past the end of the random stream",
-        set: { randomStream: labelStream("sealer-short-stream", 38) },
+        set: { randomStream: labelStream("sealer-short-stream", 31) },
         calls: render,
         code: "bad_config",
         // How a port splits its reads decides both numbers, so the portable
@@ -513,7 +514,7 @@ export function sealerRefusalCases() {
       {
         name: "a period the fixed keys do not list",
         set: {
-          randomStream: labelStream("sealer-period-keys", 92),
+          randomStream: labelStream("sealer-period-keys", 32),
           fixedPeriodKeys: { [ACCESS_GROUP]: { "251023T1400": periodKey(0xa1) } },
         },
         calls: groupedRender,
@@ -567,7 +568,7 @@ export function sealerRefusalCases() {
       {
         name: "a fixed period key of 15 bytes",
         set: {
-          randomStream: labelStream("sealer-period-keys", 92),
+          randomStream: labelStream("sealer-period-keys", 32),
           fixedPeriodKeys: {
             [ACCESS_GROUP]: {
               "251023T1400": new Uint8Array(15).fill(0xa1),

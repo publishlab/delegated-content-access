@@ -13,7 +13,14 @@ import { ResponseAssociation } from "../../../core-client/ResponseAssociation.js
 import { explicitChainKeyClientProfile } from "../referenceProfile.js";
 import { ChainKeyRequestBuilder } from "../core-client/ChainKeyRequestBuilder.js";
 import { chainKeyIssuerEngine } from "../core-issuer/chainKeyIssuerEngine.js";
-import { chainGeneration, chainSupply, deliveryPlan, periodOnlyPolicy } from "./world.js";
+import { periodKeyMap } from "../../../test-reference/support/namedRecords.js";
+import {
+  chainGeneration,
+  chainSupply,
+  cutoffsOf,
+  deliveryPlan,
+  periodOnlyPolicy,
+} from "./world.js";
 import { ACCESS_GROUP, AT, ISSUER_NAME } from "../../../demo/scenarios/fixtures.js";
 
 async function world(chainKeyProfile = undefined) {
@@ -86,7 +93,7 @@ async function world(chainKeyProfile = undefined) {
         const result = await issuer.endpoint.handleDocument(JSON.stringify(request), registration);
         assert.equal(result.response.status, 200, "real issuer accepts the relay request");
         assert.ok(
-          Object.keys(result.response.body.keys.periodKeys[ACCESS_GROUP]).length,
+          Object.keys(periodKeyMap(result.response.body.keys.periodKeys)[ACCESS_GROUP]).length,
           "real issuer supplies projected period keys before client admission",
         );
         exchanges.push({ request, response: result.response });
@@ -111,10 +118,10 @@ for (const [name, profile] of [
     assert.equal(new TextDecoder().decode(opened.bytes), "Entitled period projection");
     assert.equal(exchanges.length, 1);
     const [{ request, response }] = exchanges;
-    assert.ok(Object.keys(request.sealed.chainKeys[ACCESS_GROUP]).length);
+    assert.ok(cutoffsOf(request.sealed.chainKeys, ACCESS_GROUP).length);
     assert.equal(request.sealed.periodKeys, undefined);
     assert.equal(response.status, 200);
-    assert.ok(Object.keys(response.body.keys.periodKeys[ACCESS_GROUP]).length);
+    assert.ok(Object.keys(periodKeyMap(response.body.keys.periodKeys)[ACCESS_GROUP]).length);
     assert.equal(response.body.keys.chainKeys, undefined);
     assert.equal(
       new TextDecoder().decode((await client.openLocal("bodytext")).bytes),
@@ -132,9 +139,11 @@ function associatedRequest(client, change = () => {}) {
   const request = structuredClone(
     client.builder.build(client.dcaData, ISSUER_NAME, ["bodytext"]).toObject(),
   );
-  const envelope = Object.values(request.sealed.chainKeys[ACCESS_GROUP])[0];
+  const envelope = request.sealed.chainKeys.find(
+    (/** @type {any} */ record) => record.accessGroup === ACCESS_GROUP,
+  ).key;
   request.periodGeometry = { chainsPerDay: 2, periodMinutes: 15 };
-  request.sealed.chainKeys = { [ACCESS_GROUP]: { "251023T1430": envelope } };
+  request.sealed.chainKeys = [{ accessGroup: ACCESS_GROUP, cutoff: "251023T1430", key: envelope }];
   delete request.requestedPeriodKeys;
   change(request);
   return { request, association: new ResponseAssociation(client.dcaData, ISSUER_NAME, request) };
@@ -145,7 +154,10 @@ const rejectionCases = [
     "an unpresented family",
     "251023T1415",
     (request) => {
-      request.sealed.chainKeys = { other: request.sealed.chainKeys[ACCESS_GROUP] };
+      request.sealed.chainKeys = request.sealed.chainKeys.map((record) => ({
+        ...record,
+        accessGroup: "other",
+      }));
     },
   ],
   ["a later position than the supplied cutoff", "251023T1445", () => {}],
@@ -176,31 +188,41 @@ const rejectionCases = [
     },
   ],
   [
-    "a malformed chain collection",
+    "a chain collection that is not a record array",
     "251023T1415",
     (request) => {
-      request.sealed.chainKeys = [];
+      request.sealed.chainKeys = {
+        [ACCESS_GROUP]: { "251023T1430": request.sealed.chainKeys[0].key },
+      };
     },
   ],
   [
     "a malformed source envelope",
     "251023T1415",
     (request) => {
-      request.sealed.chainKeys[ACCESS_GROUP]["251023T1430"] = {};
+      request.sealed.chainKeys[0].key = {};
     },
   ],
   [
     "two source members in one window",
     "251023T1415",
     (request) => {
-      request.sealed.chainKeys[ACCESS_GROUP]["251023T1445"] = "another";
+      request.sealed.chainKeys.push({
+        accessGroup: ACCESS_GROUP,
+        cutoff: "251023T1445",
+        key: "another",
+      });
     },
   ],
 ];
 
 function periodResponse(t) {
   return {
-    keys: { periodKeys: { [ACCESS_GROUP]: { [t]: base64urlEncode(new Uint8Array(16).fill(7)) } } },
+    keys: {
+      periodKeys: [
+        { accessGroup: ACCESS_GROUP, period: t, key: base64urlEncode(new Uint8Array(16).fill(7)) },
+      ],
+    },
   };
 }
 
@@ -224,7 +246,7 @@ test("relay admission reads the frozen request rather than later caller edits", 
   const { client } = await world();
   const { request, association } = associatedRequest(client);
   request.periodGeometry.periodMinutes = 60;
-  request.sealed.chainKeys = {};
+  request.sealed.chainKeys = [];
   const result = await client.resolver.applyResponse(
     client.dcaData,
     ISSUER_NAME,
@@ -234,7 +256,7 @@ test("relay admission reads the frozen request rather than later caller edits", 
   assert.equal(result.accepted, 1);
   assert.equal((await client.cache.entries()).length, 1);
   const invalid = associatedRequest(client, (request) => {
-    request.sealed.chainKeys = {};
+    request.sealed.chainKeys = [];
   });
   invalid.request.sealed.chainKeys = association.request.sealed.chainKeys;
   const denied = await client.resolver.applyResponse(
@@ -266,7 +288,9 @@ test("presented period keys retain their base admission independently of chain g
   const t = "251023T1416";
   const { association } = associatedRequest(client, (request) => {
     delete request.periodGeometry;
-    request.sealed.periodKeys = { [ACCESS_GROUP]: { [t]: "sealed period member" } };
+    request.sealed.periodKeys = [
+      { accessGroup: ACCESS_GROUP, period: t, key: "sealed period member" },
+    ];
   });
   const result = await client.resolver.applyResponse(
     client.dcaData,

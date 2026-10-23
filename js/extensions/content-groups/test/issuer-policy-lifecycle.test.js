@@ -232,7 +232,7 @@ test("source policy receives the host's opaque principal and context by identity
   assert.equal(refused.code, "internal_error");
   assert.equal(refused.policyData, undefined);
   assert.equal(Object.hasOwn(refused.response.body, "keys"), false);
-  assert.equal(Object.hasOwn(refused.response.body, "contentGroups"), false);
+  assert.equal(Object.hasOwn(refused.response.body, "contentGroupKeys"), false);
   assert.deepEqual(accounting, { allowed: true, baseReads: 3, sourceReads: 2 });
 
   const replay = {

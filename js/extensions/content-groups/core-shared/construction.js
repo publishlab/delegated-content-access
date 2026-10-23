@@ -2,6 +2,7 @@
 import { utf8Encode } from "../../../core-shared/codec.js";
 import { signableOrigin } from "../../../core-shared/publisherOrigin.js";
 import { binaryStringBytes } from "../../../core-shared/binaryStrings.js";
+import { own } from "../../../core-shared/wire.js";
 import { inspectPeriodGeometryBounds } from "../../../core-shared/geometryBounds.js";
 import {
   validateAccessGroup,
@@ -40,7 +41,8 @@ export const CONTRACT = Object.freeze({
     connectors: "connectors",
     requestedContentGroups: "requestedContentGroups",
     requestedContentKeys: "requestedContentKeys",
-    response: "contentGroups",
+    requestedChainCutoffs: "requestedChainCutoffs",
+    response: "contentGroupKeys",
     chainKeys: "chainKeys",
     periodKeys: "periodKeys",
     contentKeys: "contentKeys",
@@ -54,7 +56,7 @@ export const CONTRACT = Object.freeze({
 
 /**
  * Trusted deployment bounds. `maxItems` bounds every per-exchange content-name
- * map; `maxPeriodKeysPerContentGroup` counts period results per (content name,
+ * collection; `maxPeriodKeysPerContentGroup` counts period results per (content name,
  * group). None of them grants access or is negotiated on the wire.
  */
 export const DEFAULT_LIMITS = Object.freeze({
@@ -222,32 +224,45 @@ export function checkedScope(input, chain = STOCK_CHAIN_GEOMETRY) {
   };
 }
 /**
- * One item's named connector map, `{group: connector}`, holding only groups with
- * a route. Absent means an ordinary-only item. An empty map, an array or any
- * other non-plain object is refused, never read as "no route".
+ * One item's connector collection, `[{group, connector}]`, holding only groups
+ * with a route. Absent means an ordinary-only item. An empty array, a value
+ * that is not an array, or an element that is not a `{group, connector}`
+ * record with a valid group and a canonical 16-byte connector is refused,
+ * never read as "no route". Raw records count against `maxGroups`. Several
+ * records for one group are candidate connectors and each distinct one is
+ * kept; an identical copy is dropped.
  * @param {unknown} connectors
  * @param {{maxGroups:number}} limits
  * @returns {Array<{group:string,connector:string}>}
  */
 export function checkedConnectors(connectors, limits) {
   if (connectors === undefined) return [];
-  const proto = record(connectors) ? Object.getPrototypeOf(connectors) : undefined;
-  if (proto !== Object.prototype && proto !== null)
-    throw new Error("connectors is a named map of group to connector");
-  const entries = Object.entries(/** @type {Record<string, unknown>} */ (connectors));
-  if (entries.length === 0 || entries.length > limits.maxGroups)
-    throw new Error("connectors map names between one and maxGroups groups");
-  return entries.map(([group, connector]) => {
+  if (!Array.isArray(connectors))
+    throw new Error("connectors is a collection of {group, connector} records");
+  if (connectors.length === 0 || connectors.length > limits.maxGroups)
+    throw new Error("connectors holds between one and maxGroups records");
+  /** @type {Array<{group:string,connector:string}>} */
+  const routes = [];
+  for (const entry of connectors) {
+    if (!record(entry)) throw new Error("a connector is a {group, connector} record");
+    const group = own(entry, "group");
+    const connector = own(entry, "connector");
     validateAccessGroup(group);
     bytes(connector, 16, "connector");
-    return { group, connector: /** @type {string} */ (connector) };
-  });
+    const route = {
+      group: /** @type {string} */ (group),
+      connector: /** @type {string} */ (connector),
+    };
+    if (!routes.some((held) => held.group === route.group && held.connector === route.connector))
+      routes.push(route);
+  }
+  return routes;
 }
 
 /**
  * Admit a delivery's content records: each content name with its connector
- * routes under `contentData.<name>.connectors`. A root `contentGroups`
- * dictionary is the retired form and is refused rather than read.
+ * routes under `contentData[].connectors`. A root `contentGroups` dictionary
+ * is the retired indexed form and is refused rather than read.
  * @param {any} page
  * @param {{maxItems:number,maxGroups:number}} limits
  * @returns {Record<string, Array<{group:string,connector:string}>>}
@@ -256,14 +271,19 @@ export function checkedContentRecords(page, limits) {
   if (!record(page) || Object.hasOwn(page, "contentGroups"))
     throw new Error("root contentGroups is the retired indexed form");
   const records = page.contentData;
-  if (!record(records) || Object.keys(records).length > limits.maxItems)
+  if (!Array.isArray(records) || records.length > limits.maxItems)
     throw new Error("invalid contentData");
   /** @type {Record<string, Array<{group:string,connector:string}>>} */
   const items = Object.create(null);
-  for (const [name, entry] of Object.entries(records)) {
-    validateContentName(name);
-    if (!record(entry)) throw new Error("content record is an object");
-    items[name] = checkedConnectors(entry[CONTRACT.wire.connectors], limits);
+  const selected = new Map();
+  for (const entry of records) {
+    if (!record(entry)) continue;
+    const name = validateContentName(own(entry, "contentName"));
+    selected.set(name, entry);
+  }
+  // Validate only the payload of each selected whole record.
+  for (const [name, entry] of selected) {
+    items[name] = checkedConnectors(own(entry, CONTRACT.wire.connectors), limits);
   }
   return items;
 }

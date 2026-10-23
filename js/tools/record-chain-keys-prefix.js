@@ -479,8 +479,10 @@ function guardScenario({ renders, exchanges, observations, witness, plantedPerio
       granted.status === 200 &&
       JSON.stringify(granted.body.keys) ===
         JSON.stringify({
-          contentKeys: {},
-          chainKeys: { [ACCESS_GROUP]: { [CUTOFF]: witness.cutoffChainKeys[CUTOFF] } },
+          contentKeys: [],
+          chainKeys: [
+            { accessGroup: ACCESS_GROUP, cutoff: CUTOFF, key: witness.cutoffChainKeys[CUTOFF] },
+          ],
         }),
     "the first read must return the witness chain key at the cutoff and nothing else",
   );
@@ -702,10 +704,14 @@ export async function recordPrefix(options = {}) {
       relation,
       renderedAt: publisherClock.now().toISOString(),
       publisherOrigin: ORIGIN,
-      wrapped: dcaData.contentData[CONTENT_NAME].keys[ACCESS_GROUP].map(
-        (/** @type {{ t: string }} */ wrap) => wrap.t,
-      ),
-      suppliedChain: Object.keys(dcaData.issuerData[ISSUER_NAME].sealed.chainKeys[ACCESS_GROUP]),
+      wrapped: dcaData.contentData
+        .find((item) => item.contentName === CONTENT_NAME)
+        .keys.filter((entry) => entry.accessGroup === ACCESS_GROUP)
+        .map((entry) => entry.period),
+      suppliedChain: dcaData.issuerData
+        .find((entry) => entry.issuerName === ISSUER_NAME)
+        .sealed.chainKeys.filter((entry) => entry.accessGroup === ACCESS_GROUP)
+        .map((entry) => entry.cutoff),
       resourceJWT: dcaData.resourceJWT,
       markup,
     });
@@ -794,9 +800,11 @@ export async function recordPrefix(options = {}) {
     },
     response: {
       status: 200,
-      contentKeys: {},
+      contentKeys: [],
       periodKeys: "absent",
-      chainKeys: { [ACCESS_GROUP]: { [CUTOFF]: witness.cutoffChainKeys[CUTOFF] } },
+      chainKeys: [
+        { accessGroup: ACCESS_GROUP, cutoff: CUTOFF, key: witness.cutoffChainKeys[CUTOFF] },
+      ],
       geometry: { [ACCESS_GROUP]: GEOMETRY },
     },
     policyHorizon: {

@@ -3,7 +3,9 @@
 // One attempt to open one content-key wrap with one already-selected
 // period-key capability. This file does not select or order candidates; the
 // resolver does. Entry interpretation supplies the one AAD reading selected
-// for this attempt.
+// for this attempt, and the resolver derives the nonce from the entry's authored
+// coordinate and that AAD (`js/core-shared/contentKeyWrapNonce.js`). An entry
+// carries no nonce; a `nonce` member on it is unknown and never read here.
 
 import { decrypt, decryptToKey, NONCE_BYTES, TAG_BYTES } from "../core-shared/aead.js";
 import { binaryStringBytes } from "../core-shared/binaryStrings.js";
@@ -24,21 +26,26 @@ function isAuthenticationFailure(cause) {
 /**
  * Decode and try one validated content-key wrap. Returns null when the entry
  * is unreadable or the GCM tag fails. Throws on configuration and capability
- * faults.
+ * faults, which include a nonce that is not 12 bytes: the caller derived it, so
+ * a wrong width is the caller's fault and not this candidate's miss.
  *
  * Canonical wraps use a 16-byte period key and recover a 16-byte content key.
  *
  * @param {any} entry
  * @param {Uint8Array|CryptoKey} periodKey
+ * @param {Uint8Array} nonce - derived from the entry's coordinate and the selected AAD
  * @param {Uint8Array} [aad]
  * @returns {Promise<Uint8Array|CryptoKey|null>}
  */
-export async function attemptContentKeyWrap(entry, periodKey, aad) {
+export async function attemptContentKeyWrap(entry, periodKey, nonce, aad) {
   if (!(periodKey instanceof Uint8Array) && !(periodKey instanceof globalThis.CryptoKey)) {
     throw dcaError(
       "bad_config",
       "a content-key wrap attempt needs period-key bytes or a CryptoKey handle",
     );
+  }
+  if (!(nonce instanceof Uint8Array) || nonce.length !== NONCE_BYTES) {
+    throw dcaError("bad_config", `a content-key wrap attempt takes a ${NONCE_BYTES}-byte nonce`);
   }
   if (aad !== undefined && !(aad instanceof Uint8Array)) {
     throw dcaError("bad_config", "content-key wrap AAD is bytes when present");
@@ -57,19 +64,17 @@ export async function attemptContentKeyWrap(entry, periodKey, aad) {
   }
   if (entry === null || typeof entry !== "object" || Array.isArray(entry)) return null;
 
-  const nonce = own(entry, "nonce");
   const wrapped = own(entry, "key");
-  if (typeof nonce !== "string" || typeof wrapped !== "string") return null;
+  if (typeof wrapped !== "string") return null;
 
   // The decoder returns null for a spelling that section 2.2 refuses, so the
   // entry is unreadable and this candidate misses. The decoder does not throw
   // here, because a throw would propagate out of this function rather than
   // drop one candidate.
-  const nonceBytes = binaryStringBytes(nonce);
   const wrappedBytes = binaryStringBytes(wrapped);
-  if (nonceBytes === null || wrappedBytes === null) return null;
-  if (nonceBytes.length !== NONCE_BYTES || wrappedBytes.length !== WRAPPED_CONTENT_KEY_BYTES)
-    return null;
+  if (wrappedBytes === null || wrappedBytes.length !== WRAPPED_CONTENT_KEY_BYTES) return null;
+  // Copy so a caller reusing its nonce buffer cannot change this open mid-flight.
+  const nonceBytes = Uint8Array.from(nonce);
 
   try {
     const opened =

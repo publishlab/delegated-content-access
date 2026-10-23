@@ -16,6 +16,7 @@ import { DcaRequestBuilder } from "../../core-client/DcaRequestBuilder.js";
 import { ResponseAssociation } from "../../core-client/ResponseAssociation.js";
 import { encrypt } from "../../core-shared/aead.js";
 import { base64urlEncode, utf8Encode } from "../../core-shared/codec.js";
+import { contentKeyWrapNonceOctets } from "../support/contentKeyWrapNonceOctets.js";
 
 const PUB = "https://publisher.example";
 const GROUP = "premium";
@@ -33,36 +34,42 @@ function compactJwt(payload) {
 
 /** One render whose item "a" is wrapped at T under PERIOD_KEY. */
 async function page() {
-  const wrapNonce = new Uint8Array(12).fill(11);
-  const resource = { origin: PUB, resourceId: "123456", renderId: "r-1" };
+  const renderId = "AAECAwQFBgcICQoLDA0ODw";
+  const wrapNonce = contentKeyWrapNonceOctets({
+    renderId,
+    contentName: "a",
+    accessGroup: GROUP,
+    t: T,
+  });
+  const resource = { origin: PUB, resourceId: "123456", renderId };
   return new DcaData(
     {
       version: "1",
       resource,
       resourceJWT: compactJwt(resource),
-      issuerData: {
-        [ISSUER]: {
+      issuerData: [
+        {
+          issuerName: ISSUER,
           keyId: "k1",
           unlockUrl: "https://period.example/unlock",
-          sealed: { periodKeys: { [GROUP]: { [T]: "AAAA" } } },
+          sealed: { periodKeys: [{ accessGroup: GROUP, period: T, key: "AAAA" }] },
         },
-      },
-      contentData: {
-        a: {
+      ],
+      contentData: [
+        {
+          contentName: "a",
           contentType: "text/plain",
           nonce: base64urlEncode(new Uint8Array(12).fill(1)),
           aad: "item:a",
-          keys: {
-            [GROUP]: [
-              {
-                t: T,
-                nonce: base64urlEncode(wrapNonce),
-                key: base64urlEncode(await encrypt(PERIOD_KEY, wrapNonce, CONTENT_KEY)),
-              },
-            ],
-          },
+          keys: [
+            {
+              accessGroup: GROUP,
+              period: T,
+              key: base64urlEncode(await encrypt(PERIOD_KEY, wrapNonce, CONTENT_KEY)),
+            },
+          ],
         },
-      },
+      ],
     },
     { publisherOrigin: PUB },
   );
@@ -145,7 +152,7 @@ async function obtained(chainCache) {
   const application = await resolver.applyResponse(
     data,
     ISSUER,
-    { keys: { periodKeys: { [GROUP]: { [T]: base64urlEncode(PERIOD_KEY) } } } },
+    { keys: { periodKeys: [{ accessGroup: GROUP, period: T, key: base64urlEncode(PERIOD_KEY) }] } },
     new ResponseAssociation(data, ISSUER, request),
   );
   assert.equal(application.accepted, 1);

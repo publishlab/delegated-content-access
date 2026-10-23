@@ -1,7 +1,7 @@
 {
   "name": "open-ecdh-p256-compressed",
   "vectorFormat": "ecdh-p256-envelope-open/v1",
-  "description": "docs/spec--sealed-key-envelopes.md sections 4 and 6 require a 65-octet uncompressed point and a generic unseal_failed refusal. This valid 33-octet compressed point replaces the 65-octet point while the original 44-byte nonce and ciphertext/tag tail remains; a variable-length opener could release the key from the resulting 77-octet blob.",
+  "description": "docs/spec--sealed-key-envelopes.md sections 4 and 6 require a 65-octet uncompressed point and a generic unseal_failed refusal. This valid 33-octet compressed point replaces the 65-octet point while the original 32-byte ciphertext/tag tail with twelve implicit zero nonce octets remains; a variable-length opener could release the key from the resulting 65-octet blob.",
   "input": {
     "algorithm": "ecdh-p256",
     "binding": {
@@ -19,7 +19,7 @@
   },
   "expected": {
     "bind": "dca-bind-key-envelope|c|uUT576O34BoGKpgXpdMucw|bodytext",
-    "blob": "Av_rrpHAnCFcf8NeehDgUG3w9ktUCbb_1LNPIX5pT8u7LGqnumOlMhxM4gerF3twxo66LQxQW-phMYM7M94n8yajZSmVprGcjONF6Y4",
+    "blob": "Av_rrpHAnCFcf8NeehDgUG3w9ktUCbb_1LNPIX5pT8u7y6wm0vHFo8nfv-WMnF8Ieq3msLhJfjSkeGctfhEVbkE",
     "error": "unseal_failed"
   }
 }

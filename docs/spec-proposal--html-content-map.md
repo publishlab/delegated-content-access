@@ -183,7 +183,8 @@ profile. Nothing in this profile applies to that host's handling.
 
 ### 4.3. Types
 
-The client MUST read each mapped item's required `contentData[item].contentType`.
+The client MUST read the required `contentType` from the `contentData` record
+whose `contentName` names the mapped item.
 Its value MUST be exactly `"text/html"` or `"text/plain"`, with no parameters
 or case variation; another string produces `map_type_unsupported`. A malformed
 required item record is an item failure and never supplies placeable bytes.

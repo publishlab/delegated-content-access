@@ -38,6 +38,11 @@ import { periodFamilySupply } from "../core-publisher/periodFamilySupply.js";
 import { chainKeyIssuerEngine } from "../core-issuer/chainKeyIssuerEngine.js";
 import { chainKeyCapabilitySource } from "../core-issuer/chainKeyCapabilitySource.js";
 import { wholeRenderIssuerSupplyPlan } from "../../../core-publisher/issuerSupplyPlan.js";
+import {
+  errorMap,
+  notDeliveredMap,
+  periodKeyMap,
+} from "../../../test-reference/support/namedRecords.js";
 
 const { subtle } = globalThis.crypto;
 const PUB = "https://www.news-site.example";
@@ -71,15 +76,20 @@ function lastSelected(answer) {
 
 /**
  * One family of two supplied window terminals, asked for a future horizon.
- * A fresh source each time, because one `selection` accumulates the response
- * room it has already spent.
+ * Selection bounds labels; invocation-time projection accounts for actual
+ * candidates and shared response room after envelope opening.
  *
  * @param {number} futurePeriodCount
  */
 function selectionFor(futurePeriodCount) {
   const request = new DcaRequest({
     periodGeometry: FULL,
-    sealed: { chainKeys: { premium: { "251023T2355": "AQ", "251024T2355": "Ag" } } },
+    sealed: {
+      chainKeys: [
+        { accessGroup: "premium", cutoff: "251023T2355", key: "AQ" },
+        { accessGroup: "premium", cutoff: "251024T2355", key: "Ag" },
+      ],
+    },
   });
   const grant = { accessGroup: "premium", futurePeriodCount, authorizePeriod: () => true };
   const select = chainKeyCapabilitySource().selection(request, { capturedAtMs: Date.parse(AT) }, [
@@ -202,7 +212,7 @@ test("an admitted family missing authorized current supply reports unavailable",
   const currentMiss = source.selection(
     new DcaRequest({
       periodGeometry: FULL,
-      sealed: { chainKeys: { premium: { "251024T2355": "AQ" } } },
+      sealed: { chainKeys: [{ accessGroup: "premium", cutoff: "251024T2355", key: "AQ" }] },
     }),
     { capturedAtMs: Date.parse(AT) },
     [grant],
@@ -212,7 +222,9 @@ test("an admitted family missing authorized current supply reports unavailable",
   const invalidMember = source.selection(
     new DcaRequest({
       periodGeometry: FULL,
-      sealed: { chainKeys: { premium: { "251023T2355": { malformed: true } } } },
+      sealed: {
+        chainKeys: [{ accessGroup: "premium", cutoff: "251023T2355", key: { malformed: true } }],
+      },
     }),
     { capturedAtMs: Date.parse(AT) },
     [grant],
@@ -228,12 +240,14 @@ test("an admitted family missing authorized current supply reports unavailable",
         chainsPerDay: FULL.chainsPerDay,
         periodMinutes: FULL.periodMinutes,
         targetTs: ["251023T0000"],
+        articleTs: [],
+        futureTs: ["251023T0000"],
       },
     ],
   });
 });
 
-test("response-room exhaustion is a silent omission, not availability", () => {
+test("all sourceable future selections reach actual candidate accounting", () => {
   const source = chainKeyCapabilitySource();
   const grants = ["premium", "archive", "legacy"].map((accessGroup) => ({
     accessGroup,
@@ -244,11 +258,14 @@ test("response-room exhaustion is a silent omission, not availability", () => {
     new DcaRequest({
       periodGeometry: FULL,
       sealed: {
-        chainKeys: {
-          premium: { "251023T2355": "AQ", "251024T2355": "Ag" },
-          archive: { "251023T2355": "Aw", "251024T2355": "BA" },
-          legacy: { "251023T2355": "BQ", "251024T2355": "Bg" },
-        },
+        chainKeys: [
+          { accessGroup: "premium", cutoff: "251023T2355", key: "AQ" },
+          { accessGroup: "premium", cutoff: "251024T2355", key: "Ag" },
+          { accessGroup: "archive", cutoff: "251023T2355", key: "Aw" },
+          { accessGroup: "archive", cutoff: "251024T2355", key: "BA" },
+          { accessGroup: "legacy", cutoff: "251023T2355", key: "BQ" },
+          { accessGroup: "legacy", cutoff: "251024T2355", key: "Bg" },
+        ],
       },
     }),
     { capturedAtMs: Date.parse(AT) },
@@ -256,7 +273,7 @@ test("response-room exhaustion is a silent omission, not availability", () => {
   );
   assert.ok("selected" in select("archive", 600, grants[1]));
   assert.ok("selected" in select("legacy", 600, grants[2]));
-  assert.deepEqual(select("premium", 600, grants[0]), { unavailable: true });
+  assert.ok("selected" in select("premium", 600, grants[0]));
 });
 
 test("article targets have priority and future output uses alphabetical remaining capacity", async () => {
@@ -289,11 +306,11 @@ test("article targets have priority and future output uses alphabetical remainin
   });
 
   assert.equal(answer.response.status, 200, "three families asking 600 period keys each is a 200");
-  const periodKeys = answer.response.body.keys.periodKeys;
+  const periodKeys = periodKeyMap(answer.response.body.keys.periodKeys);
   const requested = request.toObject().requestedPeriodKeys;
   assert.deepEqual(Object.keys(periodKeys).sort(), ["archive", "legacy", "premium"]);
-  for (const [accessGroup, labels] of Object.entries(requested)) {
-    for (const t of labels) {
+  for (const { accessGroup, periods } of requested) {
+    for (const t of periods) {
       assert.equal(
         Object.hasOwn(periodKeys[accessGroup], t),
         true,
@@ -327,8 +344,8 @@ test("article targets have priority and future output uses alphabetical remainin
 test("unavailable distinguishes authorized missing article supply from denial and form incompatibility", () => {
   const request = new DcaRequest({
     periodGeometry: FULL,
-    requestedPeriodKeys: { premium: ["251022T0000"] },
-    sealed: { chainKeys: { premium: { "251024T2355": "AQ" } } },
+    requestedPeriodKeys: [{ accessGroup: "premium", periods: ["251022T0000"] }],
+    sealed: { chainKeys: [{ accessGroup: "premium", cutoff: "251024T2355", key: "AQ" }] },
   });
   for (const permitted of [true, false]) {
     const grant = {
@@ -345,8 +362,8 @@ test("unavailable distinguishes authorized missing article supply from denial an
   }
   const incompatible = new DcaRequest({
     periodGeometry: FULL,
-    requestedPeriodKeys: { premium: ["251023T0010"] },
-    sealed: { chainKeys: { premium: { "251023T2355": "Ag" } } },
+    requestedPeriodKeys: [{ accessGroup: "premium", periods: ["251023T0010"] }],
+    sealed: { chainKeys: [{ accessGroup: "premium", cutoff: "251023T2355", key: "Ag" }] },
   });
   const grant = {
     accessGroup: "premium",
@@ -369,7 +386,7 @@ test("issuer reports future-only unavailable without article hints and independe
   const { registration, request } = await world();
   const document = request.toObject();
   delete document.requestedPeriodKeys;
-  document.sealed = { chainKeys: { premium: { "251022T2355": "AQ" } } };
+  document.sealed = { chainKeys: [{ accessGroup: "premium", cutoff: "251022T2355", key: "AQ" }] };
   for (const permitted of [true, false]) {
     const engine = new IssuerEngine({
       operatingIssuerNames: [ISSUER],
@@ -390,11 +407,11 @@ test("issuer reports future-only unavailable without article hints and independe
       {},
       { capturedAtMs: Date.parse(AT) },
     );
-    assert.deepEqual(result.notDelivered, {
+    assert.deepEqual(notDeliveredMap(result.notDelivered), {
       premium: { reason: permitted ? "unavailable" : "denied" },
     });
-    assert.deepEqual(result.periodKeys, {});
-    assert.deepEqual(result.errors, {});
+    assert.deepEqual(result.periodKeys, []);
+    assert.deepEqual(result.errors, []);
   }
 });
 
@@ -402,8 +419,8 @@ test("issuer reports older authorized missing supply but leaves opening failure 
   const { registration, request } = await world();
   for (const target of ["251022T0000", "251024T0000"]) {
     const document = request.toObject();
-    document.requestedPeriodKeys = { premium: [target] };
-    document.sealed = { chainKeys: { premium: { "251024T2355": "Ag" } } };
+    document.requestedPeriodKeys = [{ accessGroup: "premium", periods: [target] }];
+    document.sealed = { chainKeys: [{ accessGroup: "premium", cutoff: "251024T2355", key: "Ag" }] };
     const engine = new IssuerEngine({
       operatingIssuerNames: [ISSUER],
       notDeliveredReport: "complete",
@@ -424,12 +441,14 @@ test("issuer reports older authorized missing supply but leaves opening failure 
       { capturedAtMs: Date.parse(AT) },
     );
     if (target === "251022T0000") {
-      assert.deepEqual(result.notDelivered, { premium: { reason: "unavailable" } });
-      assert.deepEqual(result.errors, {});
+      assert.deepEqual(notDeliveredMap(result.notDelivered), {
+        premium: { reason: "unavailable" },
+      });
+      assert.deepEqual(result.errors, []);
     } else {
-      assert.deepEqual(result.notDelivered, {});
-      assert.equal(result.errors["premium|251024T2355"].error, "unseal_failed");
+      assert.deepEqual(result.notDelivered, []);
+      assert.equal(errorMap(result.errors)["premium|251024T2355"].error, "unseal_failed");
     }
-    assert.deepEqual(result.periodKeys, {});
+    assert.deepEqual(result.periodKeys, []);
   }
 });

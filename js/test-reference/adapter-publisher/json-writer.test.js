@@ -14,6 +14,8 @@ import { refuses } from "../../test-lib/helpers/refuses.js";
 
 const DCA_DATA = Object.freeze({ version: "1", resource: { data: { section: "politics" } } });
 const SEALED = Object.freeze({ bodytext: "QUJD" });
+/** SEALED as the document carries it: one `{contentName, content}` record per item. */
+const SEALED_RECORDS = [{ contentName: "bodytext", content: "QUJD" }];
 
 /** @param {Uint8Array} bytes */
 const text = (bytes) => new TextDecoder("utf-8", { fatal: true, ignoreBOM: true }).decode(bytes);
@@ -23,7 +25,7 @@ describe("The JSON delivery writer, the document it emits", () => {
     const bytes = writeJsonDelivery({ dcaData: DCA_DATA, sealedContent: SEALED });
 
     assert.ok(bytes instanceof Uint8Array, "the interchange form is bytes");
-    assert.equal(text(bytes), JSON.stringify({ ...DCA_DATA, sealedContent: SEALED }));
+    assert.equal(text(bytes), JSON.stringify({ ...DCA_DATA, sealedContent: SEALED_RECORDS }));
     assert.equal(bytes[0], 0x7b, "the first octet is `{`: no byte order mark");
   });
 
@@ -43,7 +45,20 @@ describe("The JSON delivery writer, the document it emits", () => {
   test("an empty sealedContent is written as an empty member, not left out", () => {
     const bytes = writeJsonDelivery({ dcaData: { version: "1" }, sealedContent: {} });
 
-    assert.equal(text(bytes), '{"version":"1","sealedContent":{}}');
+    assert.equal(text(bytes), '{"version":"1","sealedContent":[]}');
+  });
+
+  test("each ciphertext is one named record, in the render's item order", () => {
+    const bytes = writeJsonDelivery({
+      dcaData: { version: "1" },
+      sealedContent: { sidebar: "REVG", bodytext: "QUJD" },
+    });
+
+    assert.equal(
+      text(bytes),
+      '{"version":"1","sealedContent":[{"contentName":"sidebar","content":"REVG"},' +
+        '{"contentName":"bodytext","content":"QUJD"}]}',
+    );
   });
 
   test("each call returns new bytes and the writer keeps nothing between calls", () => {
@@ -52,7 +67,7 @@ describe("The JSON delivery writer, the document it emits", () => {
 
     assert.notEqual(first, second);
     first.fill(0);
-    assert.equal(text(second), JSON.stringify({ ...DCA_DATA, sealedContent: SEALED }));
+    assert.equal(text(second), JSON.stringify({ ...DCA_DATA, sealedContent: SEALED_RECORDS }));
   });
 
   test("an own `__proto__` member of dcaData stays an own member of the document", () => {
@@ -71,7 +86,7 @@ describe("The JSON delivery writer, the document it emits", () => {
 
     assert.equal(
       text(writeJsonDelivery({ dcaData, sealedContent })),
-      '{"version":"1","sealedContent":{"bodytext":"QUJD"}}',
+      '{"version":"1","sealedContent":[{"contentName":"bodytext","content":"QUJD"}]}',
     );
   });
 });

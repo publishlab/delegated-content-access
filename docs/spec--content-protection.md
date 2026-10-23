@@ -50,6 +50,15 @@ An item content-key alternative can stand alone without a period-key wrap.
 [Core Section 9](spec--core-protocol.md#9-delegation-completeness) defines the
 required complete issuer-mediated route for every item.
 
+A **wrap entry** is one record of an item record's `keys` collection.
+Its **authored coordinate** is the item's `contentName` and the entry's own
+`accessGroup` and `period`; this document calls the period label `t`. The authored coordinate,
+the delivery's `renderId` and the AES-GCM associated data selected for the
+entry form its **wrap context**. Publisher and client derive the **wrap
+nonce** from the wrap context (Section 4.1); no member carries it. The label
+under which a client stored, found or derived a candidate period key is not
+part of the authored coordinate.
+
 This specification consumes:
 
 - `renderId` from the publisher's resource model;
@@ -112,7 +121,7 @@ added.
 | Input | Source |
 | --- | --- |
 | `renderId` | The canonical 22-character render ID in the delivery's `resourceJWT` payload, admitted under core Section 4.1 |
-| `contentName` | The admitted member name that selects the item in that delivery's `contentData` |
+| `contentName` | The admitted `contentName` field of the item's record in that delivery's `contentData` |
 
 The client decodes the token to obtain its render ID; the optional diagnostic
 `resource` object supplies no input. Local decoding does not authenticate the
@@ -153,7 +162,7 @@ AES-128-GCM using:
 | authentication tag | 16 octets |
 
 The output is the AES-GCM ciphertext followed by the 16-octet authentication
-tag, carried in the applicable `sealedContent[contentName]` location. The
+tag, carried as `content` in the applicable `sealedContent` record for `contentName`. The
 nonce is implicit and is not transmitted. Replaying or decrypting this output
 is not a new encryption. Producing a second ciphertext, including a changed
 representation, requires a fresh independent content key; changing AAD alone
@@ -165,16 +174,16 @@ Readers and deliveries using the former random content nonce do not
 interoperate with it without a separately selected old reader; the presence
 of an item `nonce` MUST NOT select such a reader.
 
-This content-only rule does not change wrap or envelope nonces. Period keys
-wrap many content keys using fresh random wrap nonces under Section 4;
+This content-only rule does not change envelope nonces. Period keys wrap many
+content keys under nonces derived from each wrap context (Section 4.1);
 [spec-profile--period-keys.md](spec-profile--period-keys.md#content-wrapping-and-rollover)
 defines their invocation bound and deployment counting duty.
 
 ## 4. Base period-key content-key wrapping
 
 An item may declare one or more period-key wrap alternatives. Each base
-wrap entry corresponds to `(contentName, accessGroup, t)` and contains `t`, `nonce` and
-`key` as placed by the data-format specification.
+wrap entry corresponds to `(contentName, accessGroup, t)` and contains
+`accessGroup`, `period` and `key` as placed by the data-format specification.
 
 For each entry, the publisher encrypts the item's 16-octet `contentKey` with
 AES-128-GCM under `dca-profile-period-keys`,
@@ -183,17 +192,18 @@ using:
 | Input | Value |
 | --- | --- |
 | key | the 16-octet period key for `(accessGroup, t)` |
-| nonce | a fresh 12-octet wrap nonce |
+| nonce | the 12-octet wrap nonce derived from the entry's wrap context (Section 4.1) |
 | associated data | no AES-GCM `additionalData` is supplied; cryptographically the empty octet string |
 | authentication tag | 16 octets |
 
-The `contentKey` is exactly 16 octets. The `nonce` member carries the wrap
-nonce, and the `key` member carries the 16-octet encrypted content key followed
-by its 16-octet tag and therefore MUST decode to exactly 32 octets. Its
-canonical unpadded base64url spelling is exactly 43 characters.
+The `contentKey` is exactly 16 octets. The `key` member carries the 16-octet
+encrypted content key followed by its 16-octet tag and therefore MUST decode
+to exactly 32 octets. Its canonical unpadded base64url spelling is exactly 43
+characters. The entry carries no nonce.
 
 The absence of wrap AAD is part of the base v1 transcript; an implementation
-MUST NOT invent implicit AAD from the entry coordinate.
+MUST NOT invent implicit AAD from the entry coordinate. The coordinate enters
+only the wrap-nonce transcript of Section 4.1.
 
 The absence of an own `bind` member selects this base transcript. Base v1 has
 no string-valued base marker. An own `bind` member selects an alternative-wrap
@@ -201,6 +211,80 @@ profile: a client that selected and recognizes that marker MUST use that
 profile's transcript exclusively. An unknown marker, or a recognized marker
 whose profile the client has not selected, is a candidate miss. The client
 MUST NOT remove, ignore or retry that marked entry as a base no-AAD wrap.
+
+### 4.1. Wrap nonce
+
+Publisher and client derive each wrap nonce from the entry's wrap context.
+`UTF8` and `U32BE` are as defined in Section 3.2. The transcript frames octet
+strings, not text, with its own length prefix `LPB`:
+
+```text
+LPB(b) = U32BE(length_in_octets(b)) || b
+
+wrap_nonce_context = UTF8("dca-derivation-content-key-wrap-nonce") || 0x00
+                  || RID
+                  || LPB(UTF8(contentName))
+                  || LPB(UTF8(accessGroup))
+                  || LPB(UTF8(t))
+                  || LPB(wrap_aad)
+
+wrap_nonce = the first 12 octets of SHA-256(wrap_nonce_context)
+```
+
+`LPB` takes octets. The `LP` of Section 3.2 takes a string and frames its
+UTF-8 encoding, so `LP(s)` equals `LPB(UTF8(s))`. The two transcripts differ in
+how they take the render ID:
+
+- `RID` is the 16 octets that the canonical unpadded base64url `renderId` in
+  the delivery's `resourceJWT` payload decodes to
+  ([core Section 4.1](spec--core-protocol.md#41-producer-form)). It enters raw,
+  with no length prefix, because its width is fixed. The content AAD of
+  Section 3.2 instead frames the 22-character `renderId` string with `LP`.
+- `contentName`, `accessGroup` and `t` are the entry's authored coordinate in
+  their admitted spellings, without normalization.
+- `wrap_aad` is the AES-GCM associated data the entry's transcript selects:
+  the empty octet string for a base entry, and for an entry of a selected
+  alternative-wrap profile exactly the AAD octets that profile passes to
+  AES-GCM. An implementation computes the selected AAD once per wrap or
+  attempt and uses the same octets in the transcript and in the AES-GCM
+  operation.
+
+The domain string and its terminating zero octet are literal constants, not
+wire fields. SHA-256 is defined in
+[FIPS 180-4](https://csrc.nist.gov/pubs/fips/180-4/upd1/final). An input that
+fails its admission rule yields no nonce, and its existing failure scope
+applies. A client derives no nonce for an entry whose marker it does not
+select.
+
+As a worked example, render ID `AAECAwQFBgcICQoLDA0ODw`, item `bodytext`,
+access group `premium`, `t` `251023T1400` and empty `wrap_aad` give the wrap
+nonce `5bc590cb902de4d359b2c28b` in hexadecimal.
+
+A publisher MUST omit `nonce` from every wrap entry. A client MUST ignore a
+carried wrap-entry `nonce` under the data-format unknown-member rule, whatever
+its type or value. It MUST NOT use that member as the AES-GCM nonce, compare it
+with the derived nonce, or let its presence, absence or form select another
+procedure or a retry.
+
+The publisher MUST NOT encrypt different key material under one period key in
+one wrap context. Section 3.1 already fixes one content key per render and
+item, and core Section 4.1 requires a fresh random render ID for every render,
+so a compliant publisher meets this by drawing those values. Retransmitting a
+saved wrap, or repeating the identical encryption, uses no new context and
+reveals only that the copies are equal. Period-key Section 6.2 bounds the
+probability that two different contexts give one nonce and the number of
+wraps under one key.
+
+Because the nonce depends on the whole wrap context, a wrap entry moved to
+another render, item, access group or period derives another nonce and fails
+authentication. This follows from the nonce derivation; the base transcript
+still supplies no AES-GCM associated data.
+
+This is the only wrap procedure of `dca-profile-period-keys`, with no profile
+selection, runtime toggle, negotiation or legacy retry. Period-key support
+itself remains optional. A reader that expects a carried random wrap nonce
+cannot open these entries, and a reader of this procedure cannot open entries
+made with a random wrap nonce.
 
 ## 5. Opening a protected item
 
@@ -230,7 +314,12 @@ capabilities (Section 5.3); an item they do not resolve follows the core
 unlock flow.
 
 After an issuer result is admitted, an authorized issuer-returned item content
-key takes precedence over reconsulting cached period capabilities.
+key takes precedence over reconsulting cached period capabilities. When the
+result carries several content-key candidates for one item
+([core Section 7](spec--core-protocol.md#7-baseline-issuer-core-result)), the
+client tries each admitted candidate within its finite trial bound until
+content authentication succeeds. A failed opening under one candidate does not
+hide another admitted candidate.
 
 An issuer-returned item content key MUST contain exactly 16 octets. The client
 retains it only
@@ -267,8 +356,11 @@ additional derivation work.
 
 For an applicable period-key candidate and wrap entry, the client:
 
-1. requires a candidate period key of the selected period-key profile, a
-   12-octet wrap nonce and a 32-octet wrapped value;
+1. requires a candidate period key of the selected period-key profile and a
+   32-octet wrapped value, and derives the 12-octet wrap nonce (Section 4.1)
+   from the entry's authored coordinate, never from the label under which it
+   stored, found or derived the candidate, so rival, relabelled and
+   chain-derived candidates for one entry share one nonce;
 2. opens the wrapped value with that profile's content-key wrap algorithm, a
    16-octet tag and no AAD; and
 3. accepts the result only if authentication succeeds and the plaintext is
@@ -321,8 +413,8 @@ selection are defined by
 
 ## 7. Deferred ciphertext and content handling
 
-A data-format no-ciphertext outcome for `sealedContent[contentName]`, including
-a missing or non-string carrier member, means that ciphertext delivery is
+A data-format no-ciphertext outcome for an item's `sealedContent` record,
+including a missing record or a non-string `content`, means that ciphertext delivery is
 deferred. It does not change key resolution and is not a cryptographic profile.
 Later delivery MUST supply the exact ciphertext originally produced for the
 item's `contentKey`, fixed nonce and AAD; it MUST NOT silently reseal the item under a
@@ -484,9 +576,14 @@ filtering, AAD or client attempt order.
 AES-GCM nonce reuse under one key can destroy confidentiality and integrity.
 The fixed content nonce relies on a fresh independent key for every encryption.
 An accidental random-key collision repeats the key/nonce pair; a key-reuse bug
-is not rescued by changing AAD. Fresh random wrap nonces and the period-key
-invocation bound remain separate requirements (Section 4 and the period-key
-specification).
+is not rescued by changing AAD. A period key wraps many content keys, so its
+wrap nonce is the first 96 bits of a SHA-256 digest of the wrap context
+(Section 4.1). Fresh random render IDs and one content key per render and item
+give different wraps under one key different contexts, except when two render
+IDs collide. The truncated digest makes a nonce repeat across distinct
+contexts improbable, not impossible; the period-key specification bounds that
+probability and the invocation count per key. The nonce is public and predictable, which AES-GCM
+permits; it needs uniqueness under the key, not secrecy.
 
 The content AAD binds the render ID and item name under the content key
 (Section 3.2). A party rearranging public records cannot move a complete item
@@ -511,6 +608,7 @@ and authorization boundary for the specification set.
 - [BCP 14: RFC 2119 and RFC 8174](https://www.rfc-editor.org/info/bcp14)
 - [RFC 3629: UTF-8, a transformation format of ISO 10646](https://www.rfc-editor.org/info/rfc3629)
 - [NIST SP 800-38D: GCM and GMAC](https://csrc.nist.gov/pubs/sp/800/38/d/final)
+- [FIPS 180-4: Secure Hash Standard](https://csrc.nist.gov/pubs/fips/180-4/upd1/final)
 - [DCA data format](spec--data-format.md)
 - [DCA core protocol](spec--core-protocol.md)
 - [DCA sealed key envelopes](spec--sealed-key-envelopes.md)

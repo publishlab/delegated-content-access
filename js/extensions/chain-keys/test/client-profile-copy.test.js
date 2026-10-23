@@ -148,9 +148,13 @@ async function fixture() {
     },
   });
   assert.equal(result.response.status, 200);
-  assert.ok(Object.keys(result.response.body.keys.chainKeys[ACCESS_GROUP]).length);
-  assert.deepEqual(result.response.body.keys.contentKeys ?? {}, {});
-  assert.deepEqual(result.response.body.keys.periodKeys ?? {}, {});
+  assert.ok(
+    result.response.body.keys.chainKeys.some(
+      (/** @type {any} */ record) => record.accessGroup === ACCESS_GROUP,
+    ),
+  );
+  assert.deepEqual(result.response.body.keys.contentKeys ?? [], []);
+  assert.deepEqual(result.response.body.keys.periodKeys ?? [], []);
   return {
     delivery: [...delivery],
     publisherOrigin,

@@ -22,10 +22,10 @@ function delivery() {
   return {
     version: "1",
     resource: { resourceId: "article-a" },
-    contentData: {
-      bodytext: { contentType: "text/html", nonce: "n1" },
-      graphData: { contentType: "application/json", nonce: "n2" },
-    },
+    contentData: [
+      { contentName: "bodytext", contentType: "text/html" },
+      { contentName: "graphData", contentType: "application/json" },
+    ],
   };
 }
 
@@ -167,8 +167,8 @@ test("unknown names, missing targets and bad item types refuse only their own it
   const calls = [];
   const data = delivery();
   // the record exists, but its required contentType is missing
-  data.contentData.graphData = /** @type {any} */ ({ nonce: "n2" });
-  Object.assign(data.contentData, { sidebar: { contentType: "text/html", nonce: "n3" } });
+  data.contentData[1] = /** @type {any} */ ({ contentName: "graphData" });
+  data.contentData.push({ contentName: "sidebar", contentType: "text/html" });
   const connection = createContentHandler().connect({
     delivery: data,
     isEligible: () => true,
@@ -228,7 +228,9 @@ test("names are own properties: inherited members are neither items nor targets"
 
 test("a __proto__ content name is an ordinary item and an ordinary outcome member", async () => {
   const view = page();
-  const data = JSON.parse('{"contentData":{"__proto__":{"contentType":"text/plain","nonce":"n"}}}');
+  const data = JSON.parse(
+    '{"contentData":[{"contentName":"__proto__","contentType":"text/plain"}]}',
+  );
   const connection = createContentHandler().connect({
     delivery: data,
     isEligible: () => true,
@@ -273,7 +275,7 @@ test("connect snapshots targets, modes and item types", async () => {
     values,
   });
 
-  data.contentData.bodytext.contentType = "application/octet-stream";
+  data.contentData[0].contentType = "application/octet-stream";
   data.contentData = /** @type {any} */ ({});
   targets.bodytext = () => {
     throw new Error("the retargeted callback ran");
@@ -356,7 +358,7 @@ test("eligibility lost after the last commit makes the settled item stale, witho
   /** @type {string[]} */
   const calls = [];
   const data = delivery();
-  Object.assign(data.contentData, { caption: { contentType: "text/plain", nonce: "n" } });
+  data.contentData.push({ contentName: "caption", contentType: "text/plain" });
   const connection = createContentHandler().connect({
     delivery: data,
     isEligible: () => eligible,
@@ -422,7 +424,7 @@ test("an effect after an await is checked at the effect, and lost eligibility go
   /** @type {string[]} */
   const calls = [];
   const data = delivery();
-  Object.assign(data.contentData, { caption: { contentType: "text/plain", nonce: "n" } });
+  data.contentData.push({ contentName: "caption", contentType: "text/plain" });
   const connection = createContentHandler().connect({
     delivery: data,
     isEligible: () => eligible,
@@ -794,10 +796,10 @@ test("invalid callback outcomes fail, and a callback cannot claim stale", async 
       return /** @type {any} */ (result);
     };
   const data = delivery();
-  Object.assign(data.contentData, {
-    c: { contentType: "text/plain", nonce: "n" },
-    d: { contentType: "text/plain", nonce: "n" },
-  });
+  data.contentData.push(
+    { contentName: "c", contentType: "text/plain" },
+    { contentName: "d", contentType: "text/plain" },
+  );
   const connection = createContentHandler().connect({
     delivery: data,
     isEligible: () => true,
@@ -1034,6 +1036,67 @@ test("eligibility is checked before the callback, and only true counts", async (
   assert.deepEqual(calls, []);
 });
 
+test("connect selects the last whole content descriptor without inheriting an earlier type", async () => {
+  const html = { contentName: "bodytext", contentType: "text/html" };
+  const plain = { contentName: "bodytext", contentType: "text/plain" };
+  const missing = { contentName: "bodytext" };
+  for (const [records, expectedType] of [
+    [[html, plain], "text/plain"],
+    [[plain, html], "text/html"],
+    [[html, missing], null],
+    [[missing, html], "text/html"],
+    [[html, html], "text/html"],
+    [[null, html, null], "text/html"],
+  ]) {
+    const received = [];
+    const connection = createContentHandler().connect({
+      delivery: { contentData: records },
+      isEligible: () => true,
+      targets: {
+        bodytext: ({ contentType, commit }) => {
+          commit(() => received.push(contentType));
+          return { status: "handled" };
+        },
+      },
+    });
+    const result = await connection.handleContent({ bodytext: utf8Encode(BODY) });
+    assert.deepEqual(result, {
+      bodytext:
+        expectedType === null
+          ? { status: "refused", reason: "invalid_content_type" }
+          : { status: "handled" },
+    });
+    assert.deepEqual(received, expectedType === null ? [] : [expectedType]);
+    connection.dispose();
+  }
+});
+
+test("an invalid raw content identity cannot hide behind selected valid descriptors", () => {
+  const valid = { contentName: "bodytext", contentType: "text/html" };
+  for (const invalid of [
+    {},
+    { contentName: 7 },
+    { contentName: null },
+    { contentName: [] },
+    Object.create({ contentName: "bodytext" }),
+  ]) {
+    for (const records of [
+      [invalid, valid, valid],
+      [valid, valid, invalid],
+    ]) {
+      assert.throws(
+        () =>
+          createContentHandler().connect({
+            delivery: { contentData: records },
+            isEligible: () => true,
+            targets: {},
+          }),
+        { code: "bad_config" },
+      );
+    }
+  }
+});
+
 test("connect refuses invalid setup", () => {
   const handler = createContentHandler();
   const ok = { delivery: delivery(), isEligible: () => true, targets: {} };
@@ -1042,6 +1105,8 @@ test("connect refuses invalid setup", () => {
     ["setup is not an object", null, "bad_config"],
     ["unknown member", { ...ok, whenOutputPermitted: () => true }, "unsupported_option"],
     ["delivery without contentData", { ...ok, delivery: { version: "1" } }, "bad_config"],
+    ["old contentData map", { ...ok, delivery: { contentData: { bodytext: {} } } }, "bad_config"],
+    ["unnamed content record", { ...ok, delivery: { contentData: [{}] } }, "bad_config"],
     ["isEligible missing", { delivery: delivery(), targets: {} }, "bad_config"],
     ["target is not a function", { ...ok, targets: { bodytext: "#body" } }, "bad_config"],
     ["targets is an array", { ...ok, targets: [] }, "bad_config"],

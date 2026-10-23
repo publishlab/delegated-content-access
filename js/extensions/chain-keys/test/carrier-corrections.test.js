@@ -29,11 +29,18 @@ import {
 } from "../../../demo/support/PublisherRegistrations.js";
 import { Client } from "../../../test-lib/harnesses/client.js";
 import { ChainKeyRequestBuilder } from "../core-client/ChainKeyRequestBuilder.js";
+import { chainKeyRequestInput } from "../core-issuer/chainKeyRequestInput.js";
 import { chainKeyIssuerEngine } from "../core-issuer/chainKeyIssuerEngine.js";
 import { periodFamilyGeneration } from "../core-shared--publisher-issuer/periodFamilyGeneration.js";
 import { periodFamilySupply } from "../core-publisher/periodFamilySupply.js";
 import { explicitChainKeyClientProfile } from "../referenceProfile.js";
 import { wholeRenderIssuerSupplyPlan } from "../../../core-publisher/issuerSupplyPlan.js";
+import {
+  contentKeyMap,
+  errorMap,
+  periodKeyMap,
+} from "../../../test-reference/support/namedRecords.js";
+import { chainKeyRecords } from "./world.js";
 
 const { subtle } = globalThis.crypto;
 const PUB = "https://www.news-site.example";
@@ -48,6 +55,38 @@ const ARTICLE = "<p>The council voted 7-2 to rezone the harbour.</p>";
 const GEOMETRY = Object.freeze({ chainsPerDay: 2, periodMinutes: 15 });
 const TERMINAL_T = "251023T2345";
 const KEY = base64urlEncode(new Uint8Array(16).fill(3));
+const RIVAL_KEY = base64urlEncode(new Uint8Array(16).fill(4));
+
+/**
+ * Request chain collections that are not record arrays, each built from the
+ * relayed records. The former group map is one of them.
+ *
+ * @type {[string, (records: any[]) => unknown][]}
+ */
+const NOT_RECORD_ARRAYS = [
+  ["null", () => null],
+  ["a string", () => "bad"],
+  ["an empty object", () => ({})],
+  [
+    "the former group map",
+    (records) =>
+      Object.fromEntries(
+        records.map((record) => [record.accessGroup, { [record.cutoff]: record.key }]),
+      ),
+  ],
+];
+
+/**
+ * Chain record accessGroups the base name grammar refuses; undefined leaves
+ * the member out.
+ *
+ * @type {[string, unknown][]}
+ */
+const BAD_ACCESS_GROUPS = [
+  ["a missing accessGroup", undefined],
+  ["a non-string accessGroup", 7],
+  ["an accessGroup outside the name grammar", "2bad"],
+];
 
 /** @param {number} futurePeriodCount @param {boolean} content */
 function policy(futurePeriodCount, content = true, authorizePeriod = () => true) {
@@ -154,11 +193,11 @@ function counting(registration) {
 }
 
 describe("request admission when the issuer selected the chain-key extension", () => {
-  for (const malformed of [null, [], "bad"]) {
-    test(`a malformed chain collection ${JSON.stringify(malformed)} refuses the whole request`, async () => {
+  for (const [shape, malformed] of NOT_RECORD_ARRAYS) {
+    test(`a chain collection that is ${shape} refuses the whole request`, async () => {
       const { client, page, registration } = await world();
       const document = documentFor(client, page);
-      document.sealed.chainKeys = malformed;
+      document.sealed.chainKeys = malformed(document.sealed.chainKeys);
       const { counted, lookups } = counting(registration);
       const engine = chainKeyIssuerEngine({
         operatingIssuerNames: [ISSUER],
@@ -174,25 +213,70 @@ describe("request admission when the issuer selected the chain-key extension", (
     });
   }
 
-  test("an invalid access-group member name refuses the whole request", async () => {
-    const { client, page, registration } = await world();
+  for (const [name, accessGroup] of BAD_ACCESS_GROUPS) {
+    test(`a chain record with ${name} refuses the whole request`, async () => {
+      const { client, page, registration } = await world();
+      const document = documentFor(client, page);
+      const [first] = document.sealed.chainKeys;
+      const nameless = { cutoff: first.cutoff, key: first.key };
+      document.sealed.chainKeys.push(
+        accessGroup === undefined ? nameless : { accessGroup, ...nameless },
+      );
+      const { counted, lookups } = counting(registration);
+      const engine = chainKeyIssuerEngine({
+        operatingIssuerNames: [ISSUER],
+        accessPolicy: policy(2),
+        clock: new Clock(AT),
+      });
+
+      await assert.rejects(
+        engine.unlock(requestOf(document), counted),
+        (/** @type {any} */ error) => error.code === "binding_failed",
+      );
+      assert.equal(
+        lookups.count,
+        0,
+        "a sibling family cannot carry the request past the name rule",
+      );
+    });
+  }
+
+  test("a non-record element is skipped and its sibling family is answered", async () => {
+    const { client, generation, page, registration } = await world();
     const document = documentFor(client, page);
-    document.sealed.chainKeys = {
-      "2bad": document.sealed.chainKeys[GROUP],
-      [GROUP]: document.sealed.chainKeys[GROUP],
-    };
-    const { counted, lookups } = counting(registration);
+    document.sealed.chainKeys = [null, "x", 7, [GROUP], ...document.sealed.chainKeys];
     const engine = chainKeyIssuerEngine({
       operatingIssuerNames: [ISSUER],
       accessPolicy: policy(2),
       clock: new Clock(AT),
     });
 
-    await assert.rejects(
-      engine.unlock(requestOf(document), counted),
-      (/** @type {any} */ error) => error.code === "binding_failed",
+    const result = await engine.unlock(requestOf(document), registration);
+
+    const periodKeys = periodKeyMap(result.periodKeys);
+    assert.deepEqual(Object.keys(periodKeys[GROUP]), ["251023T1415", "251023T1430"]);
+    assert.equal(
+      periodKeys[GROUP]["251023T1415"],
+      base64urlEncode(await generation.periodKey(GROUP, "251023T1415")),
     );
-    assert.equal(lookups.count, 0, "a sibling family cannot carry the request past the name rule");
+    assert.deepEqual(result.errors, []);
+  });
+
+  test("an empty chain collection presents no family while the content key is answered", async () => {
+    const { client, page, registration } = await world();
+    const document = documentFor(client, page);
+    document.sealed.chainKeys = [];
+    const engine = chainKeyIssuerEngine({
+      operatingIssuerNames: [ISSUER],
+      accessPolicy: policy(2),
+      clock: new Clock(AT),
+    });
+
+    const result = await engine.unlock(requestOf(document), registration);
+
+    assert.deepEqual(Object.keys(contentKeyMap(result.contentKeys)), [NAME]);
+    assert.deepEqual(result.periodKeys, []);
+    assert.deepEqual(result.errors, []);
   });
 
   test("an invalid full periodGeometry accessGroups map refuses before policy and opening lookup", async () => {
@@ -245,25 +329,30 @@ describe("request admission when the issuer selected the chain-key extension", (
 
   test("a base issuer ignores both malformed chain members", async () => {
     const { client, page, registration } = await world();
-    for (const malformed of [null, [], "bad"]) {
+    for (const [, malformed] of NOT_RECORD_ARRAYS) {
       const document = documentFor(client, page);
-      document.sealed.chainKeys = malformed;
+      document.sealed.chainKeys = malformed(document.sealed.chainKeys);
       const result = await new IssuerEngine({
         operatingIssuerNames: [ISSUER],
         accessPolicy: policy(2),
       }).unlock(requestOf(document), registration);
-      assert.deepEqual(Object.keys(result.contentKeys), [NAME]);
-      assert.deepEqual(result.errors, {});
+      assert.deepEqual(Object.keys(contentKeyMap(result.contentKeys)), [NAME]);
+      assert.deepEqual(result.errors, []);
     }
 
-    const named = documentFor(client, page);
-    named.sealed.chainKeys = { "2bad": named.sealed.chainKeys[GROUP] };
-    const result = await new IssuerEngine({
-      operatingIssuerNames: [ISSUER],
-      accessPolicy: policy(2),
-    }).unlock(requestOf(named), registration);
-    assert.deepEqual(Object.keys(result.contentKeys), [NAME]);
-    assert.deepEqual(result.errors, {});
+    for (const [, accessGroup] of BAD_ACCESS_GROUPS) {
+      const named = documentFor(client, page);
+      named.sealed.chainKeys = named.sealed.chainKeys.map((/** @type {any} */ record) => ({
+        ...record,
+        accessGroup,
+      }));
+      const result = await new IssuerEngine({
+        operatingIssuerNames: [ISSUER],
+        accessPolicy: policy(2),
+      }).unlock(requestOf(named), registration);
+      assert.deepEqual(Object.keys(contentKeyMap(result.contentKeys)), [NAME]);
+      assert.deepEqual(result.errors, []);
+    }
   });
 });
 
@@ -271,10 +360,10 @@ describe("local chain failures keep their narrower scope under a selecting issue
   test("a noncanonical sealed member and valid same-window sibling void the family", async () => {
     const { client, page, registration } = await world();
     const document = documentFor(client, page);
-    for (const t of Object.keys(document.sealed.chainKeys[GROUP])) {
-      if (t !== TERMINAL_T) delete document.sealed.chainKeys[GROUP][t];
-    }
-    document.sealed.chainKeys[GROUP]["251023T2330"] = "AQ==";
+    document.sealed.chainKeys = document.sealed.chainKeys.filter(
+      (/** @type {any} */ record) => record.accessGroup === GROUP && record.cutoff === TERMINAL_T,
+    );
+    document.sealed.chainKeys.push({ accessGroup: GROUP, cutoff: "251023T2330", key: "AQ==" });
     const engine = chainKeyIssuerEngine({
       operatingIssuerNames: [ISSUER],
       accessPolicy: policy(2),
@@ -283,27 +372,31 @@ describe("local chain failures keep their narrower scope under a selecting issue
 
     const result = await engine.unlock(requestOf(document), registration);
 
-    assert.deepEqual(Object.keys(result.periodKeys), []);
-    assert.deepEqual(result.errors, {});
+    assert.deepEqual(result.periodKeys, []);
+    assert.deepEqual(result.errors, []);
   });
 
   const LOCAL = [
     {
-      name: "a non-object family",
+      name: "a family without a string cutoff",
       spoil: (/** @type {any} */ document) => {
-        document.sealed.chainKeys[OTHER] = "nope";
+        document.sealed.chainKeys.push({ accessGroup: OTHER, cutoff: 7, key: KEY });
       },
     },
     {
       name: "an off-grid label",
       spoil: (/** @type {any} */ document) => {
-        document.sealed.chainKeys[OTHER] = { "251023T1410": KEY };
+        document.sealed.chainKeys.push({ accessGroup: OTHER, cutoff: "251023T1410", key: KEY });
       },
     },
     {
       name: "a non-string chain key",
       spoil: (/** @type {any} */ document) => {
-        document.sealed.chainKeys[OTHER] = { [TERMINAL_T]: { key: KEY } };
+        document.sealed.chainKeys.push({
+          accessGroup: OTHER,
+          cutoff: TERMINAL_T,
+          key: { key: KEY },
+        });
       },
     },
   ];
@@ -321,17 +414,15 @@ describe("local chain failures keep their narrower scope under a selecting issue
 
       const result = await engine.unlock(requestOf(document), registration);
 
-      assert.deepEqual(Object.keys(result.contentKeys), [NAME]);
-      assert.deepEqual(Object.keys(result.periodKeys), [GROUP]);
-      assert.deepEqual(Object.keys(result.periodKeys[GROUP]), ["251023T1415", "251023T1430"]);
-      for (const t of Object.keys(result.periodKeys[GROUP])) {
-        assert.equal(
-          result.periodKeys[GROUP][t],
-          base64urlEncode(await generation.periodKey(GROUP, t)),
-        );
+      const periodKeys = periodKeyMap(result.periodKeys);
+      assert.deepEqual(Object.keys(contentKeyMap(result.contentKeys)), [NAME]);
+      assert.deepEqual(Object.keys(periodKeys), [GROUP]);
+      assert.deepEqual(Object.keys(periodKeys[GROUP]), ["251023T1415", "251023T1430"]);
+      for (const t of Object.keys(periodKeys[GROUP])) {
+        assert.equal(periodKeys[GROUP][t], base64urlEncode(await generation.periodKey(GROUP, t)));
       }
       assert.deepEqual(
-        Object.keys(result.errors),
+        Object.keys(errorMap(result.errors)),
         name === "a non-string chain key" ? [`${OTHER}|${TERMINAL_T}`] : [],
       );
     });
@@ -344,23 +435,36 @@ function clientPage(renderId) {
     {
       version: "1",
       resourceJWT: `e30.${base64urlEncode(utf8Encode(JSON.stringify({ renderId })))}.c2lnbmF0dXJl`,
-      issuerData: {
-        [ISSUER]: { keyId: KEY_ID, unlockUrl: "https://api.example/unlock", sealed: {} },
-      },
-      contentData: {},
+      issuerData: [
+        { issuerName: ISSUER, keyId: KEY_ID, unlockUrl: "https://api.example/unlock", sealed: {} },
+      ],
+      contentData: [],
     },
     { publisherOrigin: PUB },
   );
 }
 
-/** The request document the client sent, in the shape `PageLoad` holds it. */
+/**
+ * The request document the client sent, in the shape `PageLoad` holds it.
+ *
+ * @param {unknown} [periodGeometry]
+ * @param {Record<string, Record<string, unknown>>} [families] - as `chainKeyRecords` spells it
+ */
 function chainRequest(periodGeometry = GEOMETRY, families = { [GROUP]: { [TERMINAL_T]: KEY } }) {
-  return { sealed: { contentKeys: {}, chainKeys: families }, periodGeometry };
+  return {
+    sealed: { contentKeys: [], chainKeys: chainKeyRecords(families) },
+    periodGeometry,
+  };
 }
 
-/** A chain response carrying one cutoff per named family. */
+/**
+ * A chain response carrying one cutoff per named family.
+ *
+ * @param {unknown} [periodGeometry]
+ * @param {Record<string, Record<string, unknown>>} [families] - as `chainKeyRecords` spells it
+ */
 function chainResponse(periodGeometry = GEOMETRY, families = { [GROUP]: { [TERMINAL_T]: KEY } }) {
-  return { keys: { chainKeys: families }, periodGeometry };
+  return { keys: { chainKeys: chainKeyRecords(families) }, periodGeometry };
 }
 
 /** A resolver over a chain cache that records what reaches it. */
@@ -406,8 +510,8 @@ test("chain errors require a valid presented source label under resolved request
       validPage,
       ISSUER,
       {
-        keys: { contentKeys: {} },
-        errors: { [`${GROUP}|${TERMINAL_T}`]: { error: "unseal_failed" } },
+        keys: { contentKeys: [] },
+        errors: [{ coordinate: `${GROUP}|${TERMINAL_T}`, error: "unseal_failed" }],
       },
       chainRequest(),
     ),
@@ -427,8 +531,8 @@ test("chain errors require a valid presented source label under resolved request
       invalidPage,
       ISSUER,
       {
-        keys: { contentKeys: {} },
-        errors: { [`${GROUP}|${offGrid}`]: { error: "unseal_failed" } },
+        keys: { contentKeys: [] },
+        errors: [{ coordinate: `${GROUP}|${offGrid}`, error: "unseal_failed" }],
       },
       chainRequest(GEOMETRY, { [GROUP]: { [offGrid]: KEY } }),
     ),
@@ -456,6 +560,53 @@ describe("a chain response is admitted under the pair its request resolved", () 
     assert.equal(filed.length, 1);
     assert.equal(filed[0][3].chainsPerDay, GEOMETRY.chainsPerDay);
     assert.equal(filed[0][3].periodMinutes, GEOMETRY.periodMinutes);
+  });
+
+  for (const [order, keys] of [
+    ["first value first", [KEY, RIVAL_KEY]],
+    ["rival value first", [RIVAL_KEY, KEY]],
+  ]) {
+    test(`rival response records at one cutoff file both candidates, ${order}`, async () => {
+      const { filed, resolver } = filingResolver();
+
+      const applied = await applyAssociatedResponse(
+        resolver,
+        clientPage(`render-rivals-${keys[0]}`),
+        ISSUER,
+        {
+          keys: {
+            chainKeys: keys.map((key) => ({ accessGroup: GROUP, cutoff: TERMINAL_T, key })),
+          },
+        },
+        chainRequest(),
+      );
+
+      assert.deepEqual(applied, { accepted: 2, errors: [], issues: [] });
+      assert.deepEqual(
+        filed.map(([accessGroup, cutoffT]) => [accessGroup, cutoffT]),
+        [
+          [GROUP, TERMINAL_T],
+          [GROUP, TERMINAL_T],
+        ],
+        "neither rival overwrites the other",
+      );
+    });
+  }
+
+  test("a third raw response record at one cutoff exceeds the family bound and files nothing", async () => {
+    const { filed, resolver } = filingResolver();
+    const record = { accessGroup: GROUP, cutoff: TERMINAL_T, key: KEY };
+
+    const applied = await applyAssociatedResponse(
+      resolver,
+      clientPage("render-over-family-bound"),
+      ISSUER,
+      { keys: { chainKeys: [record, { ...record }, { ...record }] } },
+      chainRequest(),
+    );
+
+    assert.equal(applied.accepted, 0);
+    assert.deepEqual(filed, []);
   });
 
   test("a family the request never presented files no cutoff", async () => {
@@ -576,7 +727,14 @@ describe("a chain response is admitted under the pair its request resolved", () 
       resolver,
       clientPage("render-projected-period-keys"),
       ISSUER,
-      { keys: { periodKeys: { [GROUP]: { "251023T1415": KEY, "251023T1430": KEY } } } },
+      {
+        keys: {
+          periodKeys: [
+            { accessGroup: GROUP, period: "251023T1415", key: KEY },
+            { accessGroup: GROUP, period: "251023T1430", key: KEY },
+          ],
+        },
+      },
       chainRequest(),
     );
 
@@ -608,12 +766,10 @@ describe("a chain response is admitted under the pair its request resolved", () 
       ISSUER,
       {
         keys: {
-          periodKeys: {
-            [GROUP]: {
-              "251023T1430": KEY,
-              "251023T1145": KEY,
-            },
-          },
+          periodKeys: [
+            { accessGroup: GROUP, period: "251023T1430", key: KEY },
+            { accessGroup: GROUP, period: "251023T1145", key: KEY },
+          ],
         },
       },
       chainRequest(GEOMETRY, { [GROUP]: { "251023T1415": KEY } }),
@@ -646,13 +802,13 @@ describe("a chain response is admitted under the pair its request resolved", () 
     });
     const periodKeyT = "251023T1215";
     const request = chainRequest(GEOMETRY, { [GROUP]: { "251023T1145": KEY } });
-    request.sealed.periodKeys = { [GROUP]: { [periodKeyT]: KEY } };
+    request.sealed.periodKeys = [{ accessGroup: GROUP, period: periodKeyT, key: KEY }];
 
     const applied = await applyAssociatedResponse(
       resolver,
       clientPage("render-presented-period-key"),
       ISSUER,
-      { keys: { periodKeys: { [GROUP]: { [periodKeyT]: KEY } } } },
+      { keys: { periodKeys: [{ accessGroup: GROUP, period: periodKeyT, key: KEY }] } },
       request,
     );
 
@@ -712,9 +868,9 @@ describe("chain keys share the one response representation", () => {
       {
         transport: { method: "ECDH-P256" },
         keys: {
-          chainKeys: { [GROUP]: { [TERMINAL_T]: KEY } },
-          periodKeys: { [GROUP]: { "251023T1415": { key: KEY } } },
-          contentKeys: { [NAME]: { key: KEY } },
+          chainKeys: [{ accessGroup: GROUP, cutoff: TERMINAL_T, key: KEY }],
+          periodKeys: [{ accessGroup: GROUP, period: "251023T1415", key: { key: KEY } }],
+          contentKeys: [{ contentName: NAME, key: { key: KEY } }],
         },
         periodGeometry: { ...GEOMETRY },
       },
@@ -723,7 +879,7 @@ describe("chain keys share the one response representation", () => {
         clientPublicKey: { kty: "EC", crv: "P-256", x: "request-x", y: "request-y" },
         sealed: {
           ...chainRequest().sealed,
-          contentKeys: { [NAME]: KEY },
+          contentKeys: [{ contentName: NAME, key: KEY }],
         },
       },
     );
@@ -743,15 +899,15 @@ describe("chain keys share the one response representation", () => {
       {
         transport: { method: "ECDH-P256" },
         keys: {
-          chainKeys: { [GROUP]: { [TERMINAL_T]: { key: KEY } } },
-          periodKeys: { [GROUP]: { "251023T1415": { key: KEY } } },
-          contentKeys: { [NAME]: { key: KEY } },
+          chainKeys: [{ accessGroup: GROUP, cutoff: TERMINAL_T, key: { key: KEY } }],
+          periodKeys: [{ accessGroup: GROUP, period: "251023T1415", key: { key: KEY } }],
+          contentKeys: [{ contentName: NAME, key: { key: KEY } }],
         },
       },
       {
         ...chainRequest(),
         clientPublicKey: { kty: "EC", crv: "P-256", x: "request-x", y: "request-y" },
-        sealed: { ...chainRequest().sealed, contentKeys: { [NAME]: KEY } },
+        sealed: { ...chainRequest().sealed, contentKeys: [{ contentName: NAME, key: KEY }] },
       },
     );
     assert.deepEqual(control, { accepted: 3, errors: [], issues: [] });
@@ -763,3 +919,117 @@ describe("chain keys share the one response representation", () => {
     );
   });
 });
+
+for (const [name, cutoff] of [
+  ["missing", undefined],
+  ["numeric", 7],
+  ["null", null],
+  ["object", { malformed: true }],
+]) {
+  const record = () => ({
+    accessGroup: OTHER,
+    ...(cutoff === undefined ? {} : { cutoff }),
+    key: KEY,
+  });
+
+  test(`a record with a ${name} cutoff leaves a geometrically admitted family with no positioned members`, () => {
+    const request = requestOf({ periodGeometry: GEOMETRY, sealed: { chainKeys: [record()] } });
+    const family = chainKeyRequestInput(request).family(OTHER);
+    assert.equal(family.kind, "valid");
+    assert.deepEqual(family.geometry, { ...GEOMETRY, windowMinutes: 720, positionsPerWindow: 48 });
+    assert.deepEqual(family.members, []);
+    assert.deepEqual(family.malformedMembers, []);
+  });
+
+  test(`a record with a ${name} cutoff cannot hide an off-grid desired label from admission`, async () => {
+    const { client, page, registration } = await world();
+    const document = documentFor(client, page);
+    document.sealed.chainKeys.push(record());
+    document.requestedPeriodKeys = [{ accessGroup: OTHER, periods: ["251023T1417"] }];
+    const { counted, lookups } = counting(registration);
+    let policyCalls = 0;
+    const engine = chainKeyIssuerEngine({
+      operatingIssuerNames: [ISSUER],
+      accessPolicy: {
+        decide: (...args) => {
+          policyCalls++;
+          return policy(2).decide(...args);
+        },
+      },
+      clock: new Clock(AT),
+    });
+    await assert.rejects(
+      engine.unlock(requestOf(document), counted),
+      (error) => error.code === "binding_failed",
+      "the whole request is refused before an independent content key can be returned",
+    );
+    assert.equal(policyCalls, 0);
+    assert.equal(lookups.count, 0);
+  });
+
+  test(`a record with a ${name} cutoff with an on-grid desired label yields no source error while siblings survive`, async () => {
+    const { client, page, registration } = await world();
+    const document = documentFor(client, page);
+    document.sealed.chainKeys.push(record());
+    document.requestedPeriodKeys = [{ accessGroup: OTHER, periods: ["251023T1415"] }];
+    const engine = chainKeyIssuerEngine({
+      operatingIssuerNames: [ISSUER],
+      accessPolicy: policy(2),
+      clock: new Clock(AT),
+    });
+    const result = await engine.unlock(requestOf(document), registration);
+    assert.deepEqual(Object.keys(contentKeyMap(result.contentKeys)), [NAME]);
+    assert.deepEqual(Object.keys(periodKeyMap(result.periodKeys)), [GROUP]);
+    assert.deepEqual(Object.keys(periodKeyMap(result.periodKeys)[GROUP]), [
+      "251023T1415",
+      "251023T1430",
+    ]);
+    assert.deepEqual(result.errors, [], "a record without a label supplies no error coordinate");
+  });
+}
+
+for (const [name, spoil] of [
+  [
+    "invalid geometry",
+    (document) => {
+      document.periodGeometry = { chainsPerDay: 0, periodMinutes: 15 };
+    },
+  ],
+  [
+    "over the raw family member bound",
+    (document) => {
+      document.sealed.chainKeys.push(
+        ...Array.from({ length: 3 }, () => ({ accessGroup: OTHER, key: KEY })),
+      );
+    },
+  ],
+  [
+    "two positioned labels in one window",
+    (document) => {
+      document.sealed.chainKeys.push(
+        { accessGroup: OTHER, cutoff: "251023T2330", key: KEY },
+        { accessGroup: OTHER, cutoff: "251023T2345", key: KEY },
+      );
+    },
+  ],
+]) {
+  test(`a family with ${name} stays invalid and does not promote an off-grid hint to whole-request refusal`, async () => {
+    const { client, page, registration } = await world();
+    const document = documentFor(client, page);
+    if (name === "invalid geometry")
+      document.sealed.chainKeys.push({ accessGroup: OTHER, key: KEY });
+    spoil(document);
+    document.requestedPeriodKeys = [{ accessGroup: OTHER, periods: ["251023T1417"] }];
+    const request = requestOf(document);
+    assert.equal(chainKeyRequestInput(request).family(OTHER).kind, "invalid");
+    const engine = chainKeyIssuerEngine({
+      operatingIssuerNames: [ISSUER],
+      accessPolicy: policy(2),
+      clock: new Clock(AT),
+    });
+    const result = await engine.unlock(request, registration);
+    assert.deepEqual(Object.keys(contentKeyMap(result.contentKeys)), [NAME]);
+    assert.equal(Object.hasOwn(periodKeyMap(result.periodKeys), OTHER), false);
+    assert.deepEqual(result.errors, []);
+  });
+}

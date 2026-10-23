@@ -1,17 +1,14 @@
 //
-// Every map on the wire is keyed by a name an attacker picks: contentName,
-// accessGroup, issuerName. A bare `map[name]` reaches Object.prototype, so
-// 'constructor' or 'toString' resolves to a function instead of missing.
-// Lookups over wire-derived objects go through Object.hasOwn.
-//
-// The map itself is the attacker's too. A section that arrives as a string or
-// an array still has member names, so a walk that does not ask whether it is a
-// map reads index names as coordinates - which is the last test here.
+// Every record on the wire carries a name an attacker picks: contentName,
+// accessGroup, issuerName. A reader that files records in a plain object and
+// reads `object[name]` reaches Object.prototype, so 'constructor' or
+// 'toString' resolves to a function instead of missing. Lookups by a
+// wire-derived name go through a Map or Object.hasOwn.
 //
 // The names the sealer refuses are the other half of the same question. The
-// format's identifier section makes them the consumer's business: a map keyed
-// by contentName, accessGroup or issuerName is rejected whole when one member
-// name fails the grammar, rather than read past that member. For every name the
+// format's identifier section makes them the consumer's business: a collection
+// of records named by contentName, accessGroup or issuerName is rejected whole
+// when one record's name fails the grammar, rather than read past that record. For every name the
 // grammar admits, inherited words among them, the consumer owes a lookup that
 // resolves the name as written or stays inert, and no crash on either an
 // inherited or an own hazard name.
@@ -47,7 +44,7 @@ function unsignedJwt(payload) {
 /**
  * A page shaped like the wire, with nothing under any inherited name. Hand-built
  * rather than rendered: every test below asks what a member name resolves to,
- * which needs the map's names chosen here rather than by a publisher.
+ * which needs the record names chosen here rather than by a publisher.
  */
 function page() {
   return JSON.parse(
@@ -67,20 +64,18 @@ function page() {
         resourceId: RESOURCE_ID,
         data: {},
       }),
-      contentData: {
-        [CONTENT_NAME]: {
-          contentType: "text/html",
-          nonce: "AAAAAAAAAAAAAAAA",
-        },
-      },
-      issuerData: {
-        [ISSUER_NAME]: {
-          sealed: { contentKeys: { [CONTENT_NAME]: "AAAA" } },
+      contentData: [
+        { contentName: CONTENT_NAME, contentType: "text/html", nonce: "AAAAAAAAAAAAAAAA" },
+      ],
+      issuerData: [
+        {
+          issuerName: ISSUER_NAME,
+          sealed: { contentKeys: [{ contentName: CONTENT_NAME, key: "AAAA" }] },
           unlockUrl: UNLOCK_URL,
           keyId: KEY_ID,
         },
-      },
-      sealedContent: { [CONTENT_NAME]: "AAAA" },
+      ],
+      sealedContent: [{ contentName: CONTENT_NAME, content: "AAAA" }],
     }),
   );
 }
@@ -126,11 +121,7 @@ test("an inherited contentName has no sealed key to send", () => {
     const unsealer = new Client({ publisherOrigin: ORIGIN });
     const dcaData = unsealer.parse(wire);
     const request = unsealer.buildRequest(dcaData, ISSUER_NAME, [name]);
-    assert.deepEqual(
-      request.sealed.contentKeys,
-      {},
-      `sealed.contentKeys['${name}'] must not resolve`,
-    );
+    assert.deepEqual(request.sealed.contentKeys, [], `no sealed contentKeys record for '${name}'`);
   }
 });
 
@@ -163,7 +154,7 @@ test("an inherited contentName in a response does not become a key", async () =>
 
   // A hostile issuer answering with prototype names must not plant anything.
   unsealer.buildRequest(dcaData, ISSUER_NAME, []);
-  await unsealer.applyResponse(dcaData, ISSUER_NAME, { keys: { contentKeys: {} } });
+  await unsealer.applyResponse(dcaData, ISSUER_NAME, { keys: { contentKeys: [] } });
 
   for (const name of INHERITED) {
     assert.equal(await unsealer.contentKeyFor(dcaData, name), null);
@@ -188,7 +179,11 @@ test("resolve reports a held content key covered, not just what the cache opens"
   // A grant that delivered a content key for this render and no period key.
   unsealer.buildRequest(dcaData, ISSUER_NAME, [CONTENT_NAME]);
   await unsealer.applyResponse(dcaData, ISSUER_NAME, {
-    keys: { contentKeys: { [CONTENT_NAME]: base64urlEncode(new Uint8Array(16).fill(4)) } },
+    keys: {
+      contentKeys: [
+        { contentName: CONTENT_NAME, key: base64urlEncode(new Uint8Array(16).fill(4)) },
+      ],
+    },
   });
 
   assert.deepEqual(
@@ -222,24 +217,28 @@ describe("The consumer accepts wide", () => {
           resourceId: "123|456",
           data: {},
         }),
-        contentData: {
-          two: {
+        contentData: [
+          {
+            contentName: "two",
             contentType: "text/html",
             nonce: "AAAAAAAAAAAAAAAA",
-            keys: { ten: [{ t: "251023T1400", nonce: "AAAAAAAAAAAAAAAA", key: "AAAA" }] },
+            keys: [
+              { accessGroup: "ten", period: "251023T1400", nonce: "AAAAAAAAAAAAAAAA", key: "AAAA" },
+            ],
           },
-        },
-        issuerData: {
-          paywall: {
+        ],
+        issuerData: [
+          {
+            issuerName: "paywall",
             sealed: {
-              contentKeys: { two: "AAAA" },
-              periodKeys: { ten: { "251023T1400": "AAAA" } },
+              contentKeys: [{ contentName: "two", key: "AAAA" }],
+              periodKeys: [{ accessGroup: "ten", period: "251023T1400", key: "AAAA" }],
             },
             unlockUrl: UNLOCK_URL,
             keyId: KEY_ID,
           },
-        },
-        sealedContent: { two: "AAAA" },
+        ],
+        sealedContent: [{ contentName: "two", content: "AAAA" }],
       }),
     );
   }
@@ -253,52 +252,53 @@ describe("The consumer accepts wide", () => {
     // written, whoever chose them.
     assert.equal(unsealer.extract(page, "two"), "AAAA");
 
-    // `issuerData` is keyed by issuerName, so the name the page filed under
-    // is the key the client looks up under and sends on.
+    // Each `issuerData` record names its block by issuerName, so the name the
+    // page filed under is the name the client looks up under and sends on.
     const request = unsealer.buildRequest(dcaData, "paywall", ["two"]);
     assert.equal(request.issuerName, "paywall");
-    assert.deepEqual(request.sealed.contentKeys, { two: "AAAA" });
-    assert.deepEqual(request.sealed.periodKeys, { ten: { "251023T1400": "AAAA" } });
+    assert.deepEqual(request.sealed.contentKeys, [{ contentName: "two", key: "AAAA" }]);
+    assert.deepEqual(request.sealed.periodKeys, [
+      { accessGroup: "ten", period: "251023T1400", key: "AAAA" },
+    ]);
 
     const { covered, missing } = await unsealer.resolve(dcaData, ["two"]);
     assert.deepEqual(covered, []);
     assert.deepEqual(missing, ["two"]);
   });
 
-  test("a name the grammar refuses rejects the map that carries it", () => {
+  test("a name the grammar refuses rejects the collection that carries it", () => {
     const unsealer = new Client({ publisherOrigin: ORIGIN });
     const badPage = (/** @type {any} */ err) => err.code === "bad_page";
 
-    // One member name outside the grammar rejects the whole map, so the
-    // sound sibling beside it answers nothing either. The three maps a
+    // One record name outside the grammar rejects the whole collection, so
+    // the sound sibling beside it answers nothing either. The collections a
     // request is derived from say so where the request is derived.
     const issuers = hostilePage();
-    issuers.issuerData["pay|wall"] = issuers.issuerData.paywall;
+    issuers.issuerData.push({ ...issuers.issuerData[0], issuerName: "pay|wall" });
     assert.throws(
       () => unsealer.buildRequest(unsealer.parse(issuers), "paywall", ["two"]),
       badPage,
     );
 
     const inventory = hostilePage();
-    inventory.contentData["2bad"] = inventory.contentData.two;
+    inventory.contentData.push({ ...inventory.contentData[0], contentName: "2bad" });
     assert.throws(
       () => unsealer.buildRequest(unsealer.parse(inventory), "paywall", ["two"]),
       badPage,
     );
 
-    // The sealed-content carrier is keyed by contentName too, and the
-    // reader holds it to the same rule as it reads the delivery.
+    // The sealed-content carrier names its records by contentName too, and
+    // the reader holds it to the same rule as it reads the delivery.
     const carrier = hostilePage();
-    carrier.sealedContent["2bad"] = "AAAA";
+    carrier.sealedContent.push({ contentName: "2bad", content: "AAAA" });
     assert.throws(() => unsealer.parse(carrier), badPage);
   });
 
-  test("an own inherited-word coordinate survives both base request maps", () => {
+  test("an inherited-word coordinate survives both base request collections", () => {
     // `constructor` passes the grammar and every object also answers to it,
-    // so a map that carries it as an own member is the case a plain
-    // `map[name]` read cannot tell apart from the prototype's. Use it
-    // independently in the two dimensions the request copies: contentName
-    // and accessGroup.
+    // so a reader that indexes a plain object by name cannot tell the page's
+    // record from the prototype's member. Use it independently in the two
+    // dimensions the request copies: contentName and accessGroup.
     const hostile = JSON.parse(
       JSON.stringify({
         version: "1",
@@ -316,41 +316,45 @@ describe("The consumer accepts wide", () => {
           resourceId: RESOURCE_ID,
           data: {},
         }),
-        contentData: {
-          constructor: {
+        contentData: [
+          {
+            contentName: "constructor",
             contentType: "text/html",
             nonce: "AAAAAAAAAAAAAAAA",
-            keys: {
-              constructor: [{ t: "251023T1400", nonce: "AAAAAAAAAAAAAAAA", key: "wrapped" }],
-            },
+            keys: [
+              {
+                accessGroup: "constructor",
+                period: "251023T1400",
+                nonce: "AAAAAAAAAAAAAAAA",
+                key: "wrapped",
+              },
+            ],
           },
-        },
-        issuerData: {
-          [ISSUER_NAME]: {
+        ],
+        issuerData: [
+          {
+            issuerName: ISSUER_NAME,
             sealed: {
-              contentKeys: { constructor: "AQ" },
-              periodKeys: { constructor: { "251023T1400": "Ag" } },
-              chainKeys: { constructor: { "251023T2300": "Aw" } },
+              contentKeys: [{ contentName: "constructor", key: "AQ" }],
+              periodKeys: [{ accessGroup: "constructor", period: "251023T1400", key: "Ag" }],
+              chainKeys: [{ accessGroup: "constructor", cutoff: "251023T2300", key: "Aw" }],
             },
             unlockUrl: UNLOCK_URL,
             keyId: KEY_ID,
           },
-        },
-        sealedContent: { constructor: "ciphertext" },
+        ],
+        sealedContent: [{ contentName: "constructor", content: "ciphertext" }],
       }),
     );
 
     const unsealer = new Client({ publisherOrigin: ORIGIN });
     const request = unsealer.buildRequest(unsealer.parse(hostile), ISSUER_NAME, ["constructor"]);
 
-    for (const map of [request.sealed.contentKeys, request.sealed.periodKeys]) {
-      assert.equal(Object.hasOwn(map, "constructor"), true);
-      assert.equal(Object.getPrototypeOf(map), Object.prototype);
-    }
-
     const roundTrip = JSON.parse(JSON.stringify(request));
-    assert.equal(roundTrip.sealed.contentKeys.constructor, "AQ");
-    assert.deepEqual(roundTrip.sealed.periodKeys.constructor, { "251023T1400": "Ag" });
+    assert.deepEqual(roundTrip.sealed.contentKeys, [{ contentName: "constructor", key: "AQ" }]);
+    assert.deepEqual(roundTrip.sealed.periodKeys, [
+      { accessGroup: "constructor", period: "251023T1400", key: "Ag" },
+    ]);
     assert.equal(
       Object.hasOwn(roundTrip.sealed, "chainKeys"),
       false,
@@ -366,7 +370,7 @@ describe("The consumer accepts wide", () => {
       const dcaData = unsealer.parse(page);
       assert.equal(unsealer.extract(page, name), null);
       assert.equal(await unsealer.contentKeyFor(dcaData, name), null);
-      assert.deepEqual(unsealer.buildRequest(dcaData, "paywall", [name]).sealed.contentKeys, {});
+      assert.deepEqual(unsealer.buildRequest(dcaData, "paywall", [name]).sealed.contentKeys, []);
       assert.throws(
         () => unsealer.buildRequest(dcaData, name, ["two"]),
         (err) => err.code === "unknown_issuer",
@@ -382,7 +386,7 @@ describe("The generic content representation opener", () => {
    */
   function viewOf(record) {
     const delivery = page();
-    delivery.contentData[CONTENT_NAME] = record;
+    delivery.contentData = [{ contentName: CONTENT_NAME, ...record }];
     const item = new DcaData(delivery).contentItemFor(CONTENT_NAME);
     assert.ok(item);
     return item;

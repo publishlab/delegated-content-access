@@ -25,12 +25,12 @@ const STOCK_CHAIN_GEOMETRY = Object.freeze({
  * @property {import("../core-shared/construction.js").ContentGroupLimits} limits
  * @property {any} periodKeyCache - the dedicated content-group period-key cache
  * @property {any} chainKeyCache - the dedicated content-group chain-key cache
- * @property {Readonly<import("../../../core-client/ContentKeyResolver.js").RecoverySource>} recoverySource
- * @property {import("../../../core-client/ContentKeyResolver.js").ResponseSectionConsumer} responseInput
+ * @property {Readonly<import("../../../core-client/ContentKeyResolver.js").RecoverySource & { clearReaderContext: () => Promise<void> }>} recoverySource
+ * @property {import("../../../core-client/ContentKeyResolver.js").ResponseSectionConsumer & { clearReaderContext: () => Promise<void> }} responseInput
  * @property {typeof KIND_DESCRIPTORS} keyKinds - the two derivation kinds, for
  *   the host to settle with its selected client-bound transport
  * @property {(options: object) => ContentGroupRequestBuilder} requestBuilderFactory
- * @property {Readonly<{ requestBuilderFactory: (options: object) => ContentGroupRequestBuilder, recoverySources: object[], responseSections: object[] }>} composeOptions -
+ * @property {Readonly<{ requestBuilderFactory: (options: object) => ContentGroupRequestBuilder, recoverySources: ContentGroupClient["recoverySource"][], responseSections: ContentGroupClient["responseInput"][] }>} composeOptions -
  *   the three `composeClient` members, ready to spread into its options or
  *   `createDeliveryClient`'s
  */
@@ -40,7 +40,7 @@ const STOCK_CHAIN_GEOMETRY = Object.freeze({
  * one dedicated period-key cache and one dedicated chain-key cache, each
  * filing only its own entry kind under content-name partitions, the recovery
  * source the shared resolver runs over them, the response consumer that files
- * an admitted `contentGroups` answer into them, and the request builder. The
+ * an admitted `contentGroupKeys` answer into them, and the request builder. The
  * host supplies the two cache factories, preserving control over clocks and
  * durable storage. Geometry defaults to the required chain-key construction;
  * an explicit chain port can instrument or replace it. The period-key factory builds `adapter-client/PeriodKeyCache.js`,
@@ -96,11 +96,11 @@ export function createContentGroupClient({
     entryKind: CONTRACT.keyKinds.chainKey,
     periodView: "none",
     maxRivalsPerWindow: limits.maxRivalsPerWindow,
-    // One content-group answer carries up to maxResponseMembers chain keys,
-    // more than the chain-keys message bound,
+    // Keep every admitted response candidate pending for the attempt, even
+    // when several candidates share a window or exceed retained-rival capacity.
     maxMembersPerMessage: limits.maxResponseMembers,
-    // and up to maxWindowsPerGroup windows of one content name and group.
-    maxMembersPerFamily: limits.maxWindowsPerGroup,
+    maxMembersPerFamily: limits.maxResponseMembers,
+    // Distinct windows remain bounded independently of raw candidate count.
     maxWindowsPerFamily: limits.maxWindowsPerGroup,
     maxWindows: limits.maxCachedWindows,
     ...durable,
@@ -143,12 +143,15 @@ export function createContentGroupClient({
 
   // The recovery source owns both caches' completion and reset; the consumer
   // holds nothing of its own between calls.
-  const responseInput = contentGroupResponseInput({
-    chain,
-    limits,
-    retain,
-    clearReaderContext: async () => {},
-  });
+  // This composition always supplies the reset hook the general factory makes optional.
+  const responseInput = /** @type {ContentGroupClient["responseInput"]} */ (
+    contentGroupResponseInput({
+      chain,
+      limits,
+      retain,
+      clearReaderContext: async () => {},
+    })
+  );
   /** @param {object} options - the base request options composeClient passes */
   const requestBuilderFactory = (options) =>
     new ContentGroupRequestBuilder({

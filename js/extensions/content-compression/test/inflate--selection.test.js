@@ -15,6 +15,7 @@ import { webStreamsGzip } from "../core-shared--client-publisher/gzipCodec.js";
 import { inflateGzip } from "../core-shared--client-publisher/inflate/inflate.js";
 import { CompressingSealer } from "../core-publisher/CompressingSealer.js";
 import { openEncodedContent } from "../core-client/openEncodedContent.js";
+import { contentRecordOf, sealedContentOf } from "../../../test-lib/helpers/inspect.js";
 import { ARTICLE, contentKeyOf, itemOf, render, world } from "./world.js";
 
 /** The publisher's Web Streams gzip, the client's polyfill. */
@@ -34,7 +35,7 @@ test("a client injecting the polyfill opens what the publisher gzipped", async (
   ]) {
     const bytes = await openEncodedContent({
       item: itemOf(wire, contentName),
-      ciphertext: wire.sealedContent[contentName],
+      ciphertext: sealedContentOf(wire, contentName),
       resolveKey: () => contentKeyOf(wire, contentName, periodKeySupply),
       gzip: SELECTED,
     });
@@ -61,7 +62,7 @@ test("a ciphertext the polyfill cannot read is a typed refusal, not a throw out 
     () =>
       openEncodedContent({
         item: itemOf(mislabeled, "bodytext"),
-        ciphertext: mislabeled.sealedContent.bodytext,
+        ciphertext: sealedContentOf(mislabeled, "bodytext"),
         resolveKey: () => contentKeyOf(mislabeled, "bodytext", periodKeySupply),
         gzip: SELECTED,
       }),
@@ -74,17 +75,17 @@ test("a ciphertext the polyfill cannot read is a typed refusal, not a throw out 
     { name: "bodytext", value: ARTICLE, options: { contentEncoding: "identity" } },
   ]);
   const relabeled = structuredClone(identity);
-  relabeled.contentData.bodytext.contentEncodings = ["gzip"];
+  contentRecordOf(relabeled, "bodytext").contentEncodings = ["gzip"];
   await assert.rejects(
     () =>
       openEncodedContent({
         item: itemOf(relabeled, "bodytext"),
-        ciphertext: relabeled.sealedContent.bodytext,
+        ciphertext: sealedContentOf(relabeled, "bodytext"),
         resolveKey: () => contentKeyOf(relabeled, "bodytext", periodKeySupply),
         gzip: SELECTED,
       }),
     { code: "bad_encoding" },
   );
 
-  assert.deepEqual(wire.contentData.bodytext.contentEncodings, ["gzip"]);
+  assert.deepEqual(contentRecordOf(wire, "bodytext").contentEncodings, ["gzip"]);
 });

@@ -34,6 +34,34 @@ import {
 
 const { subtle } = globalThis.crypto;
 
+/**
+ * The ciphertext a page carries for one item, read from its
+ * `[{contentName, content}]` records.
+ *
+ * @param {any[]} sealedContent
+ * @param {string} contentName
+ * @returns {string|null}
+ */
+function ciphertextOf(sealedContent, contentName) {
+  return (
+    sealedContent.find((/** @type {any} */ record) => record.contentName === contentName)
+      ?.content ?? null
+  );
+}
+
+/**
+ * The first wrap record one item carries under one access group.
+ *
+ * @param {any} page
+ * @param {string} contentName
+ * @param {string} accessGroup
+ */
+function firstWrap(page, contentName, accessGroup) {
+  return page.contentData
+    .find((/** @type {any} */ item) => item.contentName === contentName)
+    .keys.find((/** @type {any} */ wrap) => wrap.accessGroup === accessGroup);
+}
+
 test("an omission-bound wrap opens through a client-bound period-key handle without exporting either handle", async () => {
   const { issuerConfig, periodKeySupply, sealerConfig } = await world();
   const page = await render(
@@ -44,8 +72,8 @@ test("an omission-bound wrap opens through a client-bound period-key handle with
     ),
     { items: ["bodytext"] },
   );
-  const entry = page.contentData.bodytext.keys.premium[0];
-  const periodBytes = await periodKeySupply.derive("premium", entry.t);
+  const entry = firstWrap(page, "bodytext", "premium");
+  const periodBytes = await periodKeySupply.derive("premium", entry.period);
 
   const pair = /** @type {CryptoKeyPair} */ (
     await subtle.generateKey({ name: "ECDH", namedCurve: "P-256" }, false, ["deriveKey"])
@@ -71,7 +99,7 @@ test("an omission-bound wrap opens through a client-bound period-key handle with
   assert.deepEqual([...periodHandle.usages], ["unwrapKey"]);
 
   const cache = new PeriodKeyCache();
-  await cache.put("premium", entry.t, periodHandle, { publisher: PUB });
+  await cache.put("premium", entry.period, periodHandle, { publisher: PUB });
   const resolver = omissionContentKeyResolverFactory({
     cache,
     clientBoundKeyCapability: capability,
@@ -92,7 +120,7 @@ test("an omission-bound wrap opens through a client-bound period-key handle with
     assert.deepEqual(resolved.origin, {
       kind: "cached-period-key",
       accessGroup: "premium",
-      t: entry.t,
+      t: entry.period,
     });
     assert.ok(
       contentHandle instanceof globalThis.CryptoKey,
@@ -106,7 +134,7 @@ test("an omission-bound wrap opens through a client-bound period-key handle with
         await openContent(
           contentHandle,
           "bodytext",
-          page.sealedContent.bodytext,
+          ciphertextOf(page.sealedContent, "bodytext"),
           contentAadOctets(page, "bodytext"),
         ),
       ),
@@ -178,7 +206,11 @@ test("a real omission issuer delivers an associated client-bound period handle t
   const responses = [];
   const requests = [];
   const client = createDeliveryClient({
-    reader: { dcaData: metadata, publisherOrigin: PUB, extract: (name) => sealedContent[name] },
+    reader: {
+      dcaData: metadata,
+      publisherOrigin: PUB,
+      extract: (name) => ciphertextOf(sealedContent, name),
+    },
     issuerName: ISSUER_A,
     unlockUrl: "https://issuer.example/unlock",
     relayPeriodKeys: true,
@@ -235,13 +267,15 @@ test("a real omission issuer delivers an associated client-bound period handle t
   assert.equal(requests.length, 1);
   assert.deepEqual(requests[0].clientPublicKey, capability.publicKey);
   assert.ok(
-    requests[0].boundCandidates.bodytext,
+    requests[0].boundCandidates.some(
+      (/** @type {any} */ record) => record.contentName === "bodytext",
+    ),
     "the omission request presents its bound coordinate",
   );
-  assert.deepEqual(responses[0].keys.contentKeys, {});
+  assert.deepEqual(responses[0].keys.contentKeys, []);
   assert.equal(responses[0].transport.method, ecdhProfile.METHOD);
-  const entry = page.contentData.bodytext.keys.premium[0];
-  const [handle] = await cache.candidatesAt("premium", entry.t, {
+  const entry = firstWrap(page, "bodytext", "premium");
+  const [handle] = await cache.candidatesAt("premium", entry.period, {
     publisher: PUB,
     issuerName: ISSUER_A,
   });
@@ -250,15 +284,22 @@ test("a real omission issuer delivers an associated client-bound period handle t
     page.resource.renderId,
     "bodytext",
     "premium",
-    entry.t,
+    entry.period,
   ].join("|");
   assert.ok(
     observedBindings.includes(expectedBind),
     "the opaque content-key unwrap uses its full omission coordinate",
   );
   const opener = await capability.openDeliveredKeys(responses[0].transport);
+  const deliveredPeriod = responses[0].keys.periodKeys.find(
+    (/** @type {any} */ record) =>
+      record.accessGroup === "premium" && record.period === entry.period,
+  );
+  // Look the record up first: a missing record inside the callback would
+  // throw a TypeError and satisfy the rejection on its own.
+  assert.ok(deliveredPeriod, "the response delivers the bound period key");
   await assert.rejects(
-    () => opener.open(responses[0].keys.periodKeys.premium[entry.t], ["decrypt"], "contentKey"),
+    () => opener.open(deliveredPeriod.key, ["decrypt"], "contentKey"),
     "the delivered period key cannot be opened under the item-key context",
   );
   assert.ok(handle instanceof globalThis.CryptoKey);

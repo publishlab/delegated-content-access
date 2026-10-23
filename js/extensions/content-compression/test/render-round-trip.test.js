@@ -14,6 +14,12 @@ import { CompressingSealer } from "../core-publisher/CompressingSealer.js";
 import { decode, encode } from "../core-shared--client-publisher/gzipCodec.js";
 import { openEncodedContent } from "../core-client/openEncodedContent.js";
 import {
+  contentNamesOn,
+  contentRecordOf,
+  sealedContentOf,
+  wire as wireOf,
+} from "../../../test-lib/helpers/inspect.js";
+import {
   ARTICLE,
   GROUP,
   SIDEBAR,
@@ -33,7 +39,7 @@ import {
 function open(wire, contentName, periodKeySupply, extra = {}) {
   return openEncodedContent({
     item: itemOf(wire, contentName),
-    ciphertext: wire.sealedContent[contentName],
+    ciphertext: sealedContentOf(wire, contentName),
     resolveKey: () => contentKeyOf(wire, contentName, periodKeySupply),
     ...extra,
   });
@@ -75,11 +81,31 @@ test("a codec cannot change item bytes, and a corrected retry still opens both o
   await assert.rejects(() => sealer.seal(), { code: "bad_encoding" });
   corrupt = false;
   const sealed = await sealer.seal();
-  const wire = JSON.parse(
-    JSON.stringify({ ...sealed.dcaData, sealedContent: sealed.sealedContent }),
-  );
+  const wire = wireOf(sealed);
   assert.equal(utf8Decode(await open(wire, "bodytext", periodKeySupply)), ARTICLE);
   assert.equal(utf8Decode(await open(wire, "sidebar", periodKeySupply)), SIDEBAR);
+});
+
+test("an encoder cannot mutate the captured input or the original retry bytes", async () => {
+  const { sealerConfig, periodKeySupply } = await world();
+  let mutate = true;
+  let calls = 0;
+  const sealer = new CompressingSealer(sealerConfig(), {
+    gzip: {
+      encode: async (bytes) => {
+        calls++;
+        if (mutate) bytes[0] ^= 1;
+        return encode(bytes);
+      },
+    },
+  });
+  sealer.resource("123456", {});
+  sealer.content("bodytext", ARTICLE, "text/html", { accessGroups: [GROUP] });
+  await assert.rejects(() => sealer.seal(), { code: "bad_encoding" });
+  mutate = false;
+  const wire = wireOf(await sealer.seal());
+  assert.equal(calls, 2);
+  assert.equal(utf8Decode(await open(wire, "bodytext", periodKeySupply)), ARTICLE);
 });
 
 test("the default opener refuses a published two-member gzip item", async () => {
@@ -106,7 +132,7 @@ test("a short body round trips through gzip", async () => {
     { name: "bodytext", value: ARTICLE },
   ]);
 
-  assert.deepEqual(wire.contentData.bodytext.contentEncodings, ["gzip"]);
+  assert.deepEqual(contentRecordOf(wire, "bodytext").contentEncodings, ["gzip"]);
   assert.equal(utf8Decode(await open(wire, "bodytext", periodKeySupply)), ARTICLE);
 });
 
@@ -129,7 +155,7 @@ test("an item named identity carries no encoding member and opens undecoded", as
     { name: "sidebar", value: SIDEBAR, options: { contentEncoding: "identity" } },
   ]);
 
-  assert.equal(Object.hasOwn(wire.contentData.sidebar, "contentEncodings"), false);
+  assert.equal(Object.hasOwn(contentRecordOf(wire, "sidebar"), "contentEncodings"), false);
   assert.equal(utf8Decode(await open(wire, "sidebar", periodKeySupply)), SIDEBAR);
   assert.equal(utf8Decode(await open(wire, "bodytext", periodKeySupply)), ARTICLE);
 });
@@ -147,11 +173,9 @@ test("a legacy call with no content type is refused at that call, and the render
 
   sealer.content("sidebar", SIDEBAR, "text/html", { accessGroups: [GROUP] });
   const sealed = await sealer.seal();
-  const wire = JSON.parse(
-    JSON.stringify({ ...sealed.dcaData, sealedContent: sealed.sealedContent }),
-  );
+  const wire = wireOf(sealed);
 
-  assert.deepEqual(Object.keys(wire.contentData), ["sidebar"]);
+  assert.deepEqual(contentNamesOn(wire), ["sidebar"]);
   assert.equal(utf8Decode(await open(wire, "sidebar", periodKeySupply)), SIDEBAR);
 });
 
@@ -166,9 +190,7 @@ test("bytes handed to content() round trip and can be mutated afterwards", async
     .content("sidebar", SIDEBAR, "text/html", { accessGroups: [GROUP] });
   bytes.fill(0x41);
   const sealed = await sealer.seal();
-  const wire = JSON.parse(
-    JSON.stringify({ ...sealed.dcaData, sealedContent: sealed.sealedContent }),
-  );
+  const wire = wireOf(sealed);
 
   assert.equal(utf8Decode(await open(wire, "bodytext", periodKeySupply)), ARTICLE);
   assert.equal(utf8Decode(await open(wire, "sidebar", periodKeySupply)), SIDEBAR);
@@ -193,14 +215,12 @@ test("a sealed adapter takes no more content, and a second seal carries the same
   // compressed once. Base draws a fresh renderId and fresh nonces per seal,
   // so the two renders carry the same items without being byte-equal.
   const second = await sealer.seal();
-  assert.deepEqual(Object.keys(second.dcaData.contentData), Object.keys(first.dcaData.contentData));
-  assert.deepEqual(second.dcaData.contentData.bodytext.contentEncodings, ["gzip"]);
-  assert.deepEqual(second.dcaData.contentData.sidebar.contentEncodings, ["gzip"]);
+  assert.deepEqual(contentNamesOn(second.dcaData), contentNamesOn(first.dcaData));
+  assert.deepEqual(contentRecordOf(second.dcaData, "bodytext").contentEncodings, ["gzip"]);
+  assert.deepEqual(contentRecordOf(second.dcaData, "sidebar").contentEncodings, ["gzip"]);
   assert.deepEqual(second.dcaData.resource.data, first.dcaData.resource.data);
 
-  const wire = JSON.parse(
-    JSON.stringify({ ...second.dcaData, sealedContent: second.sealedContent }),
-  );
+  const wire = wireOf(second);
   assert.equal(utf8Decode(await open(wire, "bodytext", periodKeySupply)), ARTICLE);
 });
 
@@ -225,9 +245,7 @@ test("simultaneous seals share one compression pass and both produce a render", 
 
   assert.equal(encodes, 2, "each item is compressed once, not once per concurrent caller");
   for (const sealed of [first, second]) {
-    const wire = JSON.parse(
-      JSON.stringify({ ...sealed.dcaData, sealedContent: sealed.sealedContent }),
-    );
+    const wire = wireOf(sealed);
     assert.equal(utf8Decode(await open(wire, "bodytext", periodKeySupply)), ARTICLE);
     assert.equal(utf8Decode(await open(wire, "sidebar", periodKeySupply)), SIDEBAR);
   }
@@ -242,8 +260,8 @@ test("the sealed gzip item is shorter than the same item sealed plain", async ()
   ]);
   const plain = await render(new Sealer(sealerConfig()), [{ name: "bodytext", value: body }]);
 
-  const gzipLength = compressed.sealedContent.bodytext.length;
-  const plainLength = plain.sealedContent.bodytext.length;
+  const gzipLength = sealedContentOf(compressed, "bodytext").length;
+  const plainLength = sealedContentOf(plain, "bodytext").length;
   assert.ok(gzipLength * 2 < plainLength, `${gzipLength} against ${plainLength}`);
 });
 
@@ -259,8 +277,14 @@ test("each item is compressed on its own, so one item cannot shrink on another",
     { name: "bodytext", value: body },
   ]);
 
-  assert.equal(beside.sealedContent.bodytext.length, alone.sealedContent.bodytext.length);
-  assert.equal(beside.sealedContent.sidebar.length, alone.sealedContent.bodytext.length);
+  assert.equal(
+    sealedContentOf(beside, "bodytext").length,
+    sealedContentOf(alone, "bodytext").length,
+  );
+  assert.equal(
+    sealedContentOf(beside, "sidebar").length,
+    sealedContentOf(alone, "bodytext").length,
+  );
 });
 
 test("the injected gzip is what compresses, and the record still says gzip", async () => {
@@ -279,7 +303,7 @@ test("the injected gzip is what compresses, and the record still says gzip", asy
   ]);
 
   assert.equal(asked, 1, "the default was not reached behind the injected one");
-  assert.deepEqual(wire.contentData.bodytext.contentEncodings, ["gzip"]);
+  assert.deepEqual(contentRecordOf(wire, "bodytext").contentEncodings, ["gzip"]);
   assert.equal(utf8Decode(await open(wire, "bodytext", periodKeySupply)), ARTICLE);
 });
 
@@ -340,7 +364,7 @@ test("a descriptor handed to the adapter is delegated to base unchanged", async 
     prepared(),
   ]);
 
-  assert.deepEqual(throughAdapter.contentData.bodytext.contentEncodings, ["gzip"]);
+  assert.deepEqual(contentRecordOf(throughAdapter, "bodytext").contentEncodings, ["gzip"]);
 
   // The signature is left out for the reason identity-parity.test.js states:
   // ECDSA draws its own nonce inside WebCrypto, so this compares the payload.
@@ -439,10 +463,8 @@ test("a descriptor call carrying only accessGroups is accepted", async () => {
   );
 
   const sealed = await sealer.seal();
-  const wire = JSON.parse(
-    JSON.stringify({ ...sealed.dcaData, sealedContent: sealed.sealedContent }),
-  );
-  assert.deepEqual(wire.contentData.bodytext.contentEncodings, ["gzip"]);
+  const wire = wireOf(sealed);
+  assert.deepEqual(contentRecordOf(wire, "bodytext").contentEncodings, ["gzip"]);
   assert.equal(utf8Decode(await open(wire, "bodytext", periodKeySupply)), ARTICLE);
 });
 

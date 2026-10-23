@@ -61,6 +61,7 @@ import {
   UNLOCK_URL as PRIMARY_UNLOCK,
   T_NOW,
 } from "../../../demo/scenarios/fixtures.js";
+import { keyAt, periodKeyMap } from "../../../test-reference/support/namedRecords.js";
 
 const { subtle } = globalThis.crypto;
 
@@ -555,11 +556,11 @@ describe("Both modes at once, and the fallback path", () => {
     const browser = await boundBrowser(stage, { network: wire, clientKeys: keys });
     const read = await readArticle(browser, await stage.render("A"), [CONTENT_NAME]);
     const body = structuredClone(wire.posted[0].body);
-    const good = body.keys.contentKeys[CONTENT_NAME];
-    body.keys.contentKeys.malformedSibling = {
-      ...good,
-      key: `${good.key[0] === "A" ? "B" : "A"}${good.key.slice(1)}`,
-    };
+    const good = keyAt(body.keys.contentKeys, { contentName: CONTENT_NAME });
+    body.keys.contentKeys.push({
+      contentName: "malformedSibling",
+      key: { ...good, key: `${good.key[0] === "A" ? "B" : "A"}${good.key.slice(1)}` },
+    });
     const consumer = new Client({
       publisherOrigin: PUBLISHER_ORIGIN,
       cache: /** @type {any} */ (new PeriodKeyCache()),
@@ -1008,7 +1009,7 @@ describe("Issuer delivery admission", () => {
         "the fallback preflights before preparing its response",
       );
       assert.deepEqual(
-        Object.keys(prepared[0].keys.periodKeys[ACCESS_GROUP]),
+        Object.keys(periodKeyMap(prepared[0].keys.periodKeys)[ACCESS_GROUP]),
         [T_NOW],
         "prepare receives the fallback-trimmed body, never the future period",
       );
@@ -1185,7 +1186,7 @@ describe("What refuses itself", () => {
         {
           transport: body.transport,
           keys: {},
-          notDelivered: { premium: { reason: "denied" } },
+          notDelivered: [{ accessGroup: "premium", reason: "denied" }],
         },
         wire.posted[0].request,
       ),
@@ -1236,9 +1237,10 @@ describe("What refuses itself", () => {
 
     assert.equal(read.texts[CONTENT_NAME], ARTICLES.A);
     assert.equal(read.unlock.issuerName, FALLBACK);
-    assert.deepEqual(Object.keys(wire.posted.at(-1).body.keys.periodKeys[ACCESS_GROUP]).sort(), [
-      formatT(stage.clock.now()),
-    ]);
+    assert.deepEqual(
+      Object.keys(periodKeyMap(wire.posted.at(-1).body.keys.periodKeys)[ACCESS_GROUP]).sort(),
+      [formatT(stage.clock.now())],
+    );
     assert.equal(stage.servers.fallback.stats().transportMode, "direct");
   });
 
@@ -1300,7 +1302,7 @@ describe("The view-isolation seam, from the reject side", () => {
       version: "0.10",
       issuerName: PRIMARY,
       resource: { domain: "issuer.example.com" },
-      contentKeys: {},
+      contentKeys: [],
       clientPublicKey: publicKey,
     });
   }

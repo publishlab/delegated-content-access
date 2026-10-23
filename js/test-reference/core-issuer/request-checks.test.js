@@ -75,7 +75,7 @@ function requestWith(resourceJWT) {
     version: "1",
     issuerName: "issuer.example",
     resourceJWT,
-    sealed: { contentKeys: {} },
+    sealed: { contentKeys: [] },
   });
 }
 

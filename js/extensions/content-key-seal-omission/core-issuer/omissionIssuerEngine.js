@@ -32,7 +32,7 @@ const OPTIONS = Object.freeze([
  *   required for base's reason: verification authenticates the publisher and
  *   grants the caller nothing.
  * @param {boolean} [config.developmentHttpOrigin]
- * @param {{ get: (registration: object) => (((accessGroup: string, t: string) => Promise<Uint8Array|null>)|undefined) }} [config.periodKeyLookup] -
+ * @param {{ get: (registration: object) => (((accessGroup: string, t: string) => Promise<Uint8Array|readonly Uint8Array[]|null>)|undefined) }} [config.periodKeyLookup] -
  *   issuer application state answering `get(registration)` with the period-key
  *   view held for that authenticated publisher registration
  * @returns {IssuerEngine}

@@ -16,12 +16,13 @@
 //   b. the signed resource decodes to the recorded resource, and its ES256
 //      signature verifies under the recorded public key
 //   c. every drawn value sits on the wire where the record says, and the wire
-//      carries no nonce or wrap entry the record does not list
+//      carries no content or ordinary envelope nonce; each item an access group names
+//      carries one { t, key } wrap per period fixedPeriodKeys holds for that group
 //   d. the item records carry no aad; the recorded aad equals the content AAD
 //      a hand-built transcript derives from the renderId and content name (test-reference/support/contentAadOctets.js); the sealed content
 //      opens under the drawn content key and twelve zero nonce octets, with that aad, to the
-//      recorded plaintext; and each wrap opens under its fixed period key to
-//      the same content key
+//      recorded plaintext; and each wrap opens under its fixed period key, with
+//      the nonce derived from its coordinate, to the same content key
 //   e. each issuer envelope opens under the recorded issuer private key, at a
 //      BIND built from the specification's grammar, to the drawn content key
 //      or the fixed period key the record names: an ECDH envelope as section 4
@@ -45,6 +46,7 @@ import { fileURLToPath } from "node:url";
 import { sealerForRender } from "../core-publisher/testing/sealerFactory.js";
 import { decodeValue } from "../test-bridges/_shared/serializer.mjs";
 import { contentAadOctets } from "../test-reference/support/contentAadOctets.js";
+import { contentKeyWrapNonceOctets } from "../test-reference/support/contentKeyWrapNonceOctets.js";
 
 const FIXTURE_DIR = fileURLToPath(
   new URL("../../verification/fixtures/v1/reference/protocol-regressions/", import.meta.url),
@@ -52,9 +54,6 @@ const FIXTURE_DIR = fileURLToPath(
 
 const SEALER_FACTORY_FORMAT = "sealer-factory-v3";
 const SEALER_REFUSAL_FORMAT = "sealer-factory-refusal-v2";
-
-/** An ECDH envelope carries its nonce after the 65-byte ephemeral point. */
-const ENVELOPE_NONCE = [65, 77];
 
 const { subtle } = globalThis.crypto;
 
@@ -126,12 +125,13 @@ function bindOf(renderId, at) {
  * Opens an ECDH P-256 envelope as the issuer does (section 4 of the same
  * specification): ECDH between the issuer's private key and the 65-byte point
  * at the start, the 32-byte x-coordinate as the AES-256-GCM key with no KDF,
- * the next 12 bytes as the nonce, and the BIND as the additional data.
+ * twelve zero bytes as the nonce, and the BIND as the additional data.
  *
  * @param {string} envelope @param {string} bind @param {string} privateKeyPem
  */
 async function openEcdhEnvelope(envelope, bind, privateKeyPem) {
   const bytes = fromBase64url(envelope);
+  assert.equal(bytes.length, 97, "ordinary ECDH carrier has no nonce field");
   const der = Buffer.from(
     privateKeyPem.replace(/-----(BEGIN|END) PRIVATE KEY-----/g, "").replace(/\s+/g, ""),
     "base64",
@@ -141,12 +141,7 @@ async function openEcdhEnvelope(envelope, bind, privateKeyPem) {
   const shared = new Uint8Array(
     await subtle.deriveBits({ name: "ECDH", public: point }, privateKey, 256),
   );
-  return openGcm(
-    shared,
-    bytes.subarray(...ENVELOPE_NONCE),
-    bytes.subarray(ENVELOPE_NONCE[1]),
-    new TextEncoder().encode(bind),
-  );
+  return openGcm(shared, new Uint8Array(12), bytes.subarray(65), new TextEncoder().encode(bind));
 }
 
 /**
@@ -174,10 +169,6 @@ async function openRsaEnvelope(envelope, bind, privateKeyPem) {
   );
   return plaintext.subarray(expectedBind.length);
 }
-
-/** @param {string} envelope */
-const envelopeNonce = (envelope) =>
-  toBase64url(fromBase64url(envelope).subarray(...ENVELOPE_NONCE));
 
 test("the fixture manifest names the Sealer factory records this file replays", () => {
   assert.deepEqual(
@@ -267,10 +258,15 @@ for (const { file, record } of records) {
       );
 
       // Each item: its implicit nonce, plaintext, and wraps.
-      assert.deepEqual(Object.keys(dcaData.contentData), Object.keys(expected.content));
+      assert.deepEqual(
+        dcaData.contentData.map((/** @type {any} */ item) => item.contentName),
+        Object.keys(expected.content),
+      );
       assert.deepEqual(Object.keys(sealedContent), Object.keys(expected.content));
       for (const [contentName, { aad, plaintext }] of Object.entries(expected.content)) {
-        const item = dcaData.contentData[contentName];
+        const item = dcaData.contentData.find(
+          (/** @type {any} */ record) => record.contentName === contentName,
+        );
         const contentKey = drawOf("contentKey", { contentName });
         const contentNonce = new Uint8Array(12);
         assert.equal(Object.hasOwn(item, "nonce"), false, "content nonce is implicit");
@@ -294,17 +290,34 @@ for (const { file, record } of records) {
         );
         assert.equal(new TextDecoder().decode(opened), plaintext);
 
-        const wraps = Object.entries(item.keys ?? {}).flatMap(([accessGroup, entries]) =>
-          /** @type {any[]} */ (entries).map((entry) => ({ accessGroup, ...entry })),
+        // Wraps draw nothing, so the setup fixes them: one per period the fixed
+        // keys hold for each access group the content call names.
+        const contentCall = input.calls.find(
+          (/** @type {any[]} */ [member, args]) => member === "content" && args[0] === contentName,
         );
-        assert.equal(
-          wraps.length,
-          drawsOf("wrapNonce", { contentName }).length,
-          `${contentName}: one wrap entry per recorded wrap nonce`,
+        const accessGroups = contentCall[1][3]?.accessGroups ?? [];
+        assert.deepEqual(
+          (item.keys ?? []).map(
+            (/** @type {any} */ entry) => `${entry.accessGroup} ${entry.period}`,
+          ),
+          accessGroups.flatMap((/** @type {string} */ accessGroup) =>
+            Object.keys(input.setup.fixedPeriodKeys[accessGroup]).map((t) => `${accessGroup} ${t}`),
+          ),
+          `${contentName}: one wrap per fixed period key of each named group`,
         );
-        for (const { accessGroup, t, nonce, key } of wraps) {
-          const wrapNonce = drawOf("wrapNonce", { contentName, accessGroup, t });
-          assert.equal(nonce, toBase64url(wrapNonce), `${accessGroup} ${t}: wrap nonce`);
+        for (const entry of item.keys ?? []) {
+          const { accessGroup, period: t, key } = entry;
+          assert.deepEqual(
+            Object.keys(entry).sort(),
+            ["accessGroup", "key", "period"],
+            `${accessGroup} ${t}: no nonce`,
+          );
+          const wrapNonce = contentKeyWrapNonceOctets({
+            renderId: payload.renderId,
+            contentName,
+            accessGroup,
+            t,
+          });
           const periodKey = input.setup.fixedPeriodKeys[accessGroup][t];
           assert.equal(
             toBase64url(await openGcm(periodKey, wrapNonce, fromBase64url(key))),
@@ -314,41 +327,26 @@ for (const { file, record } of records) {
         }
       }
 
-      // Each sealed key's envelope nonce.
-      const envelopes = Object.entries(dcaData.issuerData).flatMap(([issuerName, issuer]) => {
-        const { contentKeys = {}, periodKeys = {} } = /** @type {any} */ (issuer).sealed;
+      // Every sealed key has one independently checked opening below.
+      const envelopes = dcaData.issuerData.flatMap((/** @type {any} */ issuer) => {
+        const { issuerName } = issuer;
+        const { contentKeys = [], periodKeys = [] } = issuer.sealed;
         return [
-          ...Object.entries(contentKeys).map(([contentName, envelope]) => ({
+          ...contentKeys.map((/** @type {any} */ { contentName, key }) => ({
             at: { issuerName, contentName },
-            envelope,
+            envelope: key,
           })),
-          ...Object.entries(periodKeys).flatMap(([accessGroup, periods]) =>
-            Object.entries(/** @type {Record<string, string>} */ (periods)).map(
-              ([t, envelope]) => ({ at: { issuerName, accessGroup, t }, envelope }),
-            ),
-          ),
+          ...periodKeys.map((/** @type {any} */ { accessGroup, period, key }) => ({
+            at: { issuerName, accessGroup, t: period },
+            envelope: key,
+          })),
         ];
       });
       /** @param {string} issuerName */
       const algorithmOf = (issuerName) =>
         input.setup.issuers.find((/** @type {any} */ issuer) => issuer.issuerName === issuerName)
           .algorithm;
-      // An RSA-OAEP issuer draws nothing, so only ECDH envelopes carry a drawn nonce.
-      const ecdhEnvelopes = envelopes.filter(
-        ({ at }) => algorithmOf(at.issuerName) === "ecdh-p256",
-      );
-      assert.equal(
-        ecdhEnvelopes.length,
-        drawsOf("envelopeNonce").length,
-        "one ECDH sealed key per recorded envelope nonce",
-      );
-      for (const { at, envelope } of ecdhEnvelopes) {
-        assert.equal(
-          envelopeNonce(/** @type {string} */ (envelope)),
-          toBase64url(drawOf("envelopeNonce", at)),
-          `envelope nonce at ${JSON.stringify(at)}`,
-        );
-      }
+      assert.equal(drawsOf("envelopeNonce").length, 0, "no envelope nonce draw is recorded");
 
       // Each envelope opens, under the issuer's private key and at its own
       // BIND, to the drawn content key or the fixed period key.
@@ -383,11 +381,10 @@ for (const { file, record } of records) {
 
       // And the record lists no draw the checks above did not reach.
       const items = Object.keys(expected.content).length;
-      const wrapCount = drawsOf("wrapNonce").length;
       assert.equal(
         draws.length,
-        1 + items + wrapCount + ecdhEnvelopes.length,
-        "the render id, a key per item, the wrap nonces and the envelope nonces",
+        1 + items,
+        "the render id and one key per item exhaust all recorded draws",
       );
     });
   });

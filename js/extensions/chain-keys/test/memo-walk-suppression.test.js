@@ -18,6 +18,7 @@ import { encrypt } from "../../../core-shared/aead.js";
 import { base64urlDecode, base64urlEncode, utf8Encode } from "../../../core-shared/codec.js";
 import { ChainKeyCache } from "../core-client/ChainKeyCache.js";
 import { periodFamilyGeneration } from "../core-shared--publisher-issuer/periodFamilyGeneration.js";
+import { contentKeyWrapNonceOctets } from "../../../test-reference/support/contentKeyWrapNonceOctets.js";
 import { explicitChainKeyClientProfile } from "../referenceProfile.js";
 
 const VECTORS = JSON.parse(
@@ -48,7 +49,12 @@ function compactJwt(payload) {
  */
 async function render(renderId, periodKey) {
   const contentKey = new Uint8Array(16).fill(20);
-  const wrapNonce = new Uint8Array(12).fill(11);
+  const wrapNonce = contentKeyWrapNonceOctets({
+    renderId,
+    contentName: "a",
+    accessGroup: GROUP,
+    t: TARGET_T,
+  });
   const resource = { origin: PUB, resourceId: "123456", renderId };
   const data = new DcaData(
     {
@@ -56,28 +62,28 @@ async function render(renderId, periodKey) {
       resource,
       resourceJWT: compactJwt(resource),
       periodGeometry: GEOMETRY,
-      issuerData: {
-        [CHAIN]: {
+      issuerData: [
+        {
+          issuerName: CHAIN,
           keyId: "k1",
           unlockUrl: "https://chain.example/unlock",
-          sealed: { chainKeys: { [GROUP]: { [TERMINAL_T]: "AAAA" } } },
+          sealed: { chainKeys: [{ accessGroup: GROUP, cutoff: TERMINAL_T, key: "AAAA" }] },
         },
-      },
-      contentData: {
-        a: {
+      ],
+      contentData: [
+        {
+          contentName: "a",
           contentType: "text/plain",
           nonce: base64urlEncode(new Uint8Array(12).fill(1)),
-          keys: {
-            [GROUP]: [
-              {
-                t: TARGET_T,
-                nonce: base64urlEncode(wrapNonce),
-                key: base64urlEncode(await encrypt(periodKey, wrapNonce, contentKey)),
-              },
-            ],
-          },
+          keys: [
+            {
+              accessGroup: GROUP,
+              period: TARGET_T,
+              key: base64urlEncode(await encrypt(periodKey, wrapNonce, contentKey)),
+            },
+          ],
         },
-      },
+      ],
     },
     { publisherOrigin: PUB },
   );
@@ -137,7 +143,7 @@ async function fileWrongRivals(cache) {
 
 test("a correct memo left out by four newer wrong rivals does not suppress its retained chain walk", async () => {
   const periodKey = base64urlDecode(C1.periodKey);
-  const first = await render("r-1", periodKey);
+  const first = await render("AAAAAAAAAAAAAAAAAAAAAA", periodKey);
 
   // Control: the retained chain and the four rivals, with no memo yet.
   const controlCache = new PeriodKeyCache();
@@ -156,7 +162,7 @@ test("a correct memo left out by four newer wrong rivals does not suppress its r
   );
   await fileWrongRivals(cache);
 
-  const later = await render("r-2", periodKey);
+  const later = await render("AQEBAQEBAQEBAQEBAQEBAQ", periodKey);
   const run = await spent(() => resolverOver(chainCache, cache).contentKeyFor(later.data, "a"));
   assert.deepEqual(run.result, later.contentKey, "the retained chain still opens the item");
   assert.equal(
@@ -171,7 +177,7 @@ test("a memo actually tried for this wrap still suppresses its redundant chain w
   const periodKey = base64urlDecode(C1.periodKey);
   const chainCache = await retainedChain();
   const cache = new PeriodKeyCache();
-  const first = await render("r-1", periodKey);
+  const first = await render("AAAAAAAAAAAAAAAAAAAAAA", periodKey);
   assert.deepEqual(
     await resolverOver(chainCache, cache).contentKeyFor(first.data, "a"),
     first.contentKey,
@@ -179,7 +185,7 @@ test("a memo actually tried for this wrap still suppresses its redundant chain w
 
   // A later render wraps the item under a key nothing held derives. The memo
   // is tried and fails; walking its chain again would only rebuild it.
-  const rotated = await render("r-2", new Uint8Array(16).fill(77));
+  const rotated = await render("AQEBAQEBAQEBAQEBAQEBAQ", new Uint8Array(16).fill(77));
   const run = await spent(() => resolverOver(chainCache, cache).contentKeyFor(rotated.data, "a"));
   assert.equal(run.result, null);
   assert.equal(run.trials, 1, "the memo is tried once and its rebuilt bytes are not tried again");

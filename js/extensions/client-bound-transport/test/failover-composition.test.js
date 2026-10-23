@@ -68,13 +68,15 @@ describe("Going down and coming back", () => {
       network: {
         post(url, request, context) {
           if (url !== PRIMARY_UNLOCK) return stage.network.post(url, request, context);
-          const period = Object.keys(request.sealed.periodKeys[ACCESS_GROUP])[0];
+          const { period } = request.sealed.periodKeys.find(
+            (/** @type {any} */ record) => record.accessGroup === ACCESS_GROUP,
+          );
           return Promise.resolve({
             status: 200,
             body: {
               keys: {
-                contentKeys: { [CONTENT_NAME]: keyValue },
-                periodKeys: { [ACCESS_GROUP]: { [period]: keyValue } },
+                contentKeys: [{ contentName: CONTENT_NAME, key: keyValue }],
+                periodKeys: [{ accessGroup: ACCESS_GROUP, period, key: keyValue }],
               },
             },
           });

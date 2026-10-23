@@ -61,7 +61,8 @@ function acceptsExplicitResponseCoordinate(t, geometry) {
 }
 
 /**
- * A chain opening error names the exact valid source member the request presented.
+ * A chain opening error names a positioned source member the request presented,
+ * including a malformed value at an otherwise admitted coordinate.
  *
  * @param {string} accessGroup
  * @param {string} t
@@ -72,7 +73,8 @@ function acceptsPresentedErrorCoordinate(accessGroup, t, request, maximum) {
   const asked = requestCarrierOf(request, maximum).family(accessGroup);
   return (
     asked.kind === "valid" &&
-    asked.members.some((/** @type {{ t: string }} */ member) => member.t === t)
+    (asked.members.some((/** @type {{ t: string }} */ member) => member.t === t) ||
+      asked.malformedMembers.some((/** @type {{ t: string }} */ member) => member.t === t))
   );
 }
 

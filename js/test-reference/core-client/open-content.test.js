@@ -18,19 +18,23 @@ import { openContent } from "../../core-client/openContent.js";
 import { DcaData } from "../../core-client/DcaData.js";
 import { DcaError } from "../../core-shared/errors.js";
 import { contentAadOctets } from "../support/contentAadOctets.js";
+import { contentRecordOf } from "../../test-lib/helpers/inspect.js";
 
 const ARTICLE = "<p>The council voted 7-2 to rezone the harbour.</p>";
 const CONTENT_NAME = "bodytext";
 const TOKEN =
   "eyJhbGciOiJFUzI1NiJ9.eyJyZW5kZXJJZCI6IkFBQUFBQUFBQUFBQUFBQUFBQUFBQUEifQ.c2lnbmF0dXJl";
 
-/** A delivery shaped like the wire, written out, with one record per name. */
-function delivery(/** @type {Record<string, object>} */ contentData) {
+/**
+ * A delivery shaped like the wire, with one record per name: each entry of
+ * `items` becomes the `contentData` record that carries its key as `contentName`.
+ */
+function delivery(/** @type {Record<string, object>} */ items) {
   return {
     version: "1",
     resourceJWT: TOKEN,
-    contentData,
-    issuerData: { issuer_example: { keyId: "k1", sealed: { contentKeys: {} } } },
+    contentData: Object.entries(items).map(([contentName, record]) => ({ contentName, ...record })),
+    issuerData: [{ issuerName: "issuer_example", keyId: "k1", sealed: { contentKeys: [] } }],
   };
 }
 
@@ -202,7 +206,7 @@ test("a type with an unpaired surrogate fails capture, and a literal U+FFFD type
   const bytes = await opener.open({ item, ciphertext, resolveKey: async () => contentKey });
   assert.equal(utf8Decode(bytes), ARTICLE);
   for (const surrogate of ["\ud800", "\udfff"]) {
-    /** @type {any} */ (page.contentData[CONTENT_NAME]).contentType = `text/${surrogate}`;
+    contentRecordOf(page, CONTENT_NAME).contentType = `text/${surrogate}`;
     assert.throws(() => new DcaData(page).contentItemFor(CONTENT_NAME), { code: "bad_page" });
   }
 });
@@ -235,7 +239,6 @@ describe("Opening a captured item while the live page changes", () => {
   const KEY = new Uint8Array(16).fill(3);
   const SIBLING_KEY = new Uint8Array(16).fill(4);
   const NONCE = new Uint8Array(12);
-  const OTHER_NONCE = new Uint8Array(12).fill(6);
 
   /**
    * A live page with two items. `bodytext` is sealed in its "x" layer; the
@@ -245,10 +248,9 @@ describe("Opening a captured item while the live page changes", () => {
     const page = delivery({
       [CONTENT_NAME]: {
         contentType: "text/html",
-        nonce: base64urlEncode(NONCE),
         contentEncodings: ["x"],
       },
-      sidebar: { contentType: "text/plain", nonce: base64urlEncode(NONCE) },
+      sidebar: { contentType: "text/plain" },
     });
     const ciphertexts = {
       [CONTENT_NAME]: base64urlEncode(
@@ -275,10 +277,9 @@ describe("Opening a captured item while the live page changes", () => {
 
   /** Every bound input of `bodytext` and the delivery's token, changed in place. @param {any} page */
   function mutate(page) {
-    const record = page.contentData[CONTENT_NAME];
+    const record = contentRecordOf(page, CONTENT_NAME);
     record.contentType = "text/plain";
     record.contentEncodings = ["y"];
-    record.nonce = base64urlEncode(OTHER_NONCE);
     page.resourceJWT =
       "eyJhbGciOiJub25lIn0.eyJyZW5kZXJJZCI6IkFRRUJBUUVCQVFFQkFRRUJBUUVCQVEifQ.c2lnbmF0dXJl";
   }
@@ -306,7 +307,6 @@ describe("Opening a captured item while the live page changes", () => {
     const sibling = dcaData.contentItemFor("sidebar");
     assert.ok(sibling);
     mutate(page);
-    /** @type {any} */ (page.contentData[CONTENT_NAME]).nonce = base64urlEncode(NONCE);
     const edited = dcaData.contentItemFor(CONTENT_NAME);
     assert.ok(edited);
     await assert.rejects(
@@ -319,8 +319,10 @@ describe("Opening a captured item while the live page changes", () => {
     );
     assert.deepEqual(decoded, [], "no decoder saw bytes from a failed item");
 
-    // A malformed record fails only its own capture.
-    page.contentData[CONTENT_NAME] = /** @type {any} */ ("not a record");
+    // A malformed record fails only its own capture. The record keeps its name:
+    // an element with no name would supply no item rather than a bad one.
+    const index = page.contentData.findIndex((record) => record.contentName === CONTENT_NAME);
+    page.contentData[index] = /** @type {any} */ ({ contentName: CONTENT_NAME, contentType: 42 });
     assert.throws(() => dcaData.contentItemFor(CONTENT_NAME), { code: "bad_page" });
 
     // The sibling captured before the edits still opens under its captured
@@ -343,6 +345,24 @@ describe("Opening a captured item while the live page changes", () => {
     );
   });
 
+  test("a contentData element that is not a record supplies no item, and its sibling still opens", async () => {
+    const { page, ciphertexts, opener, dcaData } = await livePage();
+    // The element carries no contentName, so nothing names it to refuse: the
+    // reader skips it and keeps the records beside it.
+    const index = page.contentData.findIndex((record) => record.contentName === CONTENT_NAME);
+    page.contentData[index] = /** @type {any} */ ("not a record");
+
+    assert.equal(dcaData.contentItemFor(CONTENT_NAME), null);
+    const sibling = dcaData.contentItemFor("sidebar");
+    assert.ok(sibling);
+    const bytes = await opener.open({
+      item: sibling,
+      ciphertext: ciphertexts.sidebar,
+      resolveKey: async () => SIBLING_KEY,
+    });
+    assert.equal(utf8Decode(bytes), "sidebar");
+  });
+
   test("carried aad and nonce beside the record change nothing about the open", async () => {
     for (const aad of [
       undefined,
@@ -357,8 +377,8 @@ describe("Opening a captured item while the live page changes", () => {
       false,
     ]) {
       const { page, ciphertexts, opener } = await livePage();
-      /** @type {any} */ (page.contentData[CONTENT_NAME]).aad = aad;
-      /** @type {any} */ (page.contentData[CONTENT_NAME]).nonce = aad;
+      contentRecordOf(page, CONTENT_NAME).aad = aad;
+      contentRecordOf(page, CONTENT_NAME).nonce = aad;
       const item = new DcaData(page).contentItemFor(CONTENT_NAME);
       assert.ok(item);
       const bytes = await opener.open({

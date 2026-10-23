@@ -108,7 +108,10 @@ test("an independent map client reconstructs the same article without the owner'
   assert.deepEqual(result.report, { outcome: "complete", items: { bodytext: "opened" } });
   assert.match(tree.serialize(), /<div id="article"><p>Publisher's article<\/p><\/div>/);
   assert.equal(world.unlocks.length, 1);
-  assert.deepEqual(Object.keys(world.unlocks[0].request.sealed.contentKeys), ["bodytext"]);
+  assert.deepEqual(
+    world.unlocks[0].request.sealed.contentKeys.map((record) => record.contentName),
+    ["bodytext"],
+  );
 });
 
 test("structural refusal cannot be changed through a returned browser report", async () => {

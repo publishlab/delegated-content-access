@@ -18,23 +18,28 @@ const BASE_SEALED_MEMBERS = Object.freeze(["contentKeys", "periodKeys", "chainKe
 // base member is identity or a base route map and stays base-owned.
 const SHARED_CONTEXT_MEMBERS = Object.freeze(["periodGeometry"]);
 
-/**
- * What a selected extension's request builder may tell the delivery client
- * about the coordinates it added: whether they can return item content keys,
- * and whether they can return period or chain keys (derivation keys), which a
- * direct answer hands over as raw bytes.
- * @typedef {{ contentKeys: boolean, familyKeys: boolean }} ExtensionKeyFamilies
- */
+/** @typedef {import("../core-client/requestBuilderContracts.js").ExtensionKeyFamilies} ExtensionKeyFamilies */
 
 /**
- * Whether a built request offers any coordinate to this issuer: a base route
- * map member, or a coordinate the selected builder's `keyFamilies` reports.
+ * The records of one base request collection, or an empty list when it is
+ * absent or not an array.
+ * @param {unknown} collection
+ * @returns {any[]}
+ */
+function records(collection) {
+  return Array.isArray(collection) ? collection : [];
+}
+
+/**
+ * Whether a built request offers any coordinate to this issuer: a record in a
+ * base route collection, or a coordinate the selected builder's `keyFamilies`
+ * reports.
  * @param {any} request
  * @param {((request: any) => ExtensionKeyFamilies)|null} [keyFamilies]
  */
 export function hasEligibleCoordinates(request, keyFamilies = null) {
   const sealed = request?.sealed ?? {};
-  if (BASE_SEALED_MEMBERS.some((name) => Object.keys(sealed[name] ?? {}).length > 0)) return true;
+  if (BASE_SEALED_MEMBERS.some((name) => records(sealed[name]).length > 0)) return true;
   if (keyFamilies === null) return false;
   const families = keyFamilies(request);
   return families?.contentKeys === true || families?.familyKeys === true;
@@ -46,20 +51,7 @@ export function hasEligibleCoordinates(request, keyFamilies = null) {
  * @typedef {{ contentNames: string[], accessGroups: string[], routes?: string[] }} RouteIdentities
  */
 
-/**
- * The retry-projection seam a selected extension's request builder offers as
- * `routeProjection`. The extension declares the request members it adds,
- * names its route identities as opaque strings, rebuilds its members for a
- * subset of them, and says whether an identity still serves a missing item.
- * The walk does set operations only; it never reads an extension member.
- * @typedef {object} RouteProjection
- * @property {readonly string[]} members - root request members the extension adds
- * @property {readonly string[]} sealedMembers - `sealed` members the extension adds
- * @property {(request: any) => string[]} identities
- * @property {(request: any, routes: string[]) => { members?: Record<string, unknown>, sealed?: Record<string, unknown> }} project
- *   - the extension's members narrowed to those routes; `{}` when none remain
- * @property {(route: string, missing: string[]) => boolean} useful
- */
+/** @typedef {import("../core-client/requestBuilderContracts.js").RouteProjection} RouteProjection */
 
 /**
  * Admit a builder's projection seam once, at composition. It may claim no
@@ -113,9 +105,13 @@ export function settleRouteProjection(value) {
 export function routeIdentities(request, projection = null) {
   const sealed = request?.sealed ?? {};
   return {
-    contentNames: Object.keys(sealed.contentKeys ?? {}),
+    contentNames: [...new Set(records(sealed.contentKeys).map((record) => record?.contentName))],
     accessGroups: [
-      ...new Set([...Object.keys(sealed.periodKeys ?? {}), ...Object.keys(sealed.chainKeys ?? {})]),
+      ...new Set(
+        [...records(sealed.periodKeys), ...records(sealed.chainKeys)].map(
+          (record) => record?.accessGroup,
+        ),
+      ),
     ],
     routes: projection === null ? [] : [...new Set(projection.identities(request))],
   };
@@ -170,8 +166,9 @@ export function projectEligibleIdentities(request, identities, projection = null
 }
 
 /**
- * The base part of a projection: item and family route maps narrowed to the
- * qualified identities, with their context only while a family remains.
+ * The base part of a projection: item and family route records narrowed to
+ * the qualified identities, with their context only while a family remains.
+ * Every record of a qualified identity stays, rival candidates included.
  * @param {any} request
  * @param {RouteIdentities} identities
  * @returns {any}
@@ -179,29 +176,29 @@ export function projectEligibleIdentities(request, identities, projection = null
 function projectBase(request, identities) {
   const groups = new Set(identities.accessGroups);
   const items = new Set(identities.contentNames);
-  /** @param {Record<string, unknown>|undefined} members @param {Set<string>} admitted */
-  const select = (members, admitted) =>
-    Object.fromEntries(Object.entries(members ?? {}).filter(([name]) => admitted.has(name)));
+  /** @param {unknown} collection @param {string} field @param {Set<string>} admitted */
+  const select = (collection, field, admitted) =>
+    records(collection).filter((record) => admitted.has(record?.[field]));
   /** @type {any} */
   const selected = {
     ...request,
-    sealed: { contentKeys: select(request.sealed?.contentKeys, items) },
+    sealed: { contentKeys: select(request.sealed?.contentKeys, "contentName", items) },
   };
   for (const kind of ["periodKeys", "chainKeys"]) {
-    const families = select(request.sealed?.[kind], groups);
-    if (Object.keys(families).length > 0) selected.sealed[kind] = families;
+    const families = select(request.sealed?.[kind], "accessGroup", groups);
+    if (families.length > 0) selected.sealed[kind] = families;
   }
   if (Object.hasOwn(request, "requestedPeriodKeys")) {
-    const hints = select(request.requestedPeriodKeys, groups);
-    if (Object.keys(hints).length > 0) selected.requestedPeriodKeys = hints;
+    const hints = select(request.requestedPeriodKeys, "accessGroup", groups);
+    if (hints.length > 0) selected.requestedPeriodKeys = hints;
     else delete selected.requestedPeriodKeys;
   }
-  if (Object.keys(selected.sealed.chainKeys ?? {}).length === 0) {
+  if (records(selected.sealed.chainKeys).length === 0) {
     delete selected.requestedPeriodKeys;
   }
   if (
-    Object.keys(selected.sealed.chainKeys ?? {}).length === 0 &&
-    Object.keys(selected.sealed.periodKeys ?? {}).length === 0
+    records(selected.sealed.chainKeys).length === 0 &&
+    records(selected.sealed.periodKeys).length === 0
   ) {
     delete selected.periodGeometry;
   }

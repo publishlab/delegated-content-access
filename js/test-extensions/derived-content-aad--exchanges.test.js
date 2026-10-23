@@ -32,6 +32,7 @@ import { writeMarkupDelivery } from "../adapter-publisher/writeMarkupDelivery.js
 import { JsonDeliveryReader } from "../adapter-client/JsonDeliveryReader.js";
 import { MarkupDeliveryReader } from "../adapter-client/MarkupDeliveryReader.js";
 import { domOver } from "../test-lib/helpers/domOver.js";
+import { contentRecordOf, recordNamed } from "../test-lib/helpers/inspect.js";
 import { contentAadOctets } from "../test-reference/support/contentAadOctets.js";
 import {
   item as groupItem,
@@ -55,21 +56,20 @@ const CARRIERS = /** @type {const} */ (["json", "html"]);
  */
 function assertRoute(route, body) {
   const keys = body.keys;
-  const count = (/** @type {any} */ section) =>
-    Object.values(section ?? {}).reduce(
-      (/** @type {number} */ n, /** @type {any} */ v) => n + Object.keys(v).length,
-      0,
-    );
+  const count = (/** @type {any} */ section) => (section ?? []).length;
   if (route === "item") {
-    assert.ok(Object.keys(keys.contentKeys ?? {}).length > 0, "item keys delivered");
+    assert.ok(count(keys.contentKeys) > 0, "item keys delivered");
     assert.equal(count(keys.periodKeys) + count(keys.chainKeys), 0);
   } else if (route === "period") {
-    assert.deepEqual(keys.contentKeys ?? {}, {});
+    assert.equal(count(keys.contentKeys), 0);
     assert.ok(count(keys.periodKeys) > 0, "period keys delivered");
     assert.equal(count(keys.chainKeys), 0);
   } else {
-    assert.deepEqual(keys.contentKeys ?? {}, {});
-    assert.ok(Object.keys(keys.chainKeys?.[GROUP] ?? {}).length > 0, "a chain key delivered");
+    assert.equal(count(keys.contentKeys), 0);
+    assert.ok(
+      (keys.chainKeys ?? []).some((/** @type {any} */ record) => record.accessGroup === GROUP),
+      "a chain key delivered",
+    );
     assert.equal(count(keys.periodKeys), 0);
   }
 }
@@ -82,7 +82,7 @@ test("exchange matrix: every supported cell opens each item to its plaintext und
           const w = await exchangeWorld({ route, transport });
           const rendered = await w.render();
           for (const item of [BODY, LOCKED]) {
-            assert.equal(Object.hasOwn(rendered.dcaData.contentData[item.name], "aad"), false);
+            assert.equal(Object.hasOwn(contentRecordOf(rendered.dcaData, item.name), "aad"), false);
           }
           const state = await w.readerState();
           const client = w.clientFor(rendered, carrier, state);
@@ -103,7 +103,9 @@ test("exchange matrix: every supported cell opens each item to its plaintext und
           if (route === "item" && transport === "direct") {
             // The raw item key against octets spelled by hand: the publisher
             // sealed under the written transcript, not only under the module.
-            const key = base64urlDecode(answer.body.keys.contentKeys[BODY.name]);
+            const key = base64urlDecode(
+              recordNamed(answer.body.keys.contentKeys, "contentName", BODY.name).key,
+            );
             const plain = await decrypt(
               key,
               new Uint8Array(12),
@@ -136,7 +138,7 @@ test("exchange matrix: every supported cell opens each item to its plaintext und
       });
       const deliveryReader = overCarrier(published, carrier);
       for (const name of items) {
-        assert.equal(Object.hasOwn(deliveryReader.dcaData.contentData[name], "aad"), false);
+        assert.equal(Object.hasOwn(contentRecordOf(deliveryReader.dcaData, name), "aad"), false);
       }
       const client = w.reader().client(published, w.issuer(), { deliveryReader });
       assert.deepEqual((await client.unlock(items)).missing, []);
@@ -168,19 +170,40 @@ test("chain-derived grant: a record moved to another slot fails, and a carried o
   const grantee = w.clientFor(rendered, "json", state);
   assert.equal(text((await grantee.open(BODY.name)).bytes), BODY.value);
   assertRoute("chain", w.answers[0].body);
+  const lockedKey = await grantee.resolver.contentKeyFor(grantee.dcaData, LOCKED.name);
+  assert.ok(lockedKey instanceof Uint8Array, "the grant reaches the record at its own slot");
 
+  // Two refusals stack: the wrap nonce binds the item name, so the chain-derived
+  // period key recovers nothing at the new slot; and the record's own key still
+  // fails the new slot's content AAD.
   const moved = structuredClone(rendered);
-  moved.dcaData.contentData[BODY.name] = rendered.dcaData.contentData[LOCKED.name];
+  const bodyIndex = moved.dcaData.contentData.findIndex(
+    (/** @type {any} */ record) => record.contentName === BODY.name,
+  );
+  moved.dcaData.contentData[bodyIndex] = {
+    ...contentRecordOf(rendered.dcaData, LOCKED.name),
+    contentName: BODY.name,
+  };
   moved.sealedContent[BODY.name] = rendered.sealedContent[LOCKED.name];
   for (const carried of [undefined, "article-42|1|locked-data"]) {
     const copy = structuredClone(moved);
-    if (carried !== undefined) copy.dcaData.contentData[BODY.name].aad = carried;
+    if (carried !== undefined) contentRecordOf(copy.dcaData, BODY.name).aad = carried;
     const reader = w.clientFor(copy, "json", state);
-    assert.ok(
-      (await reader.resolver.contentKeyFor(reader.dcaData, BODY.name)) instanceof Uint8Array,
-      "the chain-derived period key still recovers the moved record's key",
+    assert.equal(
+      await reader.resolver.contentKeyFor(reader.dcaData, BODY.name),
+      null,
+      "the chain-derived period key recovers no key at the new slot",
     );
-    await assert.rejects(reader.openLocal(BODY.name), { code: "decrypt_failed" });
+    await assert.rejects(reader.openLocal(BODY.name), { code: "no_key" });
+    await assert.rejects(
+      decrypt(
+        lockedKey,
+        new Uint8Array(12),
+        base64urlDecode(copy.sealedContent[BODY.name]),
+        contentAadOctets(copy.dcaData, BODY.name),
+      ),
+      "the record's own key fails the new slot's content AAD",
+    );
   }
   assert.equal(w.answers.length, 1, "nothing was retried at the issuer");
 });

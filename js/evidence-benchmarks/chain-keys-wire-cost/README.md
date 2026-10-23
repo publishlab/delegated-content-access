@@ -7,8 +7,9 @@ The content-key-only floor has an independently sealed item content key and no s
 ## Measured result
 
 Historical capture recorded 2026-10-16 with omitted period-only geometry and no response geometry echo.
-It predates the implicit content-nonce adoption: these delivery totals include the former
-per-item nonce field and are not current wire totals.
+It predates implicit item, period-wrap and ordinary-envelope nonces, and the
+named-record wire format. These delivery totals retain the former nonce fields
+and object maps; they are not current wire totals.
 Sizes are raw / gzip / Brotli bytes. Compression uses normalized random carriers; this capture used
 `--bytes`, so it does not establish a fresh genuine-render spread.
 
@@ -23,7 +24,8 @@ Chain-only saves 109 raw / 75 Brotli bytes with ECDH and 305 raw / 235 Brotli by
 in this case. With one supplied member in either form, chain-only costs 54 raw bytes more because
 only it carries the geometry pair. Period-only becomes larger at two wrapped periods within one
 window and three across two windows in the measured raw and compressed series. One wrapped period
-adds 99 raw bytes per group; one sealed member adds 163 ECDH or 359 RSA bytes.
+added 99 raw bytes per group in that capture (72 in the later pre-array snapshot below); one sealed member
+adds 163 ECDH or 359 RSA bytes.
 
 The focused ECDH period-key request is 989 / 779 / 743 bytes, versus chain-only relay
 943 / 721 / 685. The two-period response is 131 / 131 / 112; the one-chain response is
@@ -45,7 +47,7 @@ Before printing, the run checks the exact delivery members, shared geometry shap
 to preserve the stated like-for-like wrapping schedules. The separate T0
 comparison below exercises the new omitted-option default.
 
-The geometry is 15-minute periods and two 12-hour stationary windows per day. One 51-byte `bodytext` is encrypted in each render. Gzip uses level 9; Brotli uses Node's defaults. Raw counts are UTF-8 bytes. Seeded render identifiers and content keys repeat; current item encryption derives its nonce implicitly, while other seeded nonces repeat; ECDH ephemeral keys, RSA-OAEP seals and ES256 signatures remain random. `measure.js` replaces only those random carriers with equal-width SHA-256 counter-mode material for deterministic compressed comparisons. The full run also samples seven genuine renders per focused form; the historical recorded result above uses --bytes and makes no new spread claim. Cryptographic work is counted through `crypto.subtle`, not timed.
+The geometry is 15-minute periods and two 12-hour stationary windows per day. One 51-byte `bodytext` is encrypted in each render. Gzip uses level 9; Brotli uses Node's defaults. Raw counts are UTF-8 bytes. Seeded render identifiers and content keys repeat; current item encryption derives its nonce implicitly, ordinary ECDH envelopes also use an implicit zero nonce; ECDH ephemeral keys, RSA-OAEP seals and ES256 signatures remain random. `measure.js` replaces only those random carriers with equal-width SHA-256 counter-mode material for deterministic compressed comparisons. The full run also samples seven genuine renders per focused form; the historical recorded result above uses --bytes and makes no new spread claim. Cryptographic work is counted through `crypto.subtle`, not timed.
 
 Run from the repository root:
 
@@ -61,7 +63,8 @@ diff a.txt b.txt
 ## T0 item policy: saved genuine output
 
 Historical capture recorded 2026-10-17 by `node js/evidence-benchmarks/chain-keys-wire-cost/t0.js`.
-These saved documents predate implicit content nonces and retain their original bytes.
+These saved documents predate implicit item, period-wrap and ordinary-envelope
+nonces and the named-record wire format, and retain their original bytes.
 The table describes that capture, not a fresh run of the current implementation.
 The [saved documents and measurements](t0-artifacts/measurements.json) compare the
 omitted `chainItemSlots` default against explicit `chainItemSlots: 2`. Both use
@@ -87,18 +90,23 @@ unreferenced group appears in item wraps, source supply or returned keys.
 Rerunning `t0.js` replaces only `t0-artifacts/` with a new genuine capture.
 
 
-### Current implementation raw-byte check
+### Recorded implementation raw-byte check, 2026-10-22
 
-A separate 2026-10-19 check composed the same six cases through the current real
+This snapshot predates ordinary-envelope nonce omission and the named-record
+wire format, and keeps its original measurements. Rerun against the selected implementation for current sizes.
+
+A separate 2026-10-22 check composed the same six cases through the real
 publisher, issuer and client, opened every item, and compared compact metadata
 with the saved capture. It did not replace the saved documents. Removing the
-per-item nonce field reduces each metadata document by 27 raw bytes:
+per-item nonce field saves 27 raw bytes per document; removing each period-wrap
+nonce field saves a further 27 raw bytes per wrap. In that snapshot a wrap entry is 71
+bytes, or 72 including its separating comma:
 
-| Item groups / configured universe | Current metadata default / two wraps, raw | Raw saving |
+| Item groups / configured universe | Recorded metadata default / two wraps, raw | Raw saving |
 | --- | ---: | ---: |
-| One / one | 1,208 / 1,307 | 99 |
-| Two / two | 1,655 / 1,853 | 198 |
-| One / four (sparse) | 1,208 / 1,307 | 99 |
+| One / one | 1,181 / 1,253 | 72 |
+| Two / two | 1,601 / 1,745 | 144 |
+| One / four (sparse) | 1,181 / 1,253 | 72 |
 
 This check establishes raw metadata counts only. It does not update the historical
 gzip results, response measurements or normalized broad benchmark table. For a

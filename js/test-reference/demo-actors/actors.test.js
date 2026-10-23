@@ -64,7 +64,13 @@ import {
   ungroupedArticle,
 } from "../../demo/scenarios/fixtures.js";
 import { issuerKeypair, signingKeypair } from "../support/keys.js";
-import { periodsOn } from "../../test-lib/helpers/inspect.js";
+import { keyAt } from "../support/namedRecords.js";
+import {
+  contentRecordOf,
+  issuerBlockOf,
+  issuerNamesOn,
+  periodsOn,
+} from "../../test-lib/helpers/inspect.js";
 import { wholeRenderIssuerSupplyPlan } from "../../core-publisher/issuerSupplyPlan.js";
 
 const clientBoundProfileStub = {
@@ -140,7 +146,7 @@ function axesOf(page) {
   const rendered = page.asJson();
   return {
     kid: decodeHeader(rendered.resourceJWT).kid,
-    keyId: rendered.issuerData[ISSUER_NAME].keyId,
+    keyId: issuerBlockOf(rendered).keyId,
     periods: periodsOn(rendered),
   };
 }
@@ -580,7 +586,9 @@ describe("transport-mode selection is the issuer application's", () => {
       clientBoundProfile: clientBoundProfileStub,
       random: new Random({ seed: 1 }),
     };
-    const responseSections = [{ path: ["extraKeys"], depth: 1, keyKind: "extraKey" }];
+    const responseSections = [
+      { path: ["extraKeys"], fields: ["contentName"], keyKind: "extraKey" },
+    ];
     assert.equal(
       stand({
         ...clientBound,
@@ -591,7 +599,7 @@ describe("transport-mode selection is the issuer application's", () => {
     );
     for (const extra of [
       { responseSections },
-      { responseSections: [{ path: ["keys"], depth: 1, keyKind: "contentKey" }] },
+      { responseSections: [{ path: ["keys"], fields: ["contentName"], keyKind: "contentKey" }] },
       { responseSections: "extraKeys" },
     ])
       assert.throws(
@@ -672,35 +680,59 @@ describe("FailoverGate", () => {
   test("trims each accessGroup independently without inventing availability", () => {
     const body = {
       keys: {
-        contentKeys: { bodytext: "content-key" },
-        periodKeys: {
-          article: { "251023T1300": "old", "251023T1400": "current", "251023T1500": "future" },
-          future: { "251023T1500": "not-started" },
-        },
+        contentKeys: [{ contentName: "bodytext", key: "content-key" }],
+        periodKeys: [
+          { accessGroup: "article", period: "251023T1300", key: "old" },
+          { accessGroup: "article", period: "251023T1400", key: "current" },
+          { accessGroup: "article", period: "251023T1500", key: "future" },
+          { accessGroup: "future", period: "251023T1500", key: "not-started" },
+        ],
       },
     };
 
     assert.deepEqual(trimToCurrentPeriod(body, new Date("2025-10-23T14:30:00Z")), {
       keys: {
-        contentKeys: { bodytext: "content-key" },
-        periodKeys: { article: { "251023T1400": "current" } },
+        contentKeys: [{ contentName: "bodytext", key: "content-key" }],
+        periodKeys: [{ accessGroup: "article", period: "251023T1400", key: "current" }],
+      },
+    });
+  });
+
+  test("the trim keeps every rival record at the current label", () => {
+    // Two records at one coordinate are separate candidates, and the trim is
+    // not the place that picks between them: the client keeps the one that
+    // opens.
+    const body = {
+      keys: {
+        periodKeys: [
+          { accessGroup: "article", period: "251023T1300", key: "old" },
+          { accessGroup: "article", period: "251023T1400", key: "current-a" },
+          { accessGroup: "article", period: "251023T1400", key: "current-b" },
+        ],
+      },
+    };
+
+    assert.deepEqual(trimToCurrentPeriod(body, new Date("2025-10-23T14:30:00Z")), {
+      keys: {
+        periodKeys: [
+          { accessGroup: "article", period: "251023T1400", key: "current-a" },
+          { accessGroup: "article", period: "251023T1400", key: "current-b" },
+        ],
       },
     });
   });
 
   test("the trim preserves the engine's notDelivered report and errors without adding a reason", () => {
     const body = {
-      keys: { periodKeys: { future: { "251023T1500": "not-started" } } },
-      errors: { "article|251023T1400": { error: "unseal_failed" } },
-      notDelivered: { premium: { reason: "denied" } },
+      keys: { periodKeys: [{ accessGroup: "future", period: "251023T1500", key: "not-started" }] },
+      errors: [{ coordinate: "article|251023T1400", error: "unseal_failed" }],
+      notDelivered: [{ accessGroup: "premium", reason: "denied" }],
     };
 
     assert.deepEqual(trimToCurrentPeriod(body, new Date("2025-10-23T14:30:00Z")), {
       keys: {},
-      errors: { "article|251023T1400": { error: "unseal_failed" } },
-      notDelivered: {
-        premium: { reason: "denied" },
-      },
+      errors: [{ coordinate: "article|251023T1400", error: "unseal_failed" }],
+      notDelivered: [{ accessGroup: "premium", reason: "denied" }],
     });
   });
 
@@ -709,13 +741,13 @@ describe("FailoverGate", () => {
     // notDelivered beside an error on one of that family's periods, so the
     // trim leaves the coordinate error to speak for the family.
     const body = {
-      keys: { periodKeys: { future: { "251023T1500": "not-started" } } },
-      errors: { "future|251023T1400": { error: "unseal_failed" } },
+      keys: { periodKeys: [{ accessGroup: "future", period: "251023T1500", key: "not-started" }] },
+      errors: [{ coordinate: "future|251023T1400", error: "unseal_failed" }],
     };
 
     assert.deepEqual(trimToCurrentPeriod(body, new Date("2025-10-23T14:30:00Z")), {
       keys: {},
-      errors: { "future|251023T1400": { error: "unseal_failed" } },
+      errors: [{ coordinate: "future|251023T1400", error: "unseal_failed" }],
     });
   });
 });
@@ -932,7 +964,10 @@ describe("IssuerServer composition injects business data, versions, and one deci
     allowed = true;
     const granted = await post();
     assert.equal(granted.status, 200);
-    assert.equal(typeof granted.body.keys.contentKeys[CONTENT_NAME], "string");
+    assert.equal(
+      typeof keyAt(granted.body.keys.contentKeys, { contentName: CONTENT_NAME }),
+      "string",
+    );
     assert.equal(granted.body.error, undefined);
     assert.equal(decisions, 2, "the second attempt reaches the access policy");
     assert.equal(world.servers.primary.stats().grants, 1);
@@ -953,7 +988,10 @@ describe("IssuerServer composition injects business data, versions, and one deci
 
     const granted = await post();
     assert.equal(granted.status, 200);
-    assert.equal(typeof granted.body.keys.contentKeys[CONTENT_NAME], "string");
+    assert.equal(
+      typeof keyAt(granted.body.keys.contentKeys, { contentName: CONTENT_NAME }),
+      "string",
+    );
     // The clock does not advance; this identical request is inside the
     // former response cache's 10-second TTL.
     allowed = false;
@@ -1156,9 +1194,9 @@ describe("PageLoad", () => {
     for (const kind of ["ordinary", "chain-bearing", "client-bound"]) {
       const delivered = page.asJson();
       if (kind === "chain-bearing") {
-        delivered.issuerData[ISSUER_NAME].sealed.chainKeys = {
-          [ACCESS_GROUP]: { "251023T2300": "opaque-chain-carrier" },
-        };
+        issuerBlockOf(delivered).sealed.chainKeys = [
+          { accessGroup: ACCESS_GROUP, cutoff: "251023T2300", key: "opaque-chain-carrier" },
+        ];
       }
       const capability =
         kind === "client-bound"
@@ -1189,14 +1227,16 @@ describe("PageLoad", () => {
       // builder under test: a builder that drops a member, forwards a chain
       // carrier or rewrites a blob disagrees with the bytes the publisher put
       // in the markup.
-      const block = delivered.issuerData[ISSUER_NAME];
+      const block = issuerBlockOf(delivered);
       const expected = {
         version: delivered.version,
         issuerName: ISSUER_NAME,
         resourceJWT: delivered.resourceJWT,
         keyId: block.keyId,
         sealed: {
-          contentKeys: { [CONTENT_NAME]: block.sealed.contentKeys[CONTENT_NAME] },
+          contentKeys: block.sealed.contentKeys.filter(
+            (/** @type {any} */ record) => record.contentName === CONTENT_NAME,
+          ),
           periodKeys: block.sealed.periodKeys,
         },
         ...(capability === undefined ? {} : { clientPublicKey: capability.publicKey }),
@@ -1223,11 +1263,11 @@ describe("PageLoad", () => {
         post: async () => ({
           status: 200,
           body: {
-            keys: { contentKeys: {} },
-            errors: {
-              bodytext: { error: "key_retired" },
-              ghost: { error: "invented_availability_error" },
-            },
+            keys: { contentKeys: [] },
+            errors: [
+              { coordinate: "bodytext", error: "key_retired" },
+              { coordinate: "ghost", error: "invented_availability_error" },
+            ],
           },
         }),
       },
@@ -1354,7 +1394,7 @@ describe("PageLoad", () => {
       ],
     ]) {
       const delivered = page.asJson();
-      mangle(delivered.contentData[CONTENT_NAME]);
+      mangle(contentRecordOf(delivered));
       const browser = world.makeBrowser();
       const load = browser.load(
         rootFromPage({
@@ -1406,7 +1446,7 @@ describe("PageLoad", () => {
     };
     /** @type {object[]} */
     const factoryOptions = [];
-    /** @type {{ resolveDetailed: number, applyResponse: number, contentKeyWithOriginFor: number }[]} */
+    /** @type {{ resolveDetailed: number, applyResponse: number, resolveAuthenticated: number }[]} */
     const resolverCalls = [];
     const builderOptions = [];
 
@@ -1427,7 +1467,7 @@ describe("PageLoad", () => {
       resolverFactory(options) {
         factoryOptions.push(options);
         const real = new ContentKeyResolver(options);
-        const calls = { resolveDetailed: 0, applyResponse: 0, contentKeyWithOriginFor: 0 };
+        const calls = { resolveDetailed: 0, applyResponse: 0, resolveAuthenticated: 0 };
         resolverCalls.push(calls);
         return {
           async resolveDetailed(...args) {
@@ -1438,8 +1478,11 @@ describe("PageLoad", () => {
             calls.applyResponse++;
             return real.applyResponse(...args);
           },
+          async resolveAuthenticated(...args) {
+            calls.resolveAuthenticated++;
+            return real.resolveAuthenticated(...args);
+          },
           async contentKeyWithOriginFor(...args) {
-            calls.contentKeyWithOriginFor++;
             return real.contentKeyWithOriginFor(...args);
           },
         };
@@ -1485,7 +1528,7 @@ describe("PageLoad", () => {
     assert.deepEqual(resolverCalls[0], {
       resolveDetailed: 2,
       applyResponse: 1,
-      contentKeyWithOriginFor: 1,
+      resolveAuthenticated: 1,
     });
     assert.equal(
       load.stats().trials,
@@ -1519,11 +1562,17 @@ describe("PageLoad", () => {
         error.code === "bad_config" && /resolverFactory/.test(error.message),
     );
 
-    for (const missing of ["applyResponse", "resolveDetailed", "contentKeyWithOriginFor"]) {
+    for (const missing of [
+      "applyResponse",
+      "resolveDetailed",
+      "contentKeyWithOriginFor",
+      "resolveAuthenticated",
+    ]) {
       const methods = {
         applyResponse() {},
         resolveDetailed() {},
         contentKeyWithOriginFor() {},
+        resolveAuthenticated() {},
       };
       delete methods[missing];
       const browser = world.makeBrowser({ resolverFactory: () => methods });
@@ -1581,7 +1630,7 @@ describe("PageLoad", () => {
       location: ordinary.location,
       querySelectorAll(selector) {
         return selector === SEALED_SELECTOR
-          ? [{ tagName: "script", textContent: "{}", getAttribute: () => "application/json" }]
+          ? [{ tagName: "script", textContent: "[]", getAttribute: () => "application/json" }]
           : ordinary.querySelectorAll(selector);
       },
     };
@@ -1772,7 +1821,7 @@ describe("Publisher", () => {
       "the copy is taken at construction, so the push never reached this one",
     );
     assert.deepEqual(
-      Object.keys((await early.render(article("A"))).asJson().issuerData),
+      issuerNamesOn((await early.render(article("A"))).asJson()),
       [ISSUER_NAME],
       "and every render it makes is sealed for the issuers it was built with",
     );
@@ -1781,7 +1830,7 @@ describe("Publisher", () => {
     // first time they are asked for: a caller that stands an issuer up gets one
     // that seals for it, without having to know it was building anything.
     assert.deepEqual(
-      Object.keys((await late.render(article("A"))).asJson().issuerData),
+      issuerNamesOn((await late.render(article("A"))).asJson()),
       [ISSUER_NAME, FALLBACK_ISSUER_NAME],
       "a publisher built after the list grew carries the issuer added to it",
     );

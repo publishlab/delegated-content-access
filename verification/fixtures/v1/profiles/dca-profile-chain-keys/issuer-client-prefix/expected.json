@@ -15,13 +15,15 @@
   },
   "response": {
     "status": 200,
-    "contentKeys": {},
+    "contentKeys": [],
     "periodKeys": "absent",
-    "chainKeys": {
-      "premium": {
-        "251023T1415": "vXxg30CDnydA4eLhmNIkmQ"
+    "chainKeys": [
+      {
+        "accessGroup": "premium",
+        "cutoff": "251023T1415",
+        "key": "vXxg30CDnydA4eLhmNIkmQ"
       }
-    },
+    ],
     "geometry": {
       "premium": {
         "chainsPerDay": 2,

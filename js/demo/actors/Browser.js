@@ -96,9 +96,9 @@ export class Browser {
   #persistRawPeriodKeys;
   /** @type {boolean|undefined} */
   #relayPeriodKeys;
-  /** @type {((options: object) => object)|undefined} */
+  /** @type {NonNullable<ConstructorParameters<typeof PageLoad>[0]>["resolverFactory"]} */
   #resolverFactory;
-  /** @type {((options: object) => object)|undefined} */
+  /** @type {import("../../integration-client/composeClient.js").ComposeClientOptions["requestBuilderFactory"]} */
   #requestBuilderFactory;
   /** @type {ContentRepresentationOpener} */
   #contentRepresentationOpener;
@@ -150,9 +150,9 @@ export class Browser {
    *   accepted, directly delivered period keys to enter this browser's caches
    * @param {boolean} [config.relayPeriodKeys] - whether this browser selects
    *   period-key request relay
-   * @param {(options: object) => object} [config.resolverFactory] - builds the
+   * @param {NonNullable<ConstructorParameters<typeof PageLoad>[0]>["resolverFactory"]} [config.resolverFactory] - builds the
    *   selected resolver composition once for each page load
-   * @param {(options: object) => object} [config.requestBuilderFactory] - builds
+   * @param {import("../../integration-client/composeClient.js").ComposeClientOptions["requestBuilderFactory"]} [config.requestBuilderFactory] - builds
    *   the selected request composition independently of the resolver
    * @param {Record<string, (bytes: Uint8Array) => Promise<Uint8Array>|Uint8Array>} [config.contentDecoders] -
    *   the representation decoders this client composition supports

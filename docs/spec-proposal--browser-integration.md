@@ -216,14 +216,15 @@ The setup is a plain object (an object literal or null-prototype record), with o
 
 ```text
 {
-  delivery: { contentData: { [name]: { contentType, ... } }, ... },
+  delivery: { contentData: [{ contentName, contentType, ... }, ...], ... },
   isEligible: () -> boolean,
   targets: { [name]: callback },
   values?: { [name]: "bytes" | "strictUTF8" }
 }
 ```
 
-`delivery.contentData`, `targets` and supplied `values` are plain records. Every target is callable;
+`delivery.contentData` is an admitted array of named item records; `targets` and supplied `values`
+are plain records. Every target is callable;
 each value-mode entry names a target. Omitted modes mean bytes. Setup errors throw synchronously.
 The connection captures item types, callbacks and modes, so later caller mutation does not retarget
 it. Missing/invalid item types remain an item refusal; the handler does not replace client admission.

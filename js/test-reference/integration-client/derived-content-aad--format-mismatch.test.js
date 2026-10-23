@@ -13,6 +13,7 @@ import assert from "node:assert/strict";
 import { decrypt, encrypt } from "../../core-shared/aead.js";
 import { base64urlDecode, base64urlEncode, utf8Encode } from "../../core-shared/codec.js";
 import { contentAadOctets } from "../support/contentAadOctets.js";
+import { contentRecordOf } from "../../test-lib/helpers/inspect.js";
 import {
   BODY,
   GROUP,
@@ -20,6 +21,8 @@ import {
   OTHER_UNLOCK_URL,
   RESOURCE_ID,
   UNLOCK_URL,
+  periodKeysAnswered,
+  putItemRecord,
   text,
   world,
 } from "./derived-content-aad--support.js";
@@ -28,7 +31,7 @@ const OLD_AAD = `${RESOURCE_ID}|1|${BODY.name}`;
 
 /**
  * A render, a reader holding its period grant, and the same render with BODY
- * resealed the old way: the key the grant recovers, a fresh nonce, the retired
+ * resealed with only the AAD changed: the key the grant recovers, the same zero nonce, the retired
  * string as AAD and carried in the record. LOCKED stays in the new format.
  */
 async function withOldItem() {
@@ -38,13 +41,13 @@ async function withOldItem() {
   assert.equal(text((await grantee.open(BODY.name)).bytes), BODY.value);
   const key = await grantee.resolver.contentKeyFor(grantee.dcaData, BODY.name);
   assert.ok(key instanceof Uint8Array);
-  const nonce = crypto.getRandomValues(new Uint8Array(12));
+  const nonce = new Uint8Array(12);
   const old = structuredClone(delivered);
-  old.dcaData.contentData[BODY.name] = {
-    ...old.dcaData.contentData[BODY.name],
+  putItemRecord(old.dcaData, BODY.name, {
+    ...contentRecordOf(old.dcaData, BODY.name),
     nonce: base64urlEncode(nonce),
     aad: OLD_AAD,
-  };
+  });
   old.sealedContent[BODY.name] = base64urlEncode(
     await encrypt(key, nonce, utf8Encode(BODY.value), utf8Encode(OLD_AAD)),
   );
@@ -71,7 +74,7 @@ async function outcome(w, delivered, cache, contentName) {
 test("an old-format item fails under the stock client, through a retained grant and a fresh unlock", async () => {
   const { w, old, key, cache } = await withOldItem();
   // The resealed item is a sound old-format item: the retired string opens it.
-  const record = old.dcaData.contentData[BODY.name];
+  const record = contentRecordOf(old.dcaData, BODY.name);
   assert.equal(
     text(
       await decrypt(
@@ -94,7 +97,7 @@ test("an old-format item fails under the stock client, through a retained grant 
   const before = w.exchanges.length;
   await assert.rejects(w.client(old).open(BODY.name), { code: "decrypt_failed" });
   assert.equal(w.exchanges.length, before + 1, "one unlock and no retry under another AAD");
-  assert.ok(Object.keys(w.exchanges[before].body.keys.periodKeys[GROUP]).length > 0);
+  assert.ok(periodKeysAnswered(w.exchanges[before].body, GROUP).length > 0);
 });
 
 test("a carried aad of any type selects no transcript: every outcome equals the outcome without it", async () => {
@@ -126,11 +129,11 @@ test("a carried aad of any type selects no transcript: every outcome equals the 
   ];
   for (const [format, page, expected] of formats) {
     const without = structuredClone(page);
-    delete without.dcaData.contentData[BODY.name].aad;
+    delete contentRecordOf(without.dcaData, BODY.name).aad;
     assert.deepEqual(await outcome(w, without, cache, BODY.name), expected, `${format}, no aad`);
     for (const value of carried) {
       const copy = structuredClone(page);
-      copy.dcaData.contentData[BODY.name].aad = value;
+      contentRecordOf(copy.dcaData, BODY.name).aad = value;
       assert.deepEqual(
         await outcome(w, copy, cache, BODY.name),
         expected,

@@ -15,8 +15,11 @@ import * as ecdhMethod from "../../client-bound-transport/ecdhP256.js";
 import { clientBoundKeyCapability } from "../../client-bound-transport/core-client/clientBoundKeyCapability.js";
 import { contentGroupsProfile } from "../referenceProfile.js";
 import { T18, chainPolicy, claimsOf, copy, item, world } from "./_lib/world.js";
+import { connectorsOf, find, issuerBlock, sealedContentKey, seedRecords } from "./_lib/records.js";
 
 const none = () => ({ grants: [], authorizePeriod: () => true });
+/** The content names a response section's records carry, each once. */
+const names = (records) => [...new Set(records.map(({ contentName }) => contentName))];
 
 // Replaces `connectors: [null]` and the root `contentGroups: ["sports"]`: an
 // ordinary-only item carries no connectors member at all.
@@ -28,13 +31,18 @@ test("a mixed page opens its connector item and its purchased ordinary item thro
   });
   const { page } = published;
   assert.equal(Object.hasOwn(page, "contentGroups"), false);
-  assert.equal(Object.hasOwn(page.contentData.purchasedArticle, "connectors"), false);
-  assert.equal(Object.hasOwn(page.contentData.purchasedArticle, "keys"), false);
-  assert.deepEqual(Object.keys(page.contentData.sportsArticle.connectors), ["sports"]);
-  assert.equal(typeof page.issuerData.issuer.sealed.contentKeys.purchasedArticle, "string");
-  assert.deepEqual(Object.keys(page.issuerData.issuer.sealed.contentWindowSeeds), [
-    "sportsArticle",
-  ]);
+  const purchased = find(page.contentData, { contentName: "purchasedArticle" });
+  assert.equal(Object.hasOwn(purchased, "connectors"), false);
+  assert.equal(Object.hasOwn(purchased, "keys"), false);
+  assert.deepEqual(
+    connectorsOf(page, "sportsArticle").map(({ group }) => group),
+    ["sports"],
+  );
+  assert.equal(typeof sealedContentKey(page, "issuer", "purchasedArticle"), "string");
+  assert.deepEqual(
+    [...new Set(seedRecords(page, "issuer").map(({ contentName }) => contentName))],
+    ["sportsArticle"],
+  );
   assert.equal(Object.hasOwn(claimsOf(page.resourceJWT), "contentKeyCommitments"), false);
 
   const issuer = w.issuer({ purchased: ["purchasedArticle"] });
@@ -42,8 +50,8 @@ test("a mixed page opens its connector item and its purchased ordinary item thro
   const walk = await client.unlock(["sportsArticle", "purchasedArticle"]);
   assert.deepEqual(walk.missing, []);
   const [answer] = issuer.calls.answers;
-  assert.deepEqual(Object.keys(answer.body.keys.contentKeys), ["purchasedArticle"]);
-  assert.deepEqual(Object.keys(answer.body.contentGroups.chainKeys), ["sportsArticle"]);
+  assert.deepEqual(names(answer.body.keys.contentKeys), ["purchasedArticle"]);
+  assert.deepEqual(names(answer.body.contentGroupKeys.chainKeys), ["sportsArticle"]);
   assert.deepEqual(w.openingLookups, [["issuer", "issuer-k1"]]);
   assert.equal(issuer.calls.decide.length, 1);
   assert.equal(await client.open("sportsArticle"), "content:sportsArticle");
@@ -62,8 +70,8 @@ test("an item with both routes opens through its ordinary item grant without any
   const client = reader.client(published, issuer);
   await client.unlock(["sportsArticle"]);
   const [answer] = issuer.calls.answers;
-  assert.deepEqual(Object.keys(answer.body.keys.contentKeys), ["sportsArticle"]);
-  assert.equal(Object.hasOwn(answer.body, "contentGroups"), false);
+  assert.deepEqual(names(answer.body.keys.contentKeys), ["sportsArticle"]);
+  assert.equal(Object.hasOwn(answer.body, "contentGroupKeys"), false);
   assert.equal(await client.open("sportsArticle"), "content:sportsArticle");
   assert.deepEqual(await reader.chainKeyCache().entries(), []);
   // The other route reaches the very same fresh key.
@@ -85,14 +93,16 @@ test("an ordinary-only issuer receives no seed, and each render gets a fresh ite
       seedWindows: {},
     });
     assert.equal(
-      Object.hasOwn(published.page.issuerData.issuer.sealed, "contentWindowSeeds"),
+      Object.hasOwn(issuerBlock(published.page, "issuer").sealed, "contentWindowSeeds"),
       false,
     );
     const issuer = w.issuer();
     const client = w.reader().client(published, issuer);
     await client.unlock(["purchasedArticle"]);
     assert.equal(await client.open("purchasedArticle"), "content:purchasedArticle");
-    keys.push(issuer.calls.answers[0].body.keys.contentKeys.purchasedArticle);
+    keys.push(
+      find(issuer.calls.answers[0].body.keys.contentKeys, { contentName: "purchasedArticle" })?.key,
+    );
     renderIds.push(claimsOf(published.page.resourceJWT).renderId);
   }
   assert.notEqual(renderIds[0], renderIds[1]);
@@ -123,7 +133,7 @@ test("base acquisition cannot use another keyId for the ordinary item route", as
   w.openingLookups.length = 0;
   const otherKey = { ...copy(client.sent[0]), keyId: "issuer-k2" };
   const result = await issuer.answer(otherKey);
-  assert.equal(result.body.keys?.contentKeys?.purchasedArticle, undefined);
+  assert.equal(find(result.body.keys?.contentKeys, { contentName: "purchasedArticle" }), undefined);
   assert.deepEqual(w.openingLookups, [["issuer", "issuer-k2"]], "no fallback to issuer-k1");
 });
 
@@ -139,7 +149,7 @@ test("an unselected stock chain section leaves the content-group answer usable",
   const reader = w.reader();
   const client = reader.client(published, w.issuer({ purchased: ["purchasedArticle"] }), {
     answered: (body) => {
-      body.keys.chainKeys = { sports: { [T18]: "unsupported" } };
+      body.keys.chainKeys = [{ accessGroup: "sports", cutoff: T18, key: "unsupported" }];
       return body;
     },
   });
@@ -238,13 +248,16 @@ for (const [label, method] of [
     assert.equal(status, 200);
     const [answer] = retiredIssuer.calls.answers;
     assert.equal(answer.status, 200);
-    assert.deepEqual(answer.body.errors.purchasedArticle.error, "key_retired");
+    assert.deepEqual(
+      find(answer.body.errors, { coordinate: "purchasedArticle" })?.error,
+      "key_retired",
+    );
     // The source's default connector route is also an authorized alternative;
     // its render-window seed is retired alongside the ordinary purchased key.
-    assert.deepEqual(answer.body.contentGroups, {
+    assert.deepEqual(answer.body.contentGroupKeys, {
       errors: {
-        chainKeys: { sportsArticle: { sports: { [T18]: RETIRED } } },
-        contentKeys: { sportsArticle: RETIRED },
+        chainKeys: [{ contentName: "sportsArticle", group: "sports", cutoff: T18, ...RETIRED }],
+        contentKeys: [{ contentName: "sportsArticle", ...RETIRED }],
       },
     });
     if (method !== undefined) assert.equal(answer.body.transport.method, method.METHOD);
@@ -262,14 +275,14 @@ for (const [label, method] of [
           windowStart: "261014T1200",
           t: T18,
           error: "key_retired",
-          consumer: "contentGroups",
+          consumer: "contentGroupKeys",
         },
         {
           section: "contentKeys",
           contentName: "sportsArticle",
           group: "sports",
           error: "key_retired",
-          consumer: "contentGroups",
+          consumer: "contentGroupKeys",
         },
       ],
     );

@@ -10,6 +10,7 @@ import { decrypt } from "../../../core-shared/aead.js";
 import { base64urlDecode } from "../../../core-shared/codec.js";
 import { decodePayload } from "../../../core-shared--publisher-issuer/jwt.js";
 import { contentAadOctets } from "../../../test-reference/support/contentAadOctets.js";
+import { issuerBlock, item } from "./_lib/records.js";
 
 const subtle = globalThis.crypto.subtle;
 const ORIGIN = "https://news.example";
@@ -105,15 +106,14 @@ test("a contribution's preparation adds claims, record members, sealed sections 
     "data",
     "fakeCommitments",
   ]);
-  assert.deepEqual(/** @type {any} */ (dcaData.contentData).routed.fakeRoutes, { g: "r1" });
-  assert.equal(/** @type {any} */ (dcaData.contentData).ordinary.fakeRoutes, undefined);
-  assert.deepEqual(/** @type {any} */ (dcaData.issuerData).issuerA, {
+  assert.deepEqual(item(dcaData, "routed").fakeRoutes, { g: "r1" });
+  assert.equal(item(dcaData, "ordinary").fakeRoutes, undefined);
+  assert.deepEqual(issuerBlock(dcaData, "issuerA"), {
+    issuerName: "issuerA",
     sealed: { fakeSeeds: { routed: "s1" } },
     keyId: "a1",
   });
-  assert.deepEqual(Object.keys(/** @type {any} */ (dcaData.issuerData).issuerB.sealed), [
-    "contentKeys",
-  ]);
+  assert.deepEqual(Object.keys(issuerBlock(dcaData, "issuerB").sealed), ["contentKeys"]);
   assert.equal(/** @type {any} */ (dcaData).fakeRenderPeriod, "261014T1200");
   assert.deepEqual(Object.keys(dcaData), [
     "version",
@@ -192,11 +192,11 @@ for (const [label, result, pattern] of /** @type {[string, any, RegExp][]} */ ([
   ["a record of an item the render lacks", { contentRecords: { other: { a: 1 } } }, /other/],
   [
     "a base sealed member",
-    { issuerSealed: { issuerA: { contentKeys: {} } } },
+    { issuerSealed: { issuerA: { contentKeys: [] } } },
     /sealed member contentKeys/,
   ],
   ["an issuer the publisher lacks", { issuerSealed: { issuerC: { x: {} } } }, /issuerC/],
-  ["a base page member", { pageMembers: { contentData: {} } }, /page member contentData/],
+  ["a base page member", { pageMembers: { contentData: [] } }, /page member contentData/],
   ["an unknown result member", { other: {} }, /other/],
   ["a non-JSON claim", { claims: { when: new Date() } }, /JSON/],
 ])) {

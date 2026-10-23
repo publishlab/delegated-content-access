@@ -15,16 +15,21 @@
 // Do not memoize. Resource coordinates come from the required signed-envelope
 // payload. Decoding does not authenticate it.
 //
-// This view reads own properties only. The containers are keyed by names the
-// publisher chose (contentName, accessGroup, issuerName), so `map[name]` would
-// return Object.prototype.constructor for the name 'constructor'. The fixed
-// fields (version, resource, resourceJWT) are a closed set and get one read
-// each.
+// This view reads own properties only. Items and issuer blocks arrive as
+// arrays of records named by `contentName` and `issuerName`; the view looks
+// them up through a Map built per read, so a name such as 'constructor' never
+// reaches Object.prototype. The fixed fields (version, resource, resourceJWT)
+// are a closed set and get one read each.
+//
+// Several records with one name resolve to the last whole record, and nothing
+// merges: an item's `keys` or an issuer's `keyId` never comes from an earlier
+// record with the same name. Several wrap records at one (accessGroup, period)
+// are candidate alternatives, and the view hands on every one of them.
 //
 // The format sets the scope of each failure, and each check sits at that scope.
 //
 // The outer object is delivery-wide: `version` "1", a string `resourceJWT`, a
-// `contentData` object, a non-empty `issuerData` map, and a `resource` object
+// `contentData` array, a non-empty `issuerData` array, and a `resource` object
 // when the page carries one. `#admitted` holds them, and the accessors a
 // request is derived from read through it, so a delivery short of one of them
 // answers nothing a caller sends.
@@ -40,36 +45,39 @@
 //
 // A failure in one route stays with that route. A cached-wrap container the
 // format does not admit supplies no cached route for its item and leaves the
-// issuer-mediated route alone; a malformed group value loses only that group,
-// and one malformed candidate inside an admitted array loses only itself. This
+// issuer-mediated route alone, and one malformed candidate inside an admitted
+// collection loses only itself. This
 // view treats an issuer block missing its `sealed` container or a string
 // `keyId` as an issuer this page does not carry, and the sibling
 // issuer stays usable.
 //
-// This view checks every member name of a name-keyed map before it reads any
-// member. The format's identifier section rejects the whole map when one member
-// name falls outside the grammar; it does not skip that member. So one bad name
-// in `contentData` or `issuerData` fails the delivery, a cached-wrap map keyed
-// by anything but accessGroups supplies no cached route for its item, and a
-// sealed route map keyed by anything but names of its kind supplies no route of
-// that kind.
+// This view checks the identity of every record in a collection before it
+// reads any record. The format's identifier section rejects the whole
+// collection when one record's identity is missing or falls outside the
+// grammar; it does not skip that record. One bad identity in `contentData` or
+// `issuerData` therefore fails the delivery. An element that is not a
+// non-array object is skipped and leaves its siblings usable. A cached-wrap
+// collection with an invalid accessGroup supplies no cached route for its
+// item, and a sealed route collection with an invalid identity supplies no
+// route of that kind.
 //
-// This view checks the chain route map the same way as the other two, because
-// it reads that map through the same route-map accessor: a `chainKeys`
-// map keyed by anything but accessGroups supplies no chain route, and a present
-// `chainKeys` that is not a non-array object supplies none either. The
-// envelope read and the cached-walk coordinates stay off the outer gate; the
+// This view checks sealed `chainKeys` through the same accessor as the other
+// route collections. It requires an array of records named by `accessGroup`;
+// an invalid identity rejects that collection, while a non-record element is
+// skipped. A present `chainKeys` that is not an array supplies no chain route.
+// The envelope read and the cached-walk coordinates stay off the outer gate; the
 // file is short of the format there and nowhere else.
 
 import { decodeCompactJwt } from "../core-shared/compactJwt.js";
 import { normalizePublisherOrigin } from "../core-shared/publisherOrigin.js";
 import { isAccessGroup, isContentName, isIssuerName } from "../core-shared/names.js";
-import { own } from "../core-shared/wire.js";
+import { own, setOwn } from "../core-shared/wire.js";
 import { dcaError } from "../core-shared/errors.js";
 import { contentEncodingsFrom } from "./contentEncodings.js";
 import { contentAad } from "../core-shared--client-publisher/contentAad.js";
 import { contentHandlingIsValid } from "../core-shared--client-publisher/contentHandling.js";
 import { binaryStringBytes } from "../core-shared/binaryStrings.js";
+import { recordsByName } from "../core-shared--client-publisher/deliveryRecords.js";
 
 // Local item-opening resource bound, retained from the former signing-input
 // admission. Check before compact-token splitting, decoding or JSON traversal.
@@ -100,48 +108,36 @@ function isContainer(value) {
 }
 
 /**
- * Whether every own member name one identifier-keyed map carries is a name of
- * its kind. The format rejects such a map when one member name violates the
- * grammar, and it does not pass over the invalid name and read the siblings,
- * so a caller asks this of the whole map before it reads any member of it.
+ * One descriptor collection whose rejection fails the whole delivery, as a
+ * Map from name to its last whole record. This function throws the refusal so
+ * every accessor that reads through the collection refuses the same way.
  *
- * @param {any} map - already through `isContainer`
+ * @param {unknown} collection - already through `Array.isArray`
+ * @param {string} member - `contentName` or `issuerName`
  * @param {(name: unknown) => boolean} isName
- * @returns {boolean}
+ * @param {string} which - which collection, for the message
+ * @returns {Map<string, any>}
  */
-function namesAdmit(map, isName) {
-  return Object.keys(map).every((name) => isName(name));
-}
-
-/**
- * The same check for a map whose rejection fails the whole delivery instead
- * of one route. This function throws the refusal so every accessor that reads
- * through the map refuses the same way.
- *
- * @param {any} map - already through `isContainer`
- * @param {(name: unknown) => boolean} isName
- * @param {string} which - which map, for the message
- * @returns {any} the same map
- */
-function refuseUnlessNamesAdmit(map, isName, which) {
-  if (!namesAdmit(map, isName)) {
-    throw dcaError("bad_page", `dca-data carries a ${which} name outside the grammar`);
+function refuseUnlessRecordsAdmit(collection, member, isName, which) {
+  const records = recordsByName(collection, member, isName);
+  if (records === null) {
+    throw dcaError("bad_page", `dca-data carries a ${which} record outside the grammar`);
   }
-  return map;
+  return records;
 }
 
 /**
  * The selected issuer block, or undefined when the page carries none the format
- * admits. A block is usable only when it and its `sealed` member are non-array
- * objects and its `keyId` is a non-empty string. An unusable block
+ * admits. A block is usable only when its `sealed` member is a non-array
+ * object and its `keyId` is a non-empty string. An unusable block
  * supplies no route at all, and a valid sibling issuer stays usable.
  *
- * @param {any} issuerData
+ * @param {Map<string, any>} issuerBlocks - the admitted `issuerData` by name
  * @param {string} issuerName
  * @returns {any} the usable block, or undefined
  */
-function usableIssuer(issuerData, issuerName) {
-  const block = own(issuerData, issuerName);
+function usableIssuer(issuerBlocks, issuerName) {
+  const block = issuerBlocks.get(issuerName);
   if (!isContainer(block)) return undefined;
   const keyId = own(block, "keyId");
   if (typeof keyId !== "string" || keyId.length === 0) return undefined;
@@ -149,93 +145,121 @@ function usableIssuer(issuerData, issuerName) {
 }
 
 /**
- * One kind of route map out of a usable block, or undefined when the block
- * carries no map of that kind the format admits. A container that is not a
- * non-array object supplies no route of its kind and leaves the other kind in
- * the same block alone.
+ * The fields that name a coordinate in each sealed route collection, with the
+ * grammar of the identity field. A record's other coordinate field (`period`,
+ * `cutoff`) is only checked to be a string here; the issuer and the selected
+ * profile own its grammar.
+ */
+const ROUTE_FIELDS = Object.freeze({
+  contentKeys: Object.freeze({ identity: "contentName", isName: isContentName, label: null }),
+  periodKeys: Object.freeze({ identity: "accessGroup", isName: isAccessGroup, label: "period" }),
+  chainKeys: Object.freeze({ identity: "accessGroup", isName: isAccessGroup, label: "cutoff" }),
+});
+
+/**
+ * One kind of sealed route collection out of a usable block, as the records
+ * that can supply a candidate, or undefined when the block carries no
+ * collection of that kind the format admits. A container that is not an
+ * array supplies no route of its kind and leaves the other kinds in the same
+ * block alone.
  *
- * A map carrying a member name outside the grammar of the kind it is keyed by
- * is rejected whole, which costs that one route map and leaves the other kind
- * in the same block and the sibling issuer's maps alone. The chain-key
- * carrier is keyed by accessGroup and gets the same check; the extension
- * fixes the shape of a family rather than the spelling of its name.
+ * A record whose identity field is missing or outside its grammar rejects the
+ * whole collection, which costs that one route kind and leaves the other kinds
+ * in the same block and the sibling issuers' collections alone. An element
+ * that is not a non-array object, or a record without a string `period` or
+ * `cutoff`, supplies no candidate and leaves its siblings. Several records at
+ * one coordinate all stay: they are candidate alternatives, and the client
+ * relays each one.
  *
  * @param {any} block - already through `usableIssuer`
- * @param {string} kind - `contentKeys`, `periodKeys` or an extension carrier
- * @param {(name: unknown) => boolean} [isName] - the grammar the keys answer to
- * @returns {any} the route map, or undefined
+ * @param {'contentKeys'|'periodKeys'|'chainKeys'} kind
+ * @returns {Record<string, unknown>[]|undefined}
  */
-function routeMap(block, kind, isName) {
-  const map = own(own(block, "sealed"), kind);
-  if (!isContainer(map)) return undefined;
-  if (isName !== undefined && !namesAdmit(map, isName)) return undefined;
-  return map;
+function routeRecords(block, kind) {
+  const collection = own(own(block, "sealed"), kind);
+  if (!Array.isArray(collection)) return undefined;
+  const { identity, isName, label } = ROUTE_FIELDS[kind];
+  /** @type {Record<string, unknown>[]} */
+  const records = [];
+  for (const record of collection) {
+    if (!isContainer(record)) continue;
+    if (!isName(own(record, identity))) return undefined;
+    if (label !== null && typeof own(record, label) !== "string") continue;
+    records.push(record);
+  }
+  return records;
 }
 
 /**
- * Whether one period-key family supplies a route. The delivery format
- * requires a non-empty object for each `sealed.periodKeys[accessGroup]`.
- * A malformed family costs only that access group; a sibling family in the
- * same admitted map remains available for the client to relay.
+ * The records of one route kind for one identity, in page order, or
+ * undefined when the block offers none of that kind for it.
  *
- * @param {unknown} family
- * @returns {boolean}
+ * @param {any} block - already through `usableIssuer`
+ * @param {'contentKeys'|'periodKeys'|'chainKeys'} kind
+ * @param {string} name - the contentName or accessGroup
+ * @returns {Record<string, unknown>[]|undefined}
  */
-function isPeriodKeyFamily(family) {
-  return (
-    family !== null &&
-    typeof family === "object" &&
-    !Array.isArray(family) &&
-    Object.keys(family).length > 0
+function routeFamily(block, kind, name) {
+  const { identity } = ROUTE_FIELDS[kind];
+  const family = (routeRecords(block, kind) ?? []).filter(
+    (record) => own(record, identity) === name,
   );
+  return family.length > 0 ? family : undefined;
 }
 
 /**
- * The cached-wrap map one record offers routes out of, or an empty map when it
- * offers none. The format holds `keys` to a non-empty non-array object of
- * accessGroup to a non-empty array. A malformed map container supplies no
- * cached route for that item rather than failing the item; a malformed group
- * value loses only that group. The issuer-mediated route for the same item is
- * independent of every cached route.
+ * The wrap records one item record offers cached routes out of, or an empty
+ * list when it offers none. The format holds `keys` to a non-empty array of
+ * wrap records. A malformed container, or a collection with a record whose
+ * `accessGroup` is missing or outside the grammar, supplies no cached route
+ * for that item rather than failing the item. An element that is not a
+ * record carries no group and is left out here; `isCandidate` drops it too.
+ * The issuer-mediated route for the same item is independent of every cached
+ * route.
  *
  * An absent `keys` is an item with no cached path, which the format allows.
  *
  * @param {any} record
- * @returns {any} the admitted container, or an empty one
+ * @returns {any[]} the admitted wrap records, in page order
  */
 function cachedWraps(record) {
   const keys = own(record, "keys");
-  if (keys === null || typeof keys !== "object" || Array.isArray(keys)) return {};
-
-  const accessGroups = Object.keys(keys);
-  if (accessGroups.length === 0) return {};
-  if (!namesAdmit(keys, isAccessGroup)) return {};
-  return keys;
+  if (!Array.isArray(keys) || keys.length === 0) return [];
+  const records = keys.filter(isContainer);
+  if (!records.every((entry) => isAccessGroup(own(entry, "accessGroup")))) return [];
+  return records;
 }
 
 /**
- * Whether one publisher cached-wrap family has the container the format
- * requires. A malformed group value is not a route, but does not reject the
- * identifier-keyed map or suppress valid sibling groups.
+ * Whether one wrap record is a candidate at all. A record without string
+ * `period` and `key` supplies no candidate, and its valid siblings stay. The
+ * wrap nonce is derived from the coordinate, so a carried `nonce` member is
+ * unknown and ignored, whatever its type.
  *
- * @param {unknown} entries
- * @returns {entries is any[]}
- */
-function isCachedWrapFamily(entries) {
-  return Array.isArray(entries) && entries.length > 0;
-}
-
-/**
- * Whether one array member is a candidate at all. A member that is not a
- * non-array object with string `t`, `nonce` and `key` supplies no candidate,
- * and its valid siblings under the same accessGroup stay.
- *
- * @param {any} entry
+ * @param {any} entry - already through `cachedWraps`
  * @returns {boolean}
  */
 function isCandidate(entry) {
-  if (entry === null || typeof entry !== "object" || Array.isArray(entry)) return false;
-  return ["t", "nonce", "key"].every((member) => typeof own(entry, member) === "string");
+  return ["period", "key"].every((member) => typeof own(entry, member) === "string");
+}
+
+/**
+ * One wrap record as a candidate source reads it: the record's own members
+ * without its coordinate fields, and its `period` label as `t`, the name the
+ * period-key profile, the caches and the wrap nonce use. A copy, so a later
+ * edit of the page cannot move a candidate a caller already holds.
+ *
+ * @param {any} entry - already through `isCandidate`
+ * @returns {Record<string, unknown>}
+ */
+function candidateEntry(entry) {
+  /** @type {Record<string, unknown>} */
+  const view = {};
+  for (const member of Object.keys(entry)) {
+    if (member !== "accessGroup" && member !== "period") setOwn(view, member, entry[member]);
+  }
+  setOwn(view, "t", own(entry, "period"));
+  return view;
 }
 
 export class DcaData {
@@ -291,13 +315,13 @@ export class DcaData {
     if (own(data, "version") !== "1") bad('carries no version "1"');
     if (typeof own(data, "resourceJWT") !== "string") bad("carries no resourceJWT string");
     const contentData = own(data, "contentData");
-    if (!isContainer(contentData)) bad("carries no contentData object");
-    refuseUnlessNamesAdmit(contentData, isContentName, "contentData");
+    if (!Array.isArray(contentData)) bad("carries no contentData array");
+    refuseUnlessRecordsAdmit(contentData, "contentName", isContentName, "contentData");
     const issuerData = own(data, "issuerData");
-    if (!isContainer(issuerData) || Object.keys(issuerData).length === 0) {
-      bad("carries no issuerData map");
+    if (!Array.isArray(issuerData) || issuerData.length === 0) {
+      bad("carries no issuerData array");
     }
-    refuseUnlessNamesAdmit(issuerData, isIssuerName, "issuerData");
+    refuseUnlessRecordsAdmit(issuerData, "issuerName", isIssuerName, "issuerData");
     const resource = own(data, "resource");
     if (resource !== undefined && !isContainer(resource)) {
       bad("carries a resource that is not an object");
@@ -348,7 +372,11 @@ export class DcaData {
    * @returns {any} the usable block, or undefined
    */
   #issuer(issuerName) {
-    return usableIssuer(own(this.#admitted(), "issuerData"), issuerName);
+    const issuerData = own(this.#admitted(), "issuerData");
+    return usableIssuer(
+      refuseUnlessRecordsAdmit(issuerData, "issuerName", isIssuerName, "issuerData"),
+      issuerName,
+    );
   }
 
   /**
@@ -391,45 +419,49 @@ export class DcaData {
   }
 
   /**
-   * The blob this issuer can open for one content item.
+   * The blobs this issuer can open for one content item: every `key` of the
+   * item's `{contentName, key}` records, in page order. Several are candidate
+   * alternatives, so the client relays each; empty when the block offers none.
+   * A value is handed on unchecked; the request builder relays only a
+   * canonical one.
    *
    * @param {string} issuerName
    * @param {string} contentName
-   * @returns {unknown}
+   * @returns {unknown[]}
    */
-  sealedContentKeyFor(issuerName, contentName) {
-    return own(routeMap(this.#issuer(issuerName), "contentKeys", isContentName), contentName);
+  sealedContentKeysFor(issuerName, contentName) {
+    return (routeFamily(this.#issuer(issuerName), "contentKeys", contentName) ?? []).map((record) =>
+      own(record, "key"),
+    );
   }
 
   /**
-   * The whole carried period family for one accessGroup, by `t`. The client
-   * cannot tell which period the article it reads next was rendered in, so
-   * the family travels together and the overlap key covers the boundary.
+   * The whole carried period family for one accessGroup: its
+   * `{accessGroup, period, key}` records as the page carries them, rivals at
+   * one period included. The client cannot tell which period the article it
+   * reads next was rendered in, so the family travels together and the
+   * overlap key covers the boundary.
    *
    * @param {string} issuerName
    * @param {string} accessGroup
-   * @returns {unknown}
+   * @returns {Record<string, unknown>[]|undefined}
    */
   sealedPeriodKeysFor(issuerName, accessGroup) {
-    const family = own(
-      routeMap(this.#issuer(issuerName), "periodKeys", isAccessGroup),
-      accessGroup,
-    );
-    return isPeriodKeyFamily(family) ? family : undefined;
+    return routeFamily(this.#issuer(issuerName), "periodKeys", accessGroup);
   }
 
   /**
-   * The terminal chain keys this issuer can open for one accessGroup.
-   * They stay distinct from period keys because one grants derivation
-   * reach and the other opens exactly one period.
+   * The terminal chain keys this issuer can open for one accessGroup: its
+   * `{accessGroup, cutoff, key}` records as the page carries them. They stay
+   * distinct from period keys because one grants derivation reach and the
+   * other opens exactly one period.
    *
    * @param {string} issuerName
    * @param {string} accessGroup
-   * @returns {unknown}
+   * @returns {Record<string, unknown>[]|undefined}
    */
   sealedChainKeysFor(issuerName, accessGroup) {
-    const family = own(routeMap(this.#issuer(issuerName), "chainKeys", isAccessGroup), accessGroup);
-    return isContainer(family) ? family : undefined;
+    return routeFamily(this.#issuer(issuerName), "chainKeys", accessGroup);
   }
 
   /**
@@ -440,22 +472,26 @@ export class DcaData {
    * @returns {string[]}
    */
   accessGroupsFor(contentName) {
-    const wraps = cachedWraps(own(this.#contentData(), contentName));
-    return Object.keys(wraps).filter((accessGroup) => isCachedWrapFamily(own(wraps, accessGroup)));
+    const wraps = cachedWraps(this.#contentData().get(contentName));
+    return [...new Set(wraps.map((entry) => own(entry, "accessGroup")))];
   }
 
   /**
    * The wrapped contentKey entries this item carries under one accessGroup -
-   * `{ nonce, key }` each, and a list because one item may be wrapped under
-   * more than one period.
+   * `{ t, key }` each, plus any other member the record carries, such as an
+   * extension's marker. A list because one item may be wrapped under more than
+   * one period, and because several records at one period are all candidates:
+   * none replaces another. The wire names the label `period`; this view hands
+   * it on as `t`.
    *
    * @param {string} contentName
    * @param {string} accessGroup
    * @returns {any[]}
    */
   sealedEntriesFor(contentName, accessGroup) {
-    const entries = own(cachedWraps(own(this.#contentData(), contentName)), accessGroup);
-    return isCachedWrapFamily(entries) ? entries.filter(isCandidate) : [];
+    return cachedWraps(this.#contentData().get(contentName))
+      .filter((entry) => own(entry, "accessGroup") === accessGroup && isCandidate(entry))
+      .map(candidateEntry);
   }
 
   /**
@@ -490,9 +526,10 @@ export class DcaData {
   }
 
   /**
-   * The issuers carrying one kind of route map for one accessGroup. Both kinds
-   * go through the same identifier admission, so a map naming something outside
-   * the accessGroup grammar supplies no route of its kind for any issuer.
+   * The issuers carrying one kind of route collection for one accessGroup.
+   * Both kinds go through the same identifier admission, so an issuer whose
+   * collection names something outside the accessGroup grammar supplies no
+   * route of that kind.
    *
    * @param {'periodKeys'|'chainKeys'} kind
    * @param {string} accessGroup
@@ -500,35 +537,37 @@ export class DcaData {
    */
   #issuerNamesOf(kind, accessGroup) {
     const issuerData = own(this.#data, "issuerData");
-    if (issuerData === null || typeof issuerData !== "object") return [];
-    refuseUnlessNamesAdmit(issuerData, isIssuerName, "issuerData");
+    if (!Array.isArray(issuerData)) return [];
+    const issuerBlocks = refuseUnlessRecordsAdmit(
+      issuerData,
+      "issuerName",
+      isIssuerName,
+      "issuerData",
+    );
 
     /** @type {string[]} */
     const names = [];
-    for (const issuerName of Object.keys(issuerData)) {
-      const block = usableIssuer(issuerData, issuerName);
-      const routes = routeMap(block, kind, isAccessGroup);
-      const family = own(routes, accessGroup);
-      if (kind === "periodKeys" ? isPeriodKeyFamily(family) : family !== undefined) {
-        names.push(issuerName);
-      }
+    for (const issuerName of issuerBlocks.keys()) {
+      const block = usableIssuer(issuerBlocks, issuerName);
+      if (routeFamily(block, kind, accessGroup) !== undefined) names.push(issuerName);
     }
     return names;
   }
 
   /**
-   * The item inventory the page declares. The format requires it, so a page
-   * carrying none is a bad page rather than a page with no items on it. An
-   * old document carrying the retired parallel maps fails this check.
+   * The item inventory the page declares, by name. The format requires it, so
+   * a page carrying none is a bad page rather than a page with no items on it.
+   * An old document carrying the retired parallel maps, or the name-keyed map
+   * this collection replaced, fails this check.
    *
-   * @returns {any}
+   * @returns {Map<string, any>}
    */
   #contentData() {
     const inventory = own(this.#data, "contentData");
-    if (inventory === null || typeof inventory !== "object" || Array.isArray(inventory)) {
+    if (!Array.isArray(inventory)) {
       throw dcaError("bad_page", "dca-data carries no contentData");
     }
-    return refuseUnlessNamesAdmit(inventory, isContentName, "contentData");
+    return refuseUnlessRecordsAdmit(inventory, "contentName", isContentName, "contentData");
   }
 
   /**
@@ -539,7 +578,7 @@ export class DcaData {
    * @returns {string[]}
    */
   contentNames() {
-    return Object.keys(this.#contentData());
+    return [...this.#contentData().keys()];
   }
 
   /**
@@ -555,11 +594,8 @@ export class DcaData {
    * @returns {unknown}
    */
   contentDataFor(contentName) {
-    const record = own(this.#contentData(), contentName);
+    const record = this.#contentData().get(contentName);
     if (record === undefined) return undefined;
-    if (record === null || typeof record !== "object" || Array.isArray(record)) {
-      throw dcaError("bad_page", `the contentData record for "${contentName}" is not an object`);
-    }
     if (typeof own(record, "contentType") !== "string") {
       throw dcaError(
         "bad_page",

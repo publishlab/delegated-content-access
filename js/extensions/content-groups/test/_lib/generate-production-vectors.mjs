@@ -6,7 +6,7 @@
 // It imports no code from this extension and no sibling extension, so the
 // fixture checks the implementation instead of repeating it. HKDF, SHA-256,
 // P-256 ECDH, ES256 and AES-GCM come from node:crypto. The F transcript, the
-// seed and item-pad derivations, the content AAD, the 125-byte envelope layout,
+// seed and item-pad derivations, the content AAD, the 113-byte envelope layout,
 // the stock chain-key Root/Step/Leaf and every wire object are written out
 // here from the specifications:
 //   docs/spec-profile--content-groups.md     seed, seed AAD, item pad, wire
@@ -78,19 +78,17 @@ const inputs = {
       plaintext: "buy now",
     },
   },
-  // One seed envelope per content name, each with its own ephemeral key and nonce.
+  // One seed envelope per content name, each with its own ephemeral key. The
+  // nonce is twelve implicit zero bytes, so no envelope may share a key.
   envelopes: {
     bodytext: {
       ephemeralPrivateScalarHex: scalar("dca production vector: ephemeral key for bodytext"),
-      nonceHex: "101112131415161718191a1b",
     },
     headline: {
       ephemeralPrivateScalarHex: scalar("dca production vector: ephemeral key for headline"),
-      nonceHex: "202122232425262728292a2b",
     },
     shoppingAd: {
       ephemeralPrivateScalarHex: scalar("dca production vector: ephemeral key for shoppingAd"),
-      nonceHex: "303132333435363738393a3b",
     },
   },
   // The client's trusted local narrowing. Only the builder relays the connector.
@@ -396,18 +394,17 @@ check(
   );
 }
 
-// Seeds and their 125-byte envelopes: ephemeral point (65) || nonce (12) ||
-// AES-256-GCM(seed) with tag (48). The AES key is the raw 32-byte ECDH
-// x-coordinate, with no KDF. The AAD binds the publisher namespace, render,
-// issuer, content name, window and geometry.
+// Seeds and their 113-byte envelopes: ephemeral point (65) || AES-256-GCM(seed)
+// with tag (48). The AES key is the raw 32-byte ECDH x-coordinate, with no KDF,
+// and the nonce is twelve zero bytes that the envelope does not carry. The AAD
+// binds the publisher namespace, render, issuer, content name, window and geometry.
 const issuer = p256(inputs.issuerPrivateScalarHex);
 /** @type {Record<string, any>} */
 const seedEnvelopes = {};
 /** @type {Record<string, Buffer>} */
 const seeds = {};
-for (const [contentName, { ephemeralPrivateScalarHex, nonceHex }] of Object.entries(
-  inputs.envelopes,
-)) {
+const ZERO_NONCE = Buffer.alloc(12);
+for (const [contentName, { ephemeralPrivateScalarHex }] of Object.entries(inputs.envelopes)) {
   const seed = seedOf(contentName, inputs.windowStart);
   seeds[contentName] = seed;
   const aad = F([
@@ -423,21 +420,19 @@ for (const [contentName, { ephemeralPrivateScalarHex, nonceHex }] of Object.entr
   const ephemeral = p256(ephemeralPrivateScalarHex);
   const shared = ephemeral.ecdh.computeSecret(issuer.point);
   check(shared.length === 32, "raw ECDH x-coordinate is 32 bytes");
-  const nonce = Buffer.from(nonceHex, "hex");
-  const envelope = Buffer.concat([ephemeral.point, nonce, gcm(shared, nonce, seed, aad)]);
-  check(envelope.length === 125, `${contentName} envelope is 125 bytes`);
+  const envelope = Buffer.concat([ephemeral.point, gcm(shared, ZERO_NONCE, seed, aad)]);
+  check(envelope.length === 113, `${contentName} envelope is 113 bytes`);
   // The issuer side: its own ECDH over the carried point opens the seed.
   const opened = ungcm(
     issuer.ecdh.computeSecret(envelope.subarray(0, 65)),
-    envelope.subarray(65, 77),
-    envelope.subarray(77),
+    ZERO_NONCE,
+    envelope.subarray(65),
     aad,
   );
   check(opened.equals(seed), `${contentName} envelope opens`);
   seedEnvelopes[contentName] = {
     windowStart: inputs.windowStart,
     ephemeralPublicJwk: ephemeral.jwk,
-    nonceHex,
     sharedSecretHex: hexOf(shared),
     aadText: aad.toString("ascii"),
     aadHex: hexOf(aad),
@@ -501,8 +496,10 @@ const lp = (/** @type {string} */ text) => {
   const octets = Buffer.from(text, "utf8");
   return Buffer.concat([u32(octets.length), octets]);
 };
-/** @type {Record<string, any>} */
-const contentData = {};
+// The wire carries item records; the render hands its ciphertexts to the
+// JSON writer by name, as the Sealer returns them.
+/** @type {Record<string, any>[]} */
+const contentData = [];
 /** @type {Record<string, string>} */
 const sealedContent = {};
 for (const [contentName, item] of Object.entries(inputs.items)) {
@@ -512,24 +509,27 @@ for (const [contentName, item] of Object.entries(inputs.items)) {
   sealedContent[contentName] = b64u(
     gcm(Buffer.from(item.contentKeyHex, "hex"), nonce, Buffer.from(item.plaintext, "utf8"), aad),
   );
-  contentData[contentName] = {
+  contentData.push({
+    contentName,
     contentType: item.contentType,
-    connectors: Object.fromEntries(
-      Object.entries(itemKeys[contentName].connectors).map(([group, { connector }]) => [
-        group,
-        connector,
-      ]),
-    ),
-  };
+    connectors: Object.entries(itemKeys[contentName].connectors).map(([group, { connector }]) => ({
+      group,
+      connector,
+    })),
+  });
 }
+/** One item's connector for one group, read off the wire records. */
+const connectorOf = (/** @type {string} */ contentName, /** @type {string} */ group) =>
+  contentData
+    .find((record) => record.contentName === contentName)
+    ?.connectors.find((/** @type {any} */ record) => record.group === group)?.connector;
 
 // The delivery, its members in the order the publisher writes them.
-const sealedSeeds = Object.fromEntries(
-  Object.entries(seedEnvelopes).map(([name, { sealed }]) => [
-    name,
-    { [inputs.windowStart]: sealed },
-  ]),
-);
+const sealedSeeds = Object.entries(seedEnvelopes).map(([contentName, { sealed }]) => ({
+  contentName,
+  windowStart: inputs.windowStart,
+  key: sealed,
+}));
 const publication = {
   dcaData: {
     version: "1",
@@ -538,19 +538,20 @@ const publication = {
     periodGeometry: geometry,
     renderPeriod: inputs.renderPeriod,
     contentData,
-    issuerData: {
-      [inputs.issuerName]: {
+    issuerData: [
+      {
+        issuerName: inputs.issuerName,
         sealed: { contentWindowSeeds: sealedSeeds },
         keyId: inputs.issuerKeyId,
       },
-    },
+    ],
   },
   sealedContent,
 };
 
 // The request: the base members, then the content-group members for the
 // narrowed names. Seeds go only for names the request asks about; the builder
-// relays the one connector of each requested content key.
+// relays every connector record of each requested content key's group.
 const requestedNames = [
   ...Object.keys(inputs.narrowing.requestedContentGroups),
   ...Object.keys(inputs.narrowing.requestedContentKeys),
@@ -561,17 +562,16 @@ const request = {
   resourceJWT,
   keyId: inputs.issuerKeyId,
   sealed: {
-    contentKeys: {},
-    contentWindowSeeds: Object.fromEntries(requestedNames.map((name) => [name, sealedSeeds[name]])),
+    contentKeys: [],
+    contentWindowSeeds: sealedSeeds.filter((record) => requestedNames.includes(record.contentName)),
   },
   renderPeriod: inputs.renderPeriod,
   periodGeometry: geometry,
-  requestedContentGroups: inputs.narrowing.requestedContentGroups,
-  requestedContentKeys: Object.fromEntries(
-    Object.entries(inputs.narrowing.requestedContentKeys).map(([name, group]) => [
-      name,
-      { group, connector: contentData[name].connectors[group] },
-    ]),
+  requestedContentGroups: Object.entries(inputs.narrowing.requestedContentGroups).map(
+    ([contentName, groups]) => ({ contentName, groups }),
+  ),
+  requestedContentKeys: Object.entries(inputs.narrowing.requestedContentKeys).map(
+    ([contentName, group]) => ({ contentName, group, connector: connectorOf(contentName, group) }),
   ),
 };
 
@@ -601,7 +601,11 @@ for (const grant of inputs.grants) {
       periodKeyAt(seed, grant.group, geometry, grant.t),
     );
   } else {
-    const { group, connector } = request.requestedContentKeys[grant.contentName];
+    const route = request.requestedContentKeys.find(
+      (record) => record.contentName === grant.contentName,
+    );
+    check(route !== undefined, `the request relays a route for ${grant.contentName}`);
+    const { group, connector } = /** @type {{ group: string, connector: string }} */ (route);
     const pad = padOf(periodKeyAt(seed, group, geometry, inputs.renderPeriod), grant.contentName);
     const recovered = Buffer.from(unb64u(connector).map((b, i) => b ^ pad[i]));
     contentKeys[grant.contentName] = b64u(recovered);
@@ -611,9 +615,33 @@ for (const grant of inputs.grants) {
 // the request presents no ordinary item envelope (docs/spec--core-protocol.md
 // Section 7; docs/spec--response-binding.md Section 3 keeps it in the direct
 // response). The extension adds its top-level members after it.
-const response = {
+// The pin below hashes these outputs in their earlier nested spelling, under
+// the earlier member name `contentGroups`, so neither the move to records nor
+// the rename to `contentGroupKeys` can move it; the wire response is built
+// from them.
+const pinnedResponse = {
   keys: { contentKeys: {} },
   contentGroups: { chainKeys, periodKeys, contentKeys },
+};
+/** `{name: {group: {label: key}}}` as records naming `label` under `field`. */
+const groupRecordsOf = (/** @type {Record<string, any>} */ nested, /** @type {string} */ field) =>
+  Object.entries(nested).flatMap(([contentName, groups]) =>
+    Object.entries(groups).flatMap(([group, labels]) =>
+      Object.entries(/** @type {Record<string, string>} */ (labels)).map(([label, key]) => ({
+        contentName,
+        group,
+        [field]: label,
+        key,
+      })),
+    ),
+  );
+const response = {
+  keys: { contentKeys: [] },
+  contentGroupKeys: {
+    chainKeys: groupRecordsOf(chainKeys, "cutoff"),
+    periodKeys: groupRecordsOf(periodKeys, "period"),
+    contentKeys: Object.entries(contentKeys).map(([contentName, key]) => ({ contentName, key })),
+  },
 };
 
 // Fixed-input outputs pinned before the resource claim was removed. This
@@ -628,10 +656,10 @@ check(
         items: Object.fromEntries(
           Object.entries(itemKeys).map(([name, item]) => [name, { connectors: item.connectors }]),
         ),
-        response,
+        response: pinnedResponse,
       }),
     )
-    .digest("hex") === "b036d801c8a7a357fb68ef39ef701ab972f8edde0f8a313f32d6fc415af2475f",
+    .digest("hex") === "17b0080d18c4c88dd74ca832b838348a415d4b2ad071822f6ca9dcec2ad14b50",
   "fixed seed/pad/chain/connector outputs changed",
 );
 

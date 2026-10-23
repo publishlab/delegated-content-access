@@ -17,6 +17,15 @@ import { periodFamilyGeneration } from "../core-shared--publisher-issuer/periodF
 import { periodFamilySupply } from "../core-publisher/periodFamilySupply.js";
 import { chainKeyIssuerEngine } from "../core-issuer/chainKeyIssuerEngine.js";
 import { explicitChainKeyClientProfile } from "../referenceProfile.js";
+import {
+  contentKeyMap,
+  errorMap,
+  keyAt,
+  notDeliveredMap,
+  periodKeyMap,
+  setKeyAt,
+} from "../../../test-reference/support/namedRecords.js";
+import { cutoffsOf } from "./world.js";
 
 const ORIGIN = "https://news.example";
 const ISSUER = "subscription_service";
@@ -128,7 +137,7 @@ test("the supported issuer entry processes a selected chain-key route", async ()
   });
   const result = await core.endpoint.handleDocument(document, registration, {}, Date.parse(AT));
   assert.equal(result.response.status, 200);
-  assert.deepEqual(Object.keys(result.response.body.keys.periodKeys[GROUP]), [
+  assert.deepEqual(Object.keys(periodKeyMap(result.response.body.keys.periodKeys)[GROUP]), [
     "251023T1415",
     "251023T1430",
   ]);
@@ -141,8 +150,12 @@ test("the issuer refuses another render's chain envelope and preserves an honest
   assert.notEqual(own.page.resource.renderId, other.page.resource.renderId);
 
   const copiedRequest = structuredClone(own.request);
-  const t = Object.keys(copiedRequest.sealed.chainKeys[GROUP]).sort()[0];
-  copiedRequest.sealed.chainKeys[GROUP][t] = other.request.sealed.chainKeys[GROUP][t];
+  const t = cutoffsOf(copiedRequest.sealed.chainKeys, GROUP).sort()[0];
+  setKeyAt(
+    copiedRequest.sealed.chainKeys,
+    { accessGroup: GROUP, cutoff: t },
+    keyAt(other.request.sealed.chainKeys, { accessGroup: GROUP, cutoff: t }),
+  );
 
   const engine = chainKeyIssuerEngine({
     operatingIssuerNames: [ISSUER],
@@ -163,7 +176,7 @@ test("the issuer refuses another render's chain envelope and preserves an honest
     Date.parse(AT),
   );
   assert.equal(sameRender.response.status, 200);
-  assert.ok(Object.keys(sameRender.response.body.keys.chainKeys[GROUP]).length > 0);
+  assert.ok(cutoffsOf(sameRender.response.body.keys.chainKeys, GROUP).length > 0);
   await own.client.applyResponse(own.dcaData, ISSUER, sameRender.response.body, own.request);
   assert.equal(
     utf8Decode(
@@ -179,13 +192,16 @@ test("the issuer refuses another render's chain envelope and preserves an honest
     Date.parse(AT),
   );
   assert.equal(copied.response.status, 200);
-  assert.deepEqual(copied.response.body.errors[`${GROUP}|${t}`], {
+  assert.deepEqual(errorMap(copied.response.body.errors)[`${GROUP}|${t}`], {
     error: "unseal_failed",
     message: "sealed value could not be opened",
   });
-  assert.equal(copied.response.body.keys.chainKeys?.[GROUP]?.[t], undefined);
-  assert.deepEqual(Object.keys(copied.response.body.keys.chainKeys?.[GROUP] ?? {}), []);
-  assert.deepEqual(Object.keys(copied.response.body.keys.contentKeys), ["bodytext"]);
+  assert.deepEqual(
+    cutoffsOf(copied.response.body.keys.chainKeys, GROUP),
+    [],
+    "no chain key answers for the family whose envelope failed",
+  );
+  assert.deepEqual(Object.keys(contentKeyMap(copied.response.body.keys.contentKeys)), ["bodytext"]);
 
   const copiedClient = new Client({
     publisherOrigin: ORIGIN,
@@ -221,7 +237,7 @@ test("an injected chain engine alone composes the processor selections it declar
     Date.parse(AT),
   );
   assert.equal(projected.response.status, 200, JSON.stringify(projected.response.body));
-  assert.deepEqual(Object.keys(projected.response.body.keys.periodKeys[GROUP]), [
+  assert.deepEqual(Object.keys(periodKeyMap(projected.response.body.keys.periodKeys)[GROUP]), [
     "251023T1415",
     "251023T1430",
   ]);
@@ -242,8 +258,8 @@ test("an injected chain engine alone composes the processor selections it declar
     Date.parse(AT),
   );
   assert.equal(delivered.response.status, 200, JSON.stringify(delivered.response.body));
-  assert.ok(delivered.response.body.keys.contentKeys.bodytext);
-  assert.ok(delivered.response.body.keys.chainKeys[GROUP]);
+  assert.ok(keyAt(delivered.response.body.keys.contentKeys, { contentName: "bodytext" }));
+  assert.ok(cutoffsOf(delivered.response.body.keys.chainKeys, GROUP).length > 0);
 });
 
 test("explicit host selections stay, but one that drops the chain engine's route is refused", async () => {
@@ -294,7 +310,7 @@ test("the chain issuer forwards its captured pure version guard to admission", (
     version: "2",
     issuerName: ISSUER,
     keyId: KEY_ID,
-    sealed: { contentKeys: { bodytext: "blob" } },
+    sealed: { contentKeys: [{ contentName: "bodytext", key: "blob" }] },
   };
   assert.equal(core.processor.admit(new DcaRequest(input)).kind, "admitted");
   assert.deepEqual(
@@ -311,10 +327,14 @@ test("the chain engine forwards notDeliveredReport; default none and invalid-sou
   const OLD = "251023T0400";
   const route = await chainRoute({ mixed: true });
   const missingOld = JSON.parse(route.document);
-  missingOld.requestedPeriodKeys = { [GROUP]: [OLD] };
+  missingOld.requestedPeriodKeys = [{ accessGroup: GROUP, periods: [OLD] }];
   // Two members in one window make the family invalid; that is silence, not a report.
   const invalid = JSON.parse(JSON.stringify(missingOld));
-  invalid.sealed.chainKeys[GROUP]["251023T2330"] = invalid.sealed.chainKeys[GROUP]["251023T2345"];
+  invalid.sealed.chainKeys.push({
+    accessGroup: GROUP,
+    cutoff: "251023T2330",
+    key: keyAt(invalid.sealed.chainKeys, { accessGroup: GROUP, cutoff: "251023T2345" }),
+  });
   const policy = {
     decide: (/** @type {any} */ _claims, /** @type {any} */ requested) => ({
       contentNames: requested.contentNames,
@@ -346,23 +366,26 @@ test("the chain engine forwards notDeliveredReport; default none and invalid-sou
         200,
         `${representation} ${JSON.stringify(result.response.body)}`,
       );
-      assert.ok(result.response.body.keys.contentKeys.bodytext, representation);
+      assert.ok(
+        keyAt(result.response.body.keys.contentKeys, { contentName: "bodytext" }),
+        representation,
+      );
       if (document !== missingOld) {
         assert.deepEqual(
-          result.response.body.keys.periodKeys ?? {},
-          {},
+          result.response.body.keys.periodKeys ?? [],
+          [],
           "invalid family yields no period key",
         );
         assert.deepEqual(
-          result.response.body.keys.chainKeys ?? {},
-          {},
+          result.response.body.keys.chainKeys ?? [],
+          [],
           "invalid family yields no chain key",
         );
       }
       return result.response.body.notDelivered;
     };
     assert.deepEqual(
-      await answer({ notDeliveredReport: "partial" }, missingOld),
+      notDeliveredMap(await answer({ notDeliveredReport: "partial" }, missingOld)),
       { [GROUP]: { reason: "unavailable" } },
       representation,
     );
@@ -375,11 +398,7 @@ test("the chain engine forwards notDeliveredReport; default none and invalid-sou
           ...invalid,
           sealed: {
             ...invalid.sealed,
-            chainKeys: {
-              [GROUP]: Object.fromEntries(
-                Object.entries(invalid.sealed.chainKeys[GROUP]).reverse(),
-              ),
-            },
+            chainKeys: [...invalid.sealed.chainKeys].reverse(),
           },
         },
       ],
@@ -406,7 +425,9 @@ test("an independent chain-horizon grant on a preactivation period-only article 
   const route = await chainRoute({ mixed: true, periodOnly: true });
   const request = JSON.parse(route.document);
   assert.equal(request.sealed.chainKeys, undefined);
-  assert.ok(request.sealed.periodKeys[GROUP]);
+  assert.ok(
+    request.sealed.periodKeys.some((/** @type {any} */ record) => record.accessGroup === GROUP),
+  );
   const engine = chainKeyIssuerEngine({
     operatingIssuerNames: [ISSUER],
     clock: new Clock(AT),
@@ -426,11 +447,14 @@ test("an independent chain-horizon grant on a preactivation period-only article 
     route.registration,
   );
   assert.equal(response.status, 200);
-  assert.ok(response.body.keys.contentKeys.bodytext, "the independent item grant survives");
-  assert.deepEqual(response.body.keys.chainKeys ?? {}, {});
+  assert.ok(
+    keyAt(response.body.keys.contentKeys, { contentName: "bodytext" }),
+    "the independent item grant survives",
+  );
+  assert.deepEqual(response.body.keys.chainKeys ?? [], []);
   assert.deepEqual(
-    response.body.keys.periodKeys ?? {},
-    {},
+    response.body.keys.periodKeys ?? [],
+    [],
     "a horizon grant does not turn into an explicit ordinary grant",
   );
   assert.equal(

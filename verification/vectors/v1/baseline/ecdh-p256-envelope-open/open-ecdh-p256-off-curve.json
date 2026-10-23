@@ -1,7 +1,7 @@
 {
   "name": "open-ecdh-p256-off-curve",
   "vectorFormat": "ecdh-p256-envelope-open/v1",
-  "description": "docs/spec--sealed-key-envelopes.md sections 4 and 6 require a valid P-256 point and a generic unseal_failed refusal. This 109-octet envelope carries the saved off-curve point candidate; an opener that fails to validate peer points could release its content key.",
+  "description": "docs/spec--sealed-key-envelopes.md sections 4 and 6 require a valid P-256 point and generic unseal_failed refusal. This 97-octet envelope retains the historical off-curve point and public test recipient scalar. Its ciphertext/tag were independently rebuilt with test-only nonvalidating scalar multiplication, raw 32-octet x as AES-256-GCM key, zero nonce and the recorded BIND. The deliberately lax control authenticates and recovers the recorded 16-octet content key; strict WebCrypto refuses the peer point. Changing BIND fails authentication. The independent producer/control is documented in verification/vectors/README.md; no production or primitive-conformance implementation uses its arithmetic.",
   "input": {
     "algorithm": "ecdh-p256",
     "binding": {
@@ -19,7 +19,11 @@
   },
   "expected": {
     "bind": "dca-bind-key-envelope|c|uUT576O34BoGKpgXpdMucw|bodytext",
-    "blob": "BP_rrpHAnCFcf8NeehDgUG3w9ktUCbb_1LNPIX5pT8u7s5xZErWJNnNAJfmyMYNXO4LYDDMaasFJMMGHk63Fqhssaqe6Y6UyHEziB6sXe3DGjrotDFBb6mExgzsz3ifzJqNlKZWmsZyM40Xpjg",
+    "blob": "BP_rrpHAnCFcf8NeehDgUG3w9ktUCbb_1LNPIX5pT8u7s5xZErWJNnNAJfmyMYNXO4LYDDMaasFJMMGHk63Fqhu4SM24FzJIwUCCeBqNLqOXdeupxvMvMr5iZ9bVZDZU7w",
     "error": "unseal_failed"
+  },
+  "nonvalidatingControl": {
+    "sharedXHex": "37613136a1909d6b365361d4a974a05fd22837fd7cb22ce3317633f8e2cc4986",
+    "method": "Test-only affine multiplication over the P-256 prime with a=-3, deliberately omitting the curve equation; not a protocol input or production algorithm."
   }
 }

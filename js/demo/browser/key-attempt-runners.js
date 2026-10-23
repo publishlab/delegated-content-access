@@ -10,6 +10,7 @@ import { probeArticleContentKeyMismatchForDemo } from "../actors/PageLoad.js";
 import { rootFromPage } from "../support/queryableRoot.js";
 import { utf8Decode } from "../../core-shared/codec.js";
 import { dcaError } from "../../core-shared/errors.js";
+import { recordsByName } from "../../core-shared--client-publisher/deliveryRecords.js";
 import { own } from "../../core-shared/wire.js";
 import { wholeRenderIssuerSupplyPlan } from "../../core-publisher/issuerSupplyPlan.js";
 import { CONTENT_NAME, ISSUER_NAME } from "../scenarios/fixtures.js";
@@ -87,18 +88,35 @@ function freeze(value) {
   return value;
 }
 
-/** @param {any} byGroup */
-function coordinates(byGroup) {
-  if (byGroup === null || typeof byGroup !== "object") return [];
-  return Object.keys(byGroup)
-    .sort()
-    .map((accessGroup) => {
-      const periods = own(byGroup, accessGroup);
-      return {
-        accessGroup,
-        t: periods !== null && typeof periods === "object" ? Object.keys(periods).sort() : [],
-      };
-    });
+/**
+ * The coordinates a record collection names, per access group, with each
+ * label once however many rival records carry it.
+ *
+ * @param {any} records @param {"period"|"cutoff"} field
+ */
+function coordinates(records, field) {
+  if (!Array.isArray(records)) return [];
+  /** @type {Map<string, Set<string>>} */
+  const byGroup = new Map();
+  for (const record of records) {
+    const accessGroup = own(record, "accessGroup");
+    const t = own(record, field);
+    if (typeof accessGroup !== "string" || typeof t !== "string") continue;
+    byGroup.set(accessGroup, (byGroup.get(accessGroup) ?? new Set()).add(t));
+  }
+  return [...byGroup.keys()].sort().map((accessGroup) => ({
+    accessGroup,
+    t: [.../** @type {Set<string>} */ (byGroup.get(accessGroup))].sort(),
+  }));
+}
+
+/** The distinct content names a record collection names, sorted. @param {any} records */
+function contentNames(records) {
+  if (!Array.isArray(records)) return [];
+  const names = records
+    .map((record) => own(record, "contentName"))
+    .filter((name) => typeof name === "string");
+  return [...new Set(names)].sort();
 }
 
 /** @param {any} body */
@@ -107,10 +125,9 @@ function responseSummary(body) {
   const contentKeys = own(keys, "contentKeys");
   const periodKeys = own(keys, "periodKeys");
   const chainKeys = own(keys, "chainKeys");
-  const contentKeyNames =
-    contentKeys !== null && typeof contentKeys === "object" ? Object.keys(contentKeys).sort() : [];
-  const periodKeyCoordinates = coordinates(periodKeys);
-  const chains = coordinates(chainKeys);
+  const contentKeyNames = contentNames(contentKeys);
+  const periodKeyCoordinates = coordinates(periodKeys, "period");
+  const chains = coordinates(chainKeys, "cutoff");
   return {
     contentKeyNames,
     periodKeyCoordinates,
@@ -126,14 +143,10 @@ function responseSummary(body) {
 /** @param {any} request */
 function requestSummary(request) {
   const sealed = own(request, "sealed");
-  const contentKeys = own(sealed, "contentKeys");
   return {
-    contentKeyNames:
-      contentKeys !== null && typeof contentKeys === "object"
-        ? Object.keys(contentKeys).sort()
-        : [],
-    periodKeyCoordinates: coordinates(own(sealed, "periodKeys")),
-    chainKeyCoordinates: coordinates(own(sealed, "chainKeys")),
+    contentKeyNames: contentNames(own(sealed, "contentKeys")),
+    periodKeyCoordinates: coordinates(own(sealed, "periodKeys"), "period"),
+    chainKeyCoordinates: coordinates(own(sealed, "chainKeys"), "cutoff"),
   };
 }
 
@@ -185,14 +198,12 @@ function renderSummary(page) {
 /** @param {any} page */
 function sealedChainArtifacts(page) {
   const json = page.asJson();
-  const issuerData = own(json, "issuerData");
-  const issuer = own(issuerData, ISSUER_NAME);
-  const sealed = own(issuer, "sealed");
-  const chainKeys = own(sealed, "chainKeys");
+  const issuer = recordsByName(own(json, "issuerData"), "issuerName", () => true)?.get(ISSUER_NAME);
+  const chainKeys = own(own(issuer, "sealed"), "chainKeys");
   // These are exact publisher-produced *sealed* terminal blobs.  Anchors and
   // intermediate derivation steps have no observed runtime artifact in this
   // run, so the name claims neither.
-  return chainKeys !== null && typeof chainKeys === "object" ? copy(chainKeys) : {};
+  return Array.isArray(chainKeys) ? copy(chainKeys) : [];
 }
 
 /**

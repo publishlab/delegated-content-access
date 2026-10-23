@@ -42,13 +42,16 @@
 // unwraps it, and every article of that family and period unwraps with the
 // same periodKey.
 //
-// Every wrap/envelope nonce, contentKey and renderId comes from the injected `random`,
-// `issuedAt` and every `t` from the injected `clock`.
+// Each contentKey and renderId comes from the injected `random`; `issuedAt`
+// and every `t` come from the injected `clock`. Ordinary ECDH envelopes use a
+// fresh internally generated ephemeral pair and an implicit zero nonce.
+// A period-key wrap draws no
+// nonce: it derives one from the render, item, group, period and selected aad.
 //
 // A composition may take two roles here, at two different scopes. The
-// content-key wrap strategy is selected once for the render, because
-// `contentData[contentName].keys` is emitted once and every issuer reads the
-// same entries. The issuer supply plan is asked once per issuer, and says only
+// content-key wrap strategy is selected once for the render, because an
+// item record's `keys` is emitted once and every issuer reads the same
+// entries. The issuer supply plan is asked once per issuer, and says only
 // what that issuer is supplied. Both are settled before this module draws a
 // random byte, asks the period-key supply, seals to an issuer or signs. Base
 // then executes plans that can no longer change.
@@ -68,6 +71,7 @@ import { periodsFor, settledPeriod } from "../core-shared--publisher-issuer/peri
 import { sign } from "../core-shared--publisher-issuer/jwt.js";
 import { AAD_DELIMITER, validateResourceId } from "../core-shared--client-publisher/names.js";
 import { contentAad } from "../core-shared--client-publisher/contentAad.js";
+import { contentKeyWrapNonce } from "../core-shared/contentKeyWrapNonce.js";
 import { contentHandlingIsValid } from "../core-shared--client-publisher/contentHandling.js";
 import { validateAccessGroup, validateContentName } from "../core-shared/names.js";
 import { formatT, isPeriodKeyLabel } from "../core-shared/periodLabels.js";
@@ -102,8 +106,9 @@ const VERSION = "1";
 const CONTENT_KEY_BYTES = 16;
 
 /**
- * Both carriers receive their binding and the injected random source. RSA-OAEP
- * returns before reading the random source; ECDH uses it for the nonce. An
+ * Both carriers receive their binding and the injected random source. The
+ * ordinary RSA-OAEP and ECDH procedures do not consume that source; ECDH
+ * generates a fresh ephemeral pair internally and uses an implicit zero nonce. An
  * issuer that selects an extension procedure adds `envelope`, which the
  * configured key sealing must implement; the default procedure adds nothing.
  *
@@ -210,7 +215,7 @@ function carrierOptions(random, binding, envelope) {
 /** Members of the signed resource base writes. */
 const BASE_CLAIMS = ["renderId", "origin", "issuedAt", "resourceId", "data"];
 /** Members of a content record base writes. */
-const BASE_RECORD_MEMBERS = ["contentType", "nonce", "contentEncodings", "keys"];
+const BASE_RECORD_MEMBERS = ["contentName", "contentType", "nonce", "contentEncodings", "keys"];
 /** Members of an issuer block's `sealed` base writes. */
 const BASE_SEALED_MEMBERS = ["contentKeys", "periodKeys", "chainKeys"];
 /** Delivery root members base writes; `periodGeometry` is shared, see `pageGeometry`. */
@@ -218,14 +223,15 @@ const BASE_PAGE_MEMBERS = ["version", "resource", "resourceJWT", "contentData", 
 const PREPARATION_RESULT_MEMBERS = ["claims", "contentRecords", "issuerSealed", "pageMembers"];
 
 /**
- * One wrapped contentKey, as `contentData[name].keys[accessGroup]` carries it.
- * In the format, the value at that accessGroup is an array of these rather than a `t`-keyed map.
- * It is the one place the wire uses a list, and each entry carries its own `t`.
+ * One wrapped contentKey, as an item record's `keys` collection carries it:
+ * its coordinate in named fields, then the members the render's wrap strategy
+ * wrote beside `key`. `period` is the label the strategy received as `t`.
  *
  * @typedef {object} SealedContentKeyEntry
- * @property {string} t
- * @property {string} nonce - base64url, 12 bytes, one per wrap
- * @property {string} key - base64url contentKey wrapped under the periodKey
+ * @property {string} accessGroup
+ * @property {string} period
+ * @property {string} key - base64url contentKey wrapped under the periodKey; its
+ *   nonce is derived from the coordinate, so the entry carries none
  */
 
 /**
@@ -235,29 +241,33 @@ const PREPARATION_RESULT_MEMBERS = ["claims", "contentRecords", "issuerSealed", 
  * item is sealed under LP(renderId) || LP(contentName), which a client rebuilds.
  *
  * @typedef {object} ContentDataRecord
+ * @property {string} contentName
  * @property {string} contentType - handling metadata; encoding traversal does not read it
  * @property {string[]} [contentEncodings] - applied in order, reversed by the client
- * @property {Record<string, SealedContentKeyEntry[]>} [keys] - by accessGroup
+ * @property {SealedContentKeyEntry[]} [keys] - in group order, then period order
  */
 
 /**
- * The publisher-to-client wire shape. Keyed maps, keyed by contentName,
- * accessGroup, issuerName and `t`. The publisher chose every one of those
- * names, which is why the reading side never does a bare `map[name]`.
+ * The publisher-to-client wire shape. Its collections are arrays of records
+ * named by contentName, issuerName, accessGroup and period. The publisher
+ * chose every one of those names, which is why the reading side looks a
+ * record up by its field and never does a bare `map[name]`.
  *
  * @typedef {object} DcaData
  * @property {string} version
  * @property {{ renderId: string, origin: string, issuedAt: string, resourceId: string, data: object }} resource
  * @property {string} resourceJWT - ES256 over `resource`, shared across issuers
  * @property {{ chainsPerDay?: number, periodMinutes: number }} [periodGeometry]
- * @property {Record<string, ContentDataRecord>} contentData
- * @property {Record<string, { sealed: { contentKeys: Record<string, string>, periodKeys?: Record<string, Record<string, string>>, chainKeys?: Record<string, Record<string, string>> }, keyId: string }>} issuerData
+ * @property {ContentDataRecord[]} contentData
+ * @property {Array<{ issuerName: string, sealed: { contentKeys?: { contentName: string, key: string }[], periodKeys?: { accessGroup: string, period: string, key: string }[], chainKeys?: { accessGroup: string, cutoff: string, key: string }[] }, keyId: string }>} issuerData
  */
 
 /**
  * @typedef {object} Render
  * @property {DcaData} dcaData
- * @property {Record<string, string>} sealedContent - base64url ciphertext per contentName
+ * @property {Record<string, string>} sealedContent - base64url ciphertext per
+ *   contentName; an in-memory map that each delivery writer turns into the
+ *   wire's `{contentName, content}` records
  */
 
 /**
@@ -696,7 +706,8 @@ function checkedKeyBytes(value, kind, accessGroup, t, width) {
 /**
  * How a key is sealed to an issuer. An explicit `keySealing` replaces the core
  * default, and is then responsible for every selected producer requirement,
- * including a fresh ECDH pair and nonce per envelope.
+ * including a fresh ECDH pair per envelope and the selected construction's
+ * nonce procedure.
  * The core default conforms. A variant may commit to another coordinate or
  * carrier when its selected profile defines that construction.
  *
@@ -864,7 +875,7 @@ export class Sealer {
    *   Optional while there is only one, required as soon as there are two:
    *   a publisher holding two keys has to say which of them signs.
    * @param {import('./contentKeyWrap.js').ContentKeyWrapStrategy} [config.contentKeyWrapStrategy]
-   *   how this render writes `contentData[contentName].keys`: the aad each
+   *   how this render writes each item record's `keys`: the aad each
    *   wrap is made under and the entry that carries it. One per render,
    *   because that member is emitted once and every issuer reads the same
    *   entries. `ordinaryContentKeyWrap` by default, which is the format's v1
@@ -933,7 +944,7 @@ export class Sealer {
    * assign the same contentName differently.
    *
    * The item's contentKey is wrapped under the `accessGroups` named here: one
-   * `contentData[name].keys[accessGroup]` list per group, and every issuer
+   * set of wrap records per group in the item's `keys`, and every issuer
    * granted that group can hand out the periodKey that opens it.
    *
    * Groups are optional per item. An item with omitted or empty groups ships
@@ -958,15 +969,14 @@ export class Sealer {
    * @returns {this}
    */
   content(name, value, contentTypeOrOptions, legacyOptions) {
-    // Both names key a map on the wire (`contentData[name]` and
-    // `contentData[name].keys[accessGroup]`), and the contentName also
-    // enters the item's AAD. This method refuses a bad name here rather than
-    // at seal(), so the call that introduced the name is the one that fails.
+    // Both names identify records on the wire (an item's `contentName` and
+    // a wrap's `accessGroup`), and the contentName also enters the item's
+    // AAD. This method refuses a bad name here rather than at seal(), so the
+    // call that introduced the name is the one that fails.
     validateContentName(name);
-    // Every emitted map is keyed by contentName, so a second item under one
-    // name could only survive as a duplicate member - the shape
-    // `tools/duplicateMembers.js` lints against and the reject vector
-    // refuses. The call that repeats the name fails instead.
+    // A publisher emits one record per contentName. A second item under one
+    // name would be a second record that a reader replaces the first with,
+    // so the call that repeats the name fails instead.
     if (this.#items.some((item) => item.name === name)) {
       throw dcaError("bad_config", `content "${name}" is already in this render`);
     }
@@ -1027,8 +1037,9 @@ export class Sealer {
 
   /**
    * One render. The core default, and any conforming selected provider, gives
-   * a fresh renderId, contentKey per item, nonce per wrapped
-   * contentKey, and ECDH ephemeral keypair per sealed blob. An explicit
+   * a fresh renderId, contentKey per item, and ECDH ephemeral keypair per
+   * sealed blob. Each period-key wrap derives its nonce from that renderId and
+   * its own coordinate. An explicit
    * provider is responsible for its own producer conformance; deterministic replay is
    * fixture-only and intentionally nonconforming.
    *
@@ -1043,8 +1054,10 @@ export class Sealer {
     if (!this.#items.length)
       throw dcaError("bad_config", "Sealer needs a content item before it can seal");
 
-    // Capture the admitted item set before invoking host callbacks or awaiting.
-    // Later additions belong to a subsequent render, including its route checks.
+    // Capture one operation before invoking host callbacks or awaiting.
+    // resource() owns its admitted data; replacement and later content additions
+    // belong to subsequent calls, including their route checks.
+    const resourceInput = this.#resource;
     const items = this.#items.slice();
 
     // One render instant for the whole render, read once and checked here.
@@ -1104,6 +1117,7 @@ export class Sealer {
     }));
     const prepared = await this.#prepareItems(
       renderId,
+      resourceInput.resourceId,
       now,
       items,
       itemViews,
@@ -1115,17 +1129,19 @@ export class Sealer {
       renderId,
       origin: this.#origin,
       issuedAt: now.toISOString(),
-      resourceId: this.#resource.resourceId,
+      resourceId: resourceInput.resourceId,
       // Each render gets its own copy. A host may annotate or otherwise
       // mutate one returned delivery without changing the next render's
       // signed resource context.
-      data: snapshotResourceData(this.#resource.data),
+      data: snapshotResourceData(resourceInput.data),
       ...prepared.claims,
     };
 
     const resourceJWT = await this.#sign(resource);
 
-    /** @type {Record<string, ContentDataRecord>} */
+    // Built by name while the render fills it in; the wire record carries the
+    // name as its first field, written at assembly below.
+    /** @type {Record<string, Omit<ContentDataRecord, "contentName">>} */
     const contentData = {};
     /** @type {Record<string, string>} */
     const sealedContent = {};
@@ -1154,21 +1170,21 @@ export class Sealer {
     if (periodKeys)
       await this.#wrapContentKeys(renderId, contentData, contentKeys, periodKeys, items);
 
-    /** @type {Record<string, any>} */
-    const issuerData = {};
+    /** @type {any[]} */
+    const issuerData = [];
 
     for (const [index, issuer] of this.#issuers.entries()) {
       const plan = plans[index];
       const contributedSealed = prepared.issuerSealed[issuer.issuerName];
       if (suppliesNothing(plan) && contributedSealed === undefined) continue;
 
-      /** @type {{ contentKeys?: Record<string, string>, periodKeys?: Record<string, Record<string, string>>, chainKeys?: Record<string, Record<string, string>> }} */
+      /** @type {{ contentKeys?: { contentName: string, key: string }[], periodKeys?: { accessGroup: string, period: string, key: string }[], chainKeys?: { accessGroup: string, cutoff: string, key: string }[] }} */
       const sealed = {};
       if (plan.contentKeyNames.length > 0) {
-        /** @type {Record<string, string>} */
-        const sealedKeys = {};
+        /** @type {{ contentName: string, key: string }[]} */
+        const sealedKeys = [];
         for (const contentName of plan.contentKeyNames) {
-          sealedKeys[contentName] = await this.#keySealing.seal(
+          const key = await this.#keySealing.seal(
             contentKeys[contentName],
             issuer.publicKey,
             issuer.algorithm,
@@ -1181,16 +1197,19 @@ export class Sealer {
               issuer.envelope,
             ),
           );
+          sealedKeys.push({ contentName, key });
         }
         sealed.contentKeys = sealedKeys;
       }
       if (periodKeys) {
         const sealedPeriodKeys = await this.#sealPeriodKeys(issuer, plan, renderId, periodKeys);
-        if (Object.keys(sealedPeriodKeys).length > 0) sealed.periodKeys = sealedPeriodKeys;
+        if (sealedPeriodKeys.length > 0) sealed.periodKeys = sealedPeriodKeys;
         const chains = await this.#sealChainKeys(issuer, plan, renderId, periodKeys);
-        if (Object.keys(chains).length > 0) sealed.chainKeys = chains;
+        if (chains.length > 0) sealed.chainKeys = chains;
       }
-      Object.assign(sealed, contributedSealed ?? {});
+      // An extension contributes whole sealed collections of its own, such
+      // as `contentWindowSeeds`, already in their record shape.
+      Object.defineProperties(sealed, Object.getOwnPropertyDescriptors(contributedSealed ?? {}));
 
       // A group declaration can select no actual source (for example, an
       // empty ordinary-source selector). Do not publish an issuer endpoint
@@ -1199,8 +1218,9 @@ export class Sealer {
         continue;
       }
 
-      issuerData[issuer.issuerName] = {
-        // The planned members lead the block. They say which route the
+      issuerData.push({
+        issuerName: issuer.issuerName,
+        // The planned members follow the name. They say which route the
         // rest of it is written for, and a reader meets them before it
         // reads a `sealed` that may be shaped for that route.
         ...plan.issuerMembers,
@@ -1209,7 +1229,7 @@ export class Sealer {
         // The client relays this beside keyId, and the issuer opens every
         // sealed value of the block with the procedure it names.
         ...(issuer.envelope === undefined ? {} : { envelope: issuer.envelope }),
-      };
+      });
     }
 
     // Assembled here rather than filled in as it goes, because the wire has
@@ -1229,7 +1249,10 @@ export class Sealer {
         ? { periodGeometry: /** @type {any} */ (periodGeometry) }
         : {}),
       ...pageMembers,
-      contentData,
+      contentData: Object.entries(contentData).map(([contentName, record]) => ({
+        contentName,
+        ...record,
+      })),
       issuerData,
     };
 
@@ -1282,6 +1305,7 @@ export class Sealer {
    * what they return. Each one receives its own copies of the content keys.
    *
    * @param {string} renderId
+   * @param {string} resourceId - captured at seal entry
    * @param {Date} now
    * @param {ContentItem[]} items
    * @param {readonly PreparedItemView[]} itemViews
@@ -1289,16 +1313,15 @@ export class Sealer {
    * @param {Uint8Array[]} contentKeys - in item order
    * @returns {Promise<{ claims: Record<string, unknown>, contentRecords: Record<string, Record<string, unknown>>, issuerSealed: Record<string, Record<string, unknown>>, pageMembers: Record<string, unknown> }>}
    */
-  async #prepareItems(renderId, now, items, itemViews, issuerViews, contentKeys) {
+  async #prepareItems(renderId, resourceId, now, items, itemViews, issuerViews, contentKeys) {
     /** @type {Record<string, unknown>} */
-    const claims = {};
+    const claims = Object.create(null);
     /** @type {Record<string, Record<string, unknown>>} */
-    const contentRecords = {};
+    const contentRecords = Object.create(null);
     /** @type {Record<string, Record<string, unknown>>} */
-    const issuerSealed = {};
+    const issuerSealed = Object.create(null);
     /** @type {Record<string, unknown>} */
-    const pageMembers = {};
-    const resourceId = /** @type {{ resourceId: string }} */ (this.#resource).resourceId;
+    const pageMembers = Object.create(null);
     for (const preparation of this.#itemPreparations) {
       const by = preparation.name;
       const result = await preparation.prepare(
@@ -1340,7 +1363,7 @@ export class Sealer {
             `${by} adds a record to "${contentName}", not in this render`,
           );
         }
-        const target = (contentRecords[contentName] ??= {});
+        const target = (contentRecords[contentName] ??= Object.create(null));
         for (const [name, value] of entriesOf(record, by, `the record of "${contentName}"`)) {
           if (BASE_RECORD_MEMBERS.includes(name) || Object.hasOwn(target, name)) {
             throw dcaError(
@@ -1370,7 +1393,7 @@ export class Sealer {
               `${by} does not seal under`,
           );
         }
-        const target = (issuerSealed[issuerName] ??= {});
+        const target = (issuerSealed[issuerName] ??= Object.create(null));
         for (const [name, value] of entriesOf(members, by, `the sealed of "${issuerName}"`)) {
           if (BASE_SEALED_MEMBERS.includes(name) || Object.hasOwn(target, name)) {
             throw dcaError(
@@ -1714,9 +1737,11 @@ export class Sealer {
   }
 
   /**
-   * Fills `contentData[contentName].keys[accessGroup]`, the client's side of
-   * the cached path, into the record the item already has. One entry per
-   * period, each with its own nonce.
+   * Fills the item record's `keys`, the client's side of the cached path,
+   * into the record the item already has. One wrap record per group and
+   * period, written as `{accessGroup, period, ...entry}` from the strategy's
+   * `{t, key, ...}` entry. Each wrap's nonce is derived from the render ID, the item name, the
+   * group, the period and the selected aad, so the entry carries none.
    *
    * This member is emitted once for the whole render, which is why the wrap
    * strategy is selected once: it says what each wrap is bound to and what
@@ -1729,7 +1754,8 @@ export class Sealer {
    *
    * @param {ContentItem[]} items - the render's captured item set
    * @param {string} renderId - the coordinate every wrap is offered under
-   * @param {Record<string, ContentDataRecord>} contentData - changed in place
+   * @param {Record<string, Omit<ContentDataRecord, "contentName">>} contentData - by
+   *   contentName, changed in place
    * @param {Record<string, Uint8Array>} contentKeys
    * @param {{ periodsFor: (accessGroup: string) => readonly string[], keyFor: (accessGroup: string, t: string) => Uint8Array,
    * }} periodKeys
@@ -1738,38 +1764,45 @@ export class Sealer {
   async #wrapContentKeys(renderId, contentData, contentKeys, periodKeys, items) {
     for (const item of items) {
       if (item.accessGroups.length === 0) continue;
-      /** @type {Record<string, object[]>} */
-      const byGroup = {};
+      /** @type {object[]} */
+      const records = [];
       for (const accessGroup of item.accessGroups) {
-        /** @type {object[]} */
-        const entries = [];
         for (const t of periodKeys.periodsFor(accessGroup)) {
-          const nonce = this.#random.bytes(NONCE_BYTES);
           const coordinate = { renderId, contentName: item.name, accessGroup, t };
+          // Ask the strategy once and copy its bytes before the digest await: the strategy
+          // still owns its buffer, and the nonce transcript and GCM must see the same bytes.
+          // Any other value passes through uncopied, so the nonce helper refuses it below.
+          const selected = this.#contentKeyWrap.aad(coordinate);
+          const aad = selected instanceof Uint8Array ? Uint8Array.from(selected) : selected;
+          const nonce = await contentKeyWrapNonce({ ...coordinate, aad });
+          if (nonce === null) {
+            throw dcaError(
+              "bad_config",
+              `the wrap aad for "${item.name}" at ${accessGroup} ${t} is bytes or undefined`,
+            );
+          }
           const key = await encrypt(
             periodKeys.keyFor(accessGroup, t),
             nonce,
             contentKeys[item.name],
-            this.#contentKeyWrap.aad(coordinate),
+            aad,
           );
-          entries.push(
-            this.#contentKeyWrap.entry({
-              t,
-              nonce: base64urlEncode(nonce),
-              key: base64urlEncode(key),
-            }),
+          // The checked entry carries `t` and `key`; the wire spells `t` as
+          // `period` beside the accessGroup.
+          const { t: period, ...entry } = /** @type {{ t: string, key: string }} */ (
+            this.#contentKeyWrap.entry({ t, key: base64urlEncode(key) })
           );
+          records.push({ accessGroup, period, ...entry });
         }
-        byGroup[accessGroup] = entries;
       }
-      contentData[item.name].keys = /** @type {any} */ (byGroup);
+      contentData[item.name].keys = /** @type {any} */ (records);
     }
   }
 
   /**
-   * The issuer's side of the same path,
-   * `issuerData[issuerName].sealed.periodKeys[accessGroup][t]`: each periodKey
-   * sealed to that issuer's public key.
+   * The issuer's side of the same path, the issuer block's
+   * `sealed.periodKeys` records `{accessGroup, period, key}`: each periodKey
+   * sealed to that issuer's public key, with `period` the label `t`.
    *
    * The groups are the ones this issuer's plan supplies, and the plan was
    * already checked against the render's groups and against what that issuer
@@ -1780,22 +1813,20 @@ export class Sealer {
    * @param {string} renderId - the render every one of these blobs is bound to
    * @param {{ periodsFor: (accessGroup: string) => readonly string[], keyFor: (accessGroup: string, t: string) => Uint8Array,
    * }} periodKeys
-   * @returns {Promise<Record<string, Record<string, string>>>}
+   * @returns {Promise<{ accessGroup: string, period: string, key: string }[]>}
    */
   async #sealPeriodKeys(issuer, plan, renderId, periodKeys) {
-    /** @type {Record<string, Record<string, string>>} */
-    const sealed = {};
+    /** @type {{ accessGroup: string, period: string, key: string }[]} */
+    const sealed = [];
 
     for (const accessGroup of plan.suppliedAccessGroups) {
       if (!plan.periodKeyDelivery[accessGroup].includes("period-keys")) continue;
-      /** @type {Record<string, string>} */
-      const byPeriod = {};
       for (const t of selectedPeriodSourceTs(
         plan,
         accessGroup,
         periodKeys.periodsFor(accessGroup),
       )) {
-        byPeriod[t] = await this.#keySealing.seal(
+        const key = await this.#keySealing.seal(
           periodKeys.keyFor(accessGroup, t),
           issuer.publicKey,
           issuer.algorithm,
@@ -1809,8 +1840,8 @@ export class Sealer {
             issuer.envelope,
           ),
         );
+        sealed.push({ accessGroup, period: t, key });
       }
-      if (Object.keys(byPeriod).length > 0) sealed[accessGroup] = byPeriod;
     }
 
     return sealed;
@@ -1825,16 +1856,14 @@ export class Sealer {
    * @param {import('./issuerSupplyPlan.js').IssuerSupplyPlan} plan
    * @param {string} renderId
    * @param {{ chainKeysFor: (accessGroup: string) => { t: string, key: Uint8Array }[], geometryFor: (accessGroup: string) => { chainsPerDay: number, periodMinutes: number }|null }} periodKeys
-   * @returns {Promise<Record<string, Record<string, string>>>}
+   * @returns {Promise<{ accessGroup: string, cutoff: string, key: string }[]>}
    */
   async #sealChainKeys(issuer, plan, renderId, periodKeys) {
-    /** @type {Record<string, Record<string, string>>} */
-    const sealed = {};
+    /** @type {{ accessGroup: string, cutoff: string, key: string }[]} */
+    const sealed = [];
 
     for (const accessGroup of plan.suppliedAccessGroups) {
       if (!plan.periodKeyDelivery[accessGroup].includes("chain-keys")) continue;
-      /** @type {Record<string, string>} */
-      const byTerminal = {};
       const geometry = periodKeys.geometryFor(accessGroup);
       if (!geometry) {
         throw dcaError(
@@ -1842,9 +1871,9 @@ export class Sealer {
           `the chain supply for "${accessGroup}" carries the complete geometry its envelope binds`,
         );
       }
-      for (const { t, key } of periodKeys.chainKeysFor?.(accessGroup) ?? []) {
-        byTerminal[t] = await this.#keySealing.seal(
-          key,
+      for (const { t, key: chainKey } of periodKeys.chainKeysFor?.(accessGroup) ?? []) {
+        const key = await this.#keySealing.seal(
+          chainKey,
           issuer.publicKey,
           issuer.algorithm,
           carrierOptions(
@@ -1859,8 +1888,8 @@ export class Sealer {
             issuer.envelope,
           ),
         );
+        sealed.push({ accessGroup, cutoff: t, key });
       }
-      if (Object.keys(byTerminal).length > 0) sealed[accessGroup] = byTerminal;
     }
 
     return sealed;

@@ -75,9 +75,18 @@ function record(value) {
  * @returns {boolean}
  */
 export function acceptsPeriodKeyResponseCoordinate(accessGroup, t, request, maximum) {
-  const sealed = own(request, "sealed");
-  const presentedFamily = own(own(sealed, "periodKeys"), accessGroup);
-  if (record(presentedFamily) && typeof own(presentedFamily, t) === "string") return true;
+  const presented = own(own(request, "sealed"), "periodKeys");
+  if (
+    Array.isArray(presented) &&
+    presented.some(
+      (entry) =>
+        record(entry) &&
+        own(entry, "accessGroup") === accessGroup &&
+        own(entry, "period") === t &&
+        typeof own(entry, "key") === "string",
+    )
+  )
+    return true;
 
   const asked = requestCarrierOf(request, maximum).family(accessGroup);
   return asked.kind === "valid" && cutoffWithinPresentedReach(t, asked);

@@ -17,6 +17,7 @@ import { clientBoundKeyCapability } from "../extensions/client-bound-transport/c
 import * as ecdh from "../extensions/client-bound-transport/ecdhP256.js";
 import * as rsa from "../extensions/client-bound-transport/rsaOaep.js";
 import { utf8Decode } from "../core-shared/codec.js";
+import { recordNamed } from "../test-lib/helpers/inspect.js";
 
 for (const [method, profile, recipientAlgorithm, usages] of [
   ["ECDH-P256", ecdh, { name: "ECDH", namedCurve: "P-256" }, ["deriveKey"]],
@@ -161,7 +162,10 @@ for (const [method, profile, recipientAlgorithm, usages] of [
     assert.equal(lookups, 1);
     const response = await delivery.prepare(result.document, view);
     assert.equal(response.transport.method, method);
-    assert.equal(typeof response.keys.contentKeys.body, "object");
+    assert.equal(
+      typeof recordNamed(response.keys.contentKeys, "contentName", "body")?.key,
+      "object",
+    );
     const applied = await c.applyResponse(
       rendered.dcaData,
       issuerName,

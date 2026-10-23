@@ -44,5 +44,19 @@
     "fixtureConsumer": "base-contract",
     "fixtureFormats": ["1"],
     "selection": "selected-profile"
+  },
+  "html-writer": {
+    "directory": "html-writer",
+    "test": "html-writer.contract.test.js",
+    "runner": "test:contract:html-writer",
+    "requiredAccess": "markup writer callback returning an HTML fragment",
+    "versions": ["1"],
+    "deliveryModes": ["markup"],
+    "contractProfiles": ["dca-profile-html-carrier"],
+    "observations": ["body-carrier-values-and-following-sentinel"],
+    "fixtureSets": ["fixtures/v1/profiles/dca-profile-html-carrier/script-text"],
+    "fixtureConsumer": "base-contract",
+    "fixtureFormats": ["html-writer/1"],
+    "selection": "selected-profile"
   }
 }

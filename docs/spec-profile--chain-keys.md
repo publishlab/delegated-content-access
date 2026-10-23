@@ -596,7 +596,9 @@ is not a profile.
 ## 11. Publisher-to-issuer supply
 
 The publisher supplies typed capability members. The
-issuer's supplied ceiling is the union of the reach of its valid members:
+issuer's supplied ceiling is the union of the reach of its valid members in
+the input collection selected under Section 13. The following example assumes
+a deployment that deliberately selects both period-key and chain input:
 
 ```text
 issuer capability collection
@@ -624,10 +626,20 @@ ceiling to the window start through that position.
 <a id="collection-construction"></a>
 ### 11.3. Collection construction
 
+The publisher follows the single-generation-per-family rule of
+[period keys Section 5.5](spec-profile--period-keys.md#base-period-key-requirements)
+for chain supply in each render. Replacement generations can coexist across
+retained renders and in client caches. The following rules describe consumer
+handling of presented candidate alternatives.
+
 The issuer validates each member independently and computes authority from the
 union of valid, selected members. A sealed member that fails invalidates that
 member. A malformed or conflicting family collection, including
-two positions from one window, invalidates that family's chain collection. A
+two positions from one window, invalidates that family's chain collection.
+Several members at one position of one family are candidate alternatives at
+that one position
+([data format Section 2.3](spec--data-format.md#23-collections-of-named-records));
+they do not conflict, and each counts toward the member bounds of Section 22. A
 consumer MUST check positioned labels and the one-position-per-window rule
 before checking envelope-value encoding or opening. Every syntactically valid
 positioned label holds its window position even when its envelope is malformed
@@ -656,20 +668,18 @@ and keeps each issuer's chain-key collection in the existing
 ```json
 {
     "periodGeometry": { "periodMinutes": 15, "chainsPerDay": 2 },
-    "issuerData": {
-        "<issuerName>": {
+    "issuerData": [
+        {
+            "issuerName": "<issuerName>",
             "sealed": {
-                "contentKeys": { },
-                "periodKeys": { },
-                "chainKeys": {
-                    "<accessGroup>": {
-                        "<suppliedT>": "<sealed chain-key bytes>"
-                    }
-                }
+                "contentKeys": [],
+                "chainKeys": [
+                    { "accessGroup": "<accessGroup>", "cutoff": "<suppliedT>", "key": "<sealed chain-key bytes>" }
+                ]
             },
             "keyId": "2025-10"
         }
-    }
+    ]
 }
 ```
 
@@ -689,7 +699,7 @@ Section 2.
 | Member | Type | Requirement |
 | --- | --- | --- |
 | `periodGeometry` | object | Top-level shared period context; complete pair for chain processing |
-| `issuerData[issuerName].sealed.chainKeys` | object | Optional chain-capability collection |
+| `sealed.chainKeys` of an `issuerData` block | array | Optional chain-capability collection |
 
 `periodGeometry` is a non-array object with these members:
 
@@ -708,11 +718,12 @@ stores it in and whether its JSON spelling has a fraction or exponent: `2`,
 `2.0` and `2e0` admit the same value before Section 7.2 applies its bounds. The
 `pc` BIND spells the value canonically (Section 12.2).
 
-`sealed.chainKeys` maps `accessGroup` to a non-array object that maps a chain
-coordinate label to a sealed value. The label is `suppliedT`, the label of the
-supplied position, normally the window terminal; Section 7.3 defines its
-grammar and grid admission and Section 11.3 the one-member-per-window rule.
-Each sealed value is the 16-octet chain key at `suppliedT`, sealed to the
+`sealed.chainKeys` holds records `{accessGroup, cutoff, key}`. Its `cutoff`
+is `suppliedT`, the label of the supplied position, normally the window
+terminal; Section 7.3 defines its grammar and grid admission and Section 11.3
+the one-position-per-window rule. A family is the set of records that name one
+`accessGroup` in one collection. Each sealed `key` is the 16-octet chain key at
+`suppliedT`, sealed to the
 issuer under the chain envelope BIND (Section 12.2) and spelled as a binary
 string under data-format Section 2.2, in the delivery and in the request.
 
@@ -730,23 +741,24 @@ request admission.
 - A malformed or unsupported pair (either member absent, null or not a positive
   integer, or the pair fails Section 7.2) supplies no chain geometry. No family
   override can restore it.
-- A `sealed.chainKeys` that is not a non-array object, or a family name in it
-  that fails identifier rules, fails request admission under core Section 5.
+- In a request, a `sealed.chainKeys` that is not an array, or a record whose
+  `accessGroup` is missing, is not a string or fails identifier rules, fails
+  request admission under core Section 5.
 - A family in `sealed.chainKeys` without the shared pair is a failed family,
   not an absent one: it supplies no chain candidate and selects no period-key
   alternative by itself.
-- In a delivery, a `sealed.chainKeys` that is not a non-array object, or one
+- In a delivery, a `sealed.chainKeys` that is not an array, or one
   rejected under data-format Section 2.1, supplies no chain candidate for that
   issuer block; `sealed.contentKeys` and `sealed.periodKeys` stay structurally
   usable, and whether period-key members remain selectable after a chain
   failure is the union rule of Section 13.
-- A family value that is not a non-array object, or an empty family object,
-  supplies no chain candidate for that family.
-- An invalid sealed entry under data-format Section 2.2 supplies no candidate
-  at its coordinate; its label still occupies its window for the
+- An element that is not a non-array object names no family and supplies no
+  chain candidate; the consumer skips it, and its siblings keep their scope.
+- An invalid sealed `key` under data-format Section 2.2 supplies no candidate
+  at its coordinate; its `cutoff` still occupies its window for the
   one-member-per-window rule of Section 11.3, so a second member in that window
   fails the family.
-- More than `maxChainMembersPerFamily` members fail that family; more than
+- More than `maxChainMembersPerFamily` raw records fail that family; more than
   `maxChainMembersPerMessage` fail every chain family of that chain collection,
   one issuer block's `sealed.chainKeys` in a delivery or the request's. Such a
   failure reinterprets none of those members as period-key input.
@@ -794,7 +806,7 @@ required by the request, using the same unresolved-item and access-group
 selection boundary as the base request path. It copies each selected label and
 sealed value unchanged and carries the top-level `periodGeometry` object
 unchanged. It does not derive, merge, or rewrite sealed members. Unselected
-family entries may be omitted.
+family records may be omitted.
 
 Chain-only supply yields no capability through a request path without selected
 relay or at an issuer without selected chain input.
@@ -813,13 +825,16 @@ from the resolved context and the member's label. A member whose BIND does not
 verify, whose label is off its family's grid, or whose family lacks a resolved
 pair fails as a chain member (Section 11.3).
 
-Each grammar-valid own family name of `sealed.chainKeys` presents its
-`accessGroup`, even when its family value is malformed (null, an array or an
-empty object); such a family has no usable source member, reaches no opening key
-and yields no cryptographic error merely because of that malformed value. Valid
-sibling families retain their own admission scope. An empty outer collection
-presents no family. Each admitted member presents the coordinate `(accessGroup,
-suppliedT)`. A member's derived result coordinates run from its window start
+Each record of `sealed.chainKeys` with a grammar-valid `accessGroup` presents
+that access group, even when its `cutoff` or `key` is malformed. A malformed
+cutoff names no admitted source coordinate. A malformed key value is no usable
+source capability and reaches no opening key; when its otherwise admitted
+coordinate is authorized, the issuer reports `unseal_failed` there under core
+Section 7.1 without opening that value. Family presentation alone authorizes
+neither an opening nor an error. Valid sibling families retain their own
+admission scope. An empty collection presents no family. Each
+admitted member presents the coordinate `(accessGroup, suppliedT)`.
+A member's derived result coordinates run from its window start
 through its supplied position under the geometry the request resolved (Section
 5.2), and form that member's part of the admissible result set (core Section
 6.1).
@@ -828,18 +843,23 @@ through its supplied position under the geometry the request resolved (Section
 ### 12.4. Requested article periods
 
 A selected chain request MAY carry the unsigned top-level member
-`requestedPeriodKeys`, a non-empty object mapping access-group identifiers to
-non-empty arrays of canonical period labels. A relay serving unresolved items
-MUST populate it from the period-key wraps it wants to open, taking the union
-separately per group. Producers SHOULD sort and deduplicate each array; raw entries count against
-the maxima.
+`requestedPeriodKeys`, a non-empty array of records `{accessGroup, periods}`.
+Each record is a non-array object whose `accessGroup` is an access-group
+identifier and whose `periods` is a non-empty array of canonical period labels.
+A relay serving unresolved items MUST populate it from the period-key wraps it
+wants to open, taking the union separately per group. Producers SHOULD emit one
+record per group and sort and deduplicate each array; raw labels count against
+the maxima. Several records for one `accessGroup` request the union of their
+`periods`; repeating a label changes nothing. This union is the normalization
+rule for this collection, not a reading of the former object form.
 Several items, groups and wrap alternatives need not share one render-level
 coordinate. `issuedAt` is not a wrap selector. Hints do not enter an envelope
 BIND.
 
-A selecting issuer MUST count raw entries before deduplication, enforce the
-selector input maxima in Section 22, and validate every label. Invalid shapes,
-identifier names, labels or excess raw counts are whole-request structural
+A selecting issuer MUST count raw labels across all records before
+deduplication, enforce the selector input maxima in Section 22, and validate
+every label. Invalid shapes, identifiers, labels or excess raw counts are
+whole-request structural
 failures before policy or opening-key work. For an admitted source family with
 valid geometry, an off-grid desired label has the same failure scope.
 Duplicates and arbitrary array order are accepted; the issuer deduplicates
@@ -849,8 +869,8 @@ invalid source family retains its existing scoped failure and is not repaired
 by a hint. A hint naming no admitted chain source presents no family and
 authorizes no opening.
 
-For the desired-label grid check, an admitted source family is a non-empty
-family object whose geometry resolves and whose collection passes the family-
+For the desired-label grid check, an admitted source family is a family with
+at least one record whose geometry resolves and whose collection passes the family-
 and message-scoped conditions, including one position per window and
 member-count bounds. Individual member label or envelope failures retain their
 member scope and do not by themselves change that collection's admission.
@@ -937,8 +957,9 @@ For projected period-key output, the issuer MUST reserve capacity for article
 targets across every family before selecting optional future keys. Article
 selection is ordered by (accessGroup, t) byte order; remaining future selection
 uses the same order. Both count against projected output maxima. The selector
-input maxima bound the article set within those capacities. A larger future
-count is clamped, not an error. Denied, absent or failed alternatives create
+input maxima do not guarantee that the actual article candidates and ordinary
+fallback fit those capacities; mandatory output overflow is refused under
+Section 22.1. A larger optional future count is clamped, not an error. Denied, absent or failed alternatives create
 no promise that every requested item will open.
 
 Response form is independent of desired coordinates, source reach and policy
@@ -979,7 +1000,7 @@ host policy.
 
 Period keys projected from chain supply travel in `keys.periodKeys` without a
 marker. A chain grant keeps its positioned chain keys in the `keys.chainKeys`
-location. For the member bounds and one-position-per-window rule in Section
+location as records `{accessGroup, cutoff, key}`. For the member bounds and one-position-per-window rule in Section
 12.1, `keys.chainKeys` is also a chain collection; response entry admission
 follows Section 9 and the selected response binding.
 The issuer-core result holds raw chain-key bytes there; a selected
@@ -993,15 +1014,15 @@ this enclosing shape:
 ```json
 {
     "keys": {
-        "contentKeys": { "<contentName>": "<base64url(content key)>" },
-        "periodKeys": {
-            "<accessGroup>": { "<t>": "<base64url(period key)>" }
-        },
-        "chainKeys": {
-            "<accessGroup>": {
-                "<cutoffT>": "<base64url(chain-key bytes)>"
-            }
-        }
+        "contentKeys": [
+            { "contentName": "<contentName>", "key": "<base64url(content key)>" }
+        ],
+        "periodKeys": [
+            { "accessGroup": "<accessGroup>", "period": "<t>", "key": "<base64url(period key)>" }
+        ],
+        "chainKeys": [
+            { "accessGroup": "<accessGroup>", "cutoff": "<cutoffT>", "key": "<base64url(chain-key bytes)>" }
+        ]
     }
 }
 ```
@@ -1017,10 +1038,11 @@ Geometry metadata in a response has no authority. A captured request with a
 missing, null, partial or overridden pair admits no chain key. These rules apply
 to direct and client-bound responses, including mixed item, period and chain grants.
 
-`<cutoffT>` above is an ordinary canonical period coordinate `t`: the member
-name under which the returned chain key is filed. It is not a separate response
-field; the issuer selects its permitted cutoff independently of unsigned
-requested article labels. Neither the selected response `t` nor the cutoff
+The `cutoff` field above holds an ordinary canonical period coordinate `t`:
+the position of the returned chain key. It is the record's coordinate, not an
+extra key identifier; the issuer selects its permitted cutoff independently of
+unsigned requested article labels. Several records at one `(accessGroup,
+cutoff)` are candidate chain keys at that one position. Neither the selected response `t` nor the cutoff
 concept enters base period-key `p` BIND; a period-key envelope always binds its
 own `t`.
 
@@ -1228,15 +1250,29 @@ this profile.
 | Constant | Value | Bounds |
 | --- | --- | --- |
 | `maxPositionsPerWindow` | 288 | `N = (1440 / chainsPerDay) / periodMinutes` |
-| `maxChainMembersPerFamily` | 2 | chain members for one access group in one chain collection in one message |
-| `maxChainMembersPerMessage` | 16 | chain members across all access groups in one chain collection in one message |
-| `maxPeriodKeysPerFamily` | 288 | period keys one response returns for one access-group family; coordinates in one family's selected future horizon |
+| `maxChainMembersPerFamily` | 2 | raw chain records for one access group in one chain collection in one message |
+| `maxChainMembersPerMessage` | 16 | raw chain records across all access groups in one chain collection in one message |
+| `maxPeriodKeysPerFamily` | 288 | distinct chain-projected period-key candidates returned for one access-group family; coordinates in one family's selected future horizon |
 | `maxPeriodKeysPerResponse` | 512 | period keys across all families in one response |
-| `maxRequestedPeriodsPerFamily` | 288 | raw requestedPeriodKeys entries for one family |
-| `maxRequestedPeriodsPerRequest` | 512 | raw requestedPeriodKeys entries across the request |
+| `maxRequestedPeriodsPerFamily` | 288 | raw requestedPeriodKeys labels for one family, across its records |
+| `maxRequestedPeriodsPerRequest` | 512 | raw requestedPeriodKeys labels across the request |
 
 The two period-key rows are independent constants: the family value bounds
 chain-projected response output, the positions value bounds geometry.
+
+An issuer MUST count the actual distinct period-key candidates after projection
+and duplicate-key removal, not only the selected labels. Different key values
+at one coordinate count separately. The family output maximum applies to
+chain-projected families; it does not add a family limit to ordinary period-key
+fallback. The response output maximum counts all ordinary `periodKeys` records,
+including fallback families, but not errors, chain-key records or the dedicated
+content-group response member. If either output maximum would be exceeded, the
+issuer MUST refuse the whole exchange with `too_many_entries`, without
+returning sibling keys, trimming candidates or silently omitting families.
+This selected-profile finite output processing-limit refusal is a whole-request
+failure under core Section 8 and HTTP binding Section 3.4 (HTTP 4xx); it does not
+authorize conditional fallback. Invalid trusted policy grants remain policy
+faults rather than output-limit refusals.
 
 Member-count failures take the scopes of Section 12.1.
 

@@ -20,6 +20,7 @@ import {
   PUBLISHER,
   UNLOCK,
 } from "../extensions/content-groups/test/_lib/world.js";
+import { find } from "../extensions/content-groups/test/_lib/records.js";
 
 const AT = "2026-10-14T14:20:00Z";
 const routes = [
@@ -37,6 +38,8 @@ const items = [
   { name: "headline", value: "bought headline", contentType: "text/plain" },
   { name: "lockedAd", value: "denied ad", contentType: "text/plain" },
 ];
+/** The distinct values of one field across a record collection, in first-seen order. */
+const distinct = (records, field) => [...new Set(records.map((record) => record[field]))];
 const text = async (client, name) => new TextDecoder().decode((await client.openLocal(name)).bytes);
 
 async function setup({ failA = false } = {}) {
@@ -190,11 +193,11 @@ test("separate issuers: stock and content-group chains open, scopes project, hel
   );
   assert.equal(w.sent[0].sealed.contentWindowSeeds, undefined);
   assert.equal(w.sent[0].requestedContentGroups, undefined);
-  assert.deepEqual(Object.keys(w.sent[0].sealed.chainKeys), ["premium"]);
+  assert.deepEqual(distinct(w.sent[0].sealed.chainKeys, "accessGroup"), ["premium"]);
   assert.equal(w.sent[1].sealed.chainKeys, undefined);
-  assert.equal(w.sent[1].sealed.contentKeys.bodytext, undefined);
-  assert.deepEqual(Object.keys(w.sent[1].sealed.contentWindowSeeds), ["sportsNews"]);
-  assert.equal(w.responses[0].body.contentGroups, undefined);
+  assert.equal(find(w.sent[1].sealed.contentKeys, { contentName: "bodytext" }), undefined);
+  assert.deepEqual(distinct(w.sent[1].sealed.contentWindowSeeds, "contentName"), ["sportsNews"]);
+  assert.equal(w.responses[0].body.contentGroupKeys, undefined);
   assert.equal(w.responses[1].body.keys.chainKeys, undefined);
   assert.ok(w.responses.every((r) => r.body.periodGeometry === undefined));
   const later = await w.client("two");
@@ -215,7 +218,7 @@ test("separate issuers: a failed stock route preserves independent item fallback
   const walk = await first.unlockRoutes(["bodytext", "sportsNews", "headline"], routes);
   assert.deepEqual(walk.missing, []);
   assert.equal(w.sent.length, 2);
-  assert.ok(w.sent[1].sealed.contentKeys.bodytext);
+  assert.ok(find(w.sent[1].sealed.contentKeys, { contentName: "bodytext" })?.key);
   for (const item of items.slice(0, 3)) assert.equal(await text(first, item.name), item.value);
   const later = await w.client("fallback-two");
   await assert.rejects(

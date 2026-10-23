@@ -6,7 +6,9 @@ Status: Public Working Draft
 
 This optional profile defines compact publisher-to-issuer envelopes using one
 fixed RFC 9180 HPKE suite and compressed P-256 public-point transport. It saves
-44 octets per sealed value compared with the ordinary ECDH envelope. A publisher
+32 octets for a 16-octet key compared with the ordinary ECDH envelope. Its
+generic 32-octet payload capacity does not define composition with content
+groups; that composition remains undefined and MUST be refused. A publisher
 selects it per issuer block with `"envelope": "compact-ecdh"`, using the same
 issuer public key and key identifier. The baseline envelope remains available.
 
@@ -30,8 +32,12 @@ ECDH, HKDF/HMAC and AES-GCM primitives without depending on an HPKE library.
 An exact implementation can later be replaced by a compatible library while
 preserving the cryptographic bytes.
 
-The combined extension removes the 12-octet transmitted nonce and shortens the
-public point by 32 octets. Derivation and compressed transport are selected
+Compressed transport shortens the public point by 32 octets. For an ordinary
+16-octet key that takes the envelope from 97 to 65 octets. A generic 32-octet
+payload occupies 81 octets, compared with 113 in an uncompressed envelope.
+This size arithmetic does not define a content-group composition. Neither
+uncompressed envelope carries a nonce, so the saving is the point alone.
+Derivation and compressed transport are selected
 together. This profile offers no derivation-only mode. Compression is a DCA
 carrier transformation around standard HPKE; HPKE's internal serialization and
 key schedule remain exactly those specified in RFC 9180.
@@ -72,7 +78,7 @@ issuer-to-client response protection.
 
 ### 3.1. Publisher delivery
 
-The optional member `issuerData.<issuerName>.envelope` has one defined value:
+The optional member `envelope` on an `issuerData` record has one defined value:
 
 | Representation | Meaning |
 | --- | --- |
@@ -88,7 +94,7 @@ requires another specified procedure and trusted configuration.
 The selector applies to the issuer block's `sealed.contentKeys`,
 `sealed.periodKeys` and, when the chain-key profile is selected,
 `sealed.chainKeys`. A block MUST NOT mix compact and ordinary envelopes in these
-maps. Another issuer block in the same delivery MAY use a different procedure.
+collections. Another issuer block in the same delivery MAY use a different procedure.
 An extension-defined sealed field participates only when its owning mechanism
 provides the payload width and binding required by Section 4.2. A publisher MUST
 NOT emit a compact-selected block containing a sealed field whose composition
@@ -96,25 +102,27 @@ with this selector is undefined.
 
 ```json
 {
-  "issuerData": {
-    "exampleIssuer": {
+  "issuerData": [
+    {
+      "issuerName": "exampleIssuer",
       "keyId": "issuer-key-A",
       "envelope": "compact-ecdh",
       "sealed": {
-        "contentKeys": {
-          "bodytext": "<compact seal: 65 bytes>"
-        }
+        "contentKeys": [
+          { "contentName": "bodytext", "key": "<compact seal: 65 bytes>" }
+        ]
       }
     },
-    "otherIssuer": {
+    {
+      "issuerName": "otherIssuer",
       "keyId": "issuer-key-B",
       "sealed": {
-        "contentKeys": {
-          "bodytext": "<ordinary ECDH seal: 109 bytes>"
-        }
+        "contentKeys": [
+          { "contentName": "bodytext", "key": "<ordinary ECDH seal: 97 bytes>" }
+        ]
       }
     }
-  }
+  ]
 }
 ```
 
@@ -137,9 +145,9 @@ The client MUST NOT infer or rewrite a selector from a blob's length.
   "envelope": "compact-ecdh",
   "resourceJWT": "<signed resource metadata>",
   "sealed": {
-    "contentKeys": {
-      "bodytext": "<compact seal: 65 bytes>"
-    }
+    "contentKeys": [
+      { "contentName": "bodytext", "key": "<compact seal: 65 bytes>" }
+    ]
   }
 }
 ```
@@ -217,7 +225,7 @@ compressedEnc (33 octets) || ciphertext (payload width + 16-octet GCM tag)
 ```
 
 For a 16-octet key it is 65 octets, encoded as 87 unpadded base64url characters.
-For a 32-octet seed it is 81 octets, encoded as 108 characters. The selector's
+For a 32-octet payload it is 81 octets, encoded as 108 characters. The selector's
 JSON overhead is per issuer block and is additional to these string widths.
 
 An issuer MUST check the exact expected envelope width and prefix before

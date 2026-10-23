@@ -33,23 +33,30 @@ function page(compactBlockExtra = { envelope: "compact-ecdh" }) {
   return new DcaData({
     version: "1",
     resourceJWT: compactJwt({ origin: "https://news.example", renderId: "r-1" }),
-    issuerData: {
-      [COMPACT]: {
+    issuerData: [
+      {
+        issuerName: COMPACT,
         keyId: "key-A",
         ...compactBlockExtra,
         unlockUrl: "https://a.example/unlock",
-        sealed: { contentKeys: { bodytext: "AQ", premium: "Ag" } },
+        sealed: {
+          contentKeys: [
+            { contentName: "bodytext", key: "AQ" },
+            { contentName: "premium", key: "Ag" },
+          ],
+        },
       },
-      [ORDINARY]: {
+      {
+        issuerName: ORDINARY,
         keyId: "key-B",
         unlockUrl: "https://b.example/unlock",
-        sealed: { contentKeys: { bodytext: "Aw" } },
+        sealed: { contentKeys: [{ contentName: "bodytext", key: "Aw" }] },
       },
-    },
-    contentData: {
-      bodytext: { contentType: "text/html", nonce: "n", aad: "a" },
-      premium: { contentType: "text/html", nonce: "n", aad: "a" },
-    },
+    ],
+    contentData: [
+      { contentName: "bodytext", contentType: "text/html", nonce: "n", aad: "a" },
+      { contentName: "premium", contentType: "text/html", nonce: "n", aad: "a" },
+    ],
   });
 }
 
@@ -96,7 +103,10 @@ describe("envelope selector relay", () => {
     const narrowed = projectEligibleIdentities(request, identities);
     assert.notEqual(narrowed, null);
     assert.equal(narrowed.envelope, "compact-ecdh");
-    assert.deepEqual(Object.keys(narrowed.sealed.contentKeys), ["premium"]);
+    assert.deepEqual(
+      narrowed.sealed.contentKeys.map((/** @type {any} */ record) => record.contentName),
+      ["premium"],
+    );
   });
 
   test("the response association pins the envelope sent with the request", () => {

@@ -44,6 +44,32 @@ import { countingEndpoint } from "../../test-lib/harnesses/issuer-endpoint.js";
 import { held } from "../../test-lib/helpers/inspect.js";
 import { periodKey } from "../support/keys.js";
 
+/**
+ * The content names a key collection's records carry, in wire order.
+ *
+ * @param {any[]} records
+ * @returns {string[]}
+ */
+const namesIn = (records) => records.map((record) => record.contentName);
+
+/**
+ * The accessGroups a period-key collection's records carry, each once.
+ *
+ * @param {any[]} records
+ * @returns {string[]}
+ */
+const groupsIn = (records) => [...new Set(records.map((record) => record.accessGroup))];
+
+/**
+ * The periods one accessGroup's records carry, in wire order.
+ *
+ * @param {any[]} records
+ * @param {string} accessGroup
+ * @returns {string[]}
+ */
+const periodsIn = (records, accessGroup) =>
+  records.filter((record) => record.accessGroup === accessGroup).map((record) => record.period);
+
 const HOUR = 60 * 60 * 1000;
 
 /**
@@ -189,11 +215,11 @@ test("an article whose periodKeys were evicted still unlocks from the keys it sh
   // The page never lost anything: the sealed blobs it was rendered with are
   // still on it, and the issuer answers them without reading a `t`.
   assert.deepEqual(
-    Object.keys(run.reunlock.keys.periodKeys[PREMIUM]),
+    periodsIn(run.reunlock.keys.periodKeys, PREMIUM),
     [T14, T15],
     "the periods the page was rendered with, handed back as they are",
   );
-  assert.deepEqual(Object.keys(run.reunlock.keys.contentKeys), ["bodytext"]);
+  assert.deepEqual(namesIn(run.reunlock.keys.contentKeys), ["bodytext"]);
   assert.equal(run.reunlock.errors, undefined);
 
   assert.equal(run.plaintext, ARTICLES.A, "and it opens");
@@ -259,17 +285,17 @@ test("a partial hit asks the issuer for the item it could not open, and for noth
   // blob and the whole premium family stay in the browser: an issuer that is
   // not asked cannot count the view, and a blob not sent cannot be replayed.
   const request = second.buildRequest(two, ISSUER_NAME, missing);
-  assert.deepEqual(Object.keys(request.sealed.contentKeys), ["locked-data"]);
-  assert.deepEqual(Object.keys(/** @type {any} */ (request.sealed.periodKeys)), [SUBSCRIBER]);
+  assert.deepEqual(namesIn(request.sealed.contentKeys), ["locked-data"]);
+  assert.deepEqual(groupsIn(/** @type {any} */ (request.sealed.periodKeys)), [SUBSCRIBER]);
 
   const { status, body } = await endpoint.unlock(request);
   assert.equal(status, 200);
   assert.deepEqual(
-    Object.keys(body.keys.contentKeys),
+    namesIn(body.keys.contentKeys),
     ["locked-data"],
     "a subset is legal, and is answered as one",
   );
-  assert.deepEqual(Object.keys(body.keys.periodKeys), [SUBSCRIBER]);
+  assert.deepEqual(groupsIn(body.keys.periodKeys), [SUBSCRIBER]);
 
   await second.applyResponse(two, ISSUER_NAME, body);
   assert.equal(endpoint.calls.count, 2, "the covered item cost nothing");

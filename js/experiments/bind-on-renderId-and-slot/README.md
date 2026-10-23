@@ -29,8 +29,10 @@ current bound decoder. Decoder names or keyId labels alone do not isolate
 configurations that share an opening private key.
 
 Envelope width is unchanged for the tested 16-byte payloads and issuer key
-sizes (109 decoded bytes for ECDH and 256 for RSA-2048). This is a bounded
+sizes (97 decoded bytes for ECDH and 256 for RSA-2048). This is a bounded
 measurement, not a claim about arbitrary payloads or RSA modulus sizes.
+The ECDH controls use the adopted implicit zero nonce and fresh agreement per
+seal, so omitting BIND remains the isolated difference from ordinary sealing.
 
 `test/bind-self-test.test.js` replays the checked-in
 `verification/vectors/v1/experiments/bind-on-renderId-and-slot/bind-blobs.json` through the

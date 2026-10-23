@@ -26,6 +26,7 @@ import { IssuerServer } from "../demo/actors/IssuerServer.js";
 import { AllowAllPolicy } from "../demo/support/AllowAllPolicy.js";
 import { openingKeysOver, PublisherRegistrations } from "../demo/support/PublisherRegistrations.js";
 import { wholeRenderIssuerSupplyPlan } from "../core-publisher/issuerSupplyPlan.js";
+import { recordNamed, wrapsOf } from "../test-lib/helpers/inspect.js";
 
 const { subtle } = globalThis.crypto;
 
@@ -40,6 +41,17 @@ const PERIOD_SECRET = new Uint8Array(32).fill(7);
 const ARTICLE_A = "<p>The council voted 7-2 to rezone the harbour.</p>";
 const ARTICLE_B = "<p>The ferry timetable changes on Monday.</p>";
 const GEOMETRY = Object.freeze({ chainsPerDay: 2, periodMinutes: 15 });
+
+/**
+ * The premium family's chain-key records in one response, in wire order.
+ *
+ * @param {any} body
+ * @returns {any[]}
+ */
+const premiumChains = (body) =>
+  (body.keys.chainKeys ?? []).filter(
+    (/** @type {any} */ record) => record.accessGroup === "premium",
+  );
 
 /**
  * @returns {Promise<{ keyStore: object, publisherRegistration: object, render: (resourceId: string, value: string) => Promise<any> }>}
@@ -240,18 +252,22 @@ test("ECDH and RSA chain-only delivery opens the cutoff item and excludes later 
     const page = client.parse(rendered);
     const request = client.buildRequest(page, ISSUER_NAME, ["bodytext"]);
 
-    assert.deepEqual(request.sealed.contentKeys ?? {}, {}, method);
-    assert.deepEqual(request.sealed.periodKeys ?? {}, {}, method);
+    assert.deepEqual(request.sealed.contentKeys ?? [], [], method);
+    assert.deepEqual(request.sealed.periodKeys ?? [], [], method);
     const answer = await network.post("https://api.example.com/unlock", request, { origin: PUB });
     answer.body = JSON.parse(JSON.stringify(answer.body));
     assert.equal(answer.status, 200, method);
     assert.equal(answer.body.transport.method, method);
-    const chainKeyCount = Object.keys(answer.body.keys.chainKeys.premium).length;
-    assert.deepEqual(Object.keys(answer.body.keys.chainKeys.premium), ["251023T1430"], method);
-    assert.deepEqual(answer.body.keys.contentKeys ?? {}, {}, method);
-    assert.deepEqual(answer.body.keys.periodKeys ?? {}, {}, method);
+    const chainKeyCount = premiumChains(answer.body).length;
+    assert.deepEqual(
+      premiumChains(answer.body).map((record) => record.cutoff),
+      ["251023T1430"],
+      method,
+    );
+    assert.deepEqual(answer.body.keys.contentKeys ?? [], [], method);
+    assert.deepEqual(answer.body.keys.periodKeys ?? [], [], method);
     assert.equal(Object.hasOwn(answer.body, "periodGeometry"), false, method);
-    const firstChain = answer.body.keys.chainKeys.premium["251023T1430"];
+    const firstChain = recordNamed(premiumChains(answer.body), "cutoff", "251023T1430")?.key;
     assert.ok(
       firstChain,
       `${method} returns the latest independently authorized article/future cutoff`,
@@ -298,7 +314,7 @@ test("ECDH and RSA chain-only delivery opens the cutoff item and excludes later 
     await assert.rejects(wrongOpener.open(firstChain, [], "chainKey"), { code: "unwrap_failed" });
 
     const tampered = JSON.parse(JSON.stringify(answer.body));
-    for (const wrapped of Object.values(tampered.keys.chainKeys.premium)) {
+    for (const { key: wrapped } of premiumChains(tampered)) {
       const bytes = base64urlDecode(wrapped.key);
       bytes[0] ^= 1;
       wrapped.key = base64urlEncode(bytes);
@@ -383,7 +399,7 @@ test("ECDH and RSA client-bound chain key opens an earlier item by derivation al
     const current = await source.render("123456", ARTICLE_A);
     const earlier = await source.render("earlier", ARTICLE_B, "2025-10-23T12:05:00Z");
     assert.deepEqual(
-      earlier.contentData.bodytext.keys.premium.map((entry) => entry.t),
+      wrapsOf(earlier, "bodytext", "premium").map((entry) => entry.period),
       ["251023T1200", "251023T1215"],
       method,
     );
@@ -394,9 +410,13 @@ test("ECDH and RSA client-bound chain key opens an earlier item by derivation al
     answer.body = JSON.parse(JSON.stringify(answer.body));
     assert.equal(answer.status, 200, method);
     assert.equal(answer.body.transport.method, method);
-    assert.deepEqual(answer.body.keys.contentKeys ?? {}, {}, method);
-    assert.deepEqual(answer.body.keys.periodKeys ?? {}, {}, method);
-    assert.deepEqual(Object.keys(answer.body.keys.chainKeys.premium), ["251023T1430"], method);
+    assert.deepEqual(answer.body.keys.contentKeys ?? [], [], method);
+    assert.deepEqual(answer.body.keys.periodKeys ?? [], [], method);
+    assert.deepEqual(
+      premiumChains(answer.body).map((record) => record.cutoff),
+      ["251023T1430"],
+      method,
+    );
     const applied = await client.applyResponse(page, ISSUER_NAME, answer.body, request);
     assert.deepEqual(applied.issues, [], method);
 

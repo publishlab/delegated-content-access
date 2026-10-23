@@ -43,13 +43,16 @@ test("the chain runner records sealed terminal artifacts, wire labels, and a rea
 
   assert.equal(trace.world.periodGrantKind, "chain-keys");
   assert.equal(trace.world.chainKeyStrategy, "retain");
-  assert.deepEqual(Object.keys(renderA.publisherSealedTerminalKeys.premium), [
-    "251023T2345",
-    "251024T1145",
-  ]);
+  const premium = renderA.publisherSealedTerminalKeys.filter(
+    (/** @type {any} */ record) => record.accessGroup === "premium",
+  );
+  assert.deepEqual(
+    premium.map((/** @type {any} */ record) => record.cutoff),
+    ["251023T2345", "251024T1145"],
+  );
   assert.ok(
-    Object.values(renderA.publisherSealedTerminalKeys.premium).every(
-      (blob) => typeof blob === "string" && blob.length > 0,
+    premium.every(
+      (/** @type {any} */ record) => typeof record.key === "string" && record.key.length > 0,
     ),
     "the publisher observation keeps its actual sealed terminal blobs",
   );

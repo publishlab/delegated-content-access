@@ -29,7 +29,7 @@
 //   e. decrypt each recorded ciphertext with the recovered contentKey
 //   f. compare each publisher-private input periodKey with the recovered bytes
 //   g. the cached path end to end: unseal a periodKey, trial-unwrap the
-//      contentKey out of `contentData[name].keys`, decrypt with it
+//      contentKey out of the item record's `keys`, decrypt with it
 //   h. a recorded blob opens with the binding alone, and a stated `kdf` is
 //      refused rather than read under a second construction
 //
@@ -100,7 +100,9 @@ import {
 } from "../core-shared--publisher-issuer/bind.js";
 import { decrypt } from "../core-shared/aead.js";
 import { contentAadOctets } from "../test-reference/support/contentAadOctets.js";
-import { isAccessGroup, isContentName } from "../core-shared/names.js";
+import { contentKeyWrapNonceOctets } from "../test-reference/support/contentKeyWrapNonceOctets.js";
+import { isAccessGroup, isContentName, isIssuerName } from "../core-shared/names.js";
+import { recordsByName } from "../core-shared--client-publisher/deliveryRecords.js";
 import { verify, decodeHeader, sign } from "../core-shared--publisher-issuer/jwt.js";
 import { decodeCompactJwt } from "../core-shared/compactJwt.js";
 import { base64urlDecode, base64urlEncode, utf8Encode, utf8Decode } from "../core-shared/codec.js";
@@ -209,6 +211,82 @@ function wireStrings(node, path = "") {
   if (typeof node === "string") return [[path, node]];
   if (node === null || typeof node !== "object") return [];
   return Object.entries(node).flatMap(([key, value]) => wireStrings(value, `${path}.${key}`));
+}
+
+/**
+ * One issuer's block of a delivery. `issuerData` is an array of records named
+ * by `issuerName`.
+ *
+ * @param {any} dcaData
+ * @param {string} issuerName
+ * @returns {any}
+ */
+function issuerBlock(dcaData, issuerName) {
+  return recordsByName(dcaData.issuerData, "issuerName", isIssuerName)?.get(issuerName);
+}
+
+/**
+ * One item record of a delivery. `contentData` is an array of records named by
+ * `contentName`.
+ *
+ * @param {any} dcaData
+ * @param {string} contentName
+ * @returns {any}
+ */
+function contentRecord(dcaData, contentName) {
+  return recordsByName(dcaData.contentData, "contentName", isContentName)?.get(contentName);
+}
+
+/** The identity fields of each key record kind, outermost first. */
+const KEY_RECORD_COORDINATES = {
+  contentKeys: ["contentName"],
+  periodKeys: ["accessGroup", "period"],
+  chainKeys: ["accessGroup", "cutoff"],
+};
+
+/**
+ * A sealed section or a response `keys` section, read from its record arrays
+ * into the nested shape the vectors' own `bindings`, `contentKeys` and
+ * `periodKeys` projections use: `{ contentKeys: { name: key }, periodKeys:
+ * { group: { period: key } } }`. Each render here seals one blob per
+ * coordinate, so a repeated coordinate fails the test rather than fold into
+ * one entry. Names are defined as own properties, so `__proto__` stays a name.
+ *
+ * @param {any} section
+ * @returns {any}
+ */
+function keysByCoordinate(section) {
+  /** @type {any} */
+  const nested = {};
+  for (const [kind, fields] of Object.entries(KEY_RECORD_COORDINATES)) {
+    if (section?.[kind] === undefined) continue;
+    nested[kind] = {};
+    for (const record of section[kind]) {
+      let level = nested[kind];
+      for (const field of fields.slice(0, -1)) {
+        if (!Object.hasOwn(level, record[field])) defineName(level, record[field], {});
+        level = level[record[field]];
+      }
+      const name = record[fields.at(-1)];
+      assert.ok(!Object.hasOwn(level, name), `${kind} repeats ${JSON.stringify(record)}`);
+      defineName(level, name, record.key);
+    }
+  }
+  return nested;
+}
+
+/**
+ * @param {any} target
+ * @param {string} name
+ * @param {unknown} value
+ */
+function defineName(target, name, value) {
+  Object.defineProperty(target, name, {
+    value,
+    enumerable: true,
+    writable: true,
+    configurable: true,
+  });
 }
 
 const fixtureVectors = FIXTURE_DIRS.flatMap((dir) => loadVectors(dir, FIXTURE_MANIFEST));
@@ -417,7 +495,7 @@ for (const { file, vector } of sealVectors) {
   test(`${file}: two seals of one input differ in nothing but the signature`, async () => {
     // The determinism the generator promises, run twice in one process
     // rather than trusted. A draw that leaked back into a render - a fresh
-    // ephemeral keypair, an unseeded nonce - shows up here as a diff
+    // ephemeral keypair, an unseeded render id - shows up here as a diff
     // outside the one segment that is allowed to move.
     const first = await (await buildSealer(vector.input)).seal();
     const second = await (await buildSealer(vector.input)).seal();
@@ -480,7 +558,9 @@ for (const { file, vector } of sealVectors) {
     // blobs that open nowhere, and every later failure looks like a tag
     // mismatch with nothing to say why.
     const renderId = resourceOf(vector.expected.dcaData).renderId;
-    const sealed = vector.expected.dcaData.issuerData[vector.input.issuers[0].issuerName].sealed;
+    const sealed = keysByCoordinate(
+      issuerBlock(vector.expected.dcaData, vector.input.issuers[0].issuerName).sealed,
+    );
 
     /** @type {any} */
     const rebuilt = { contentKeys: {}, periodKeys: {} };
@@ -515,7 +595,7 @@ for (const { file, vector } of sealVectors) {
     const [issuer] = vector.input.issuers;
     const privateKey = await importIssuerPrivateKey(issuer.privateKeyJwk);
     const renderId = resourceOf(vector.expected.dcaData).renderId;
-    const sealed = vector.expected.dcaData.issuerData[issuer.issuerName].sealed;
+    const sealed = keysByCoordinate(issuerBlock(vector.expected.dcaData, issuer.issuerName).sealed);
 
     /** A renderId of the right width that is not this render's. */
     const foreignRenderId = base64urlEncode(base64urlDecode(renderId).map((byte) => byte ^ 0xff));
@@ -589,7 +669,9 @@ for (const { file, vector } of sealVectors) {
     for (const issuer of vector.input.issuers) {
       const privateKey = await importIssuerPrivateKey(issuer.privateKeyJwk);
       const renderId = resourceOf(vector.expected.dcaData).renderId;
-      const sealed = vector.expected.dcaData.issuerData[issuer.issuerName].sealed.contentKeys;
+      const sealed = keysByCoordinate(
+        issuerBlock(vector.expected.dcaData, issuer.issuerName).sealed,
+      ).contentKeys;
 
       for (const [contentName, blob] of Object.entries(sealed)) {
         const contentKey = await unseal(
@@ -615,13 +697,15 @@ for (const { file, vector } of sealVectors) {
     const [issuer] = vector.input.issuers;
     const privateKey = await importIssuerPrivateKey(issuer.privateKeyJwk);
     const renderId = resourceOf(vector.expected.dcaData).renderId;
-    const sealed = vector.expected.dcaData.issuerData[issuer.issuerName].sealed.contentKeys;
+    const sealed = keysByCoordinate(
+      issuerBlock(vector.expected.dcaData, issuer.issuerName).sealed,
+    ).contentKeys;
 
     for (const item of vector.input.content) {
       const contentKey = await unseal(sealed[item.name], privateKey, issuer.algorithm, {
         binding: { renderId, contentName: item.name },
       });
-      const record = vector.expected.dcaData.contentData[item.name];
+      const record = contentRecord(vector.expected.dcaData, item.name);
       assert.equal(Object.hasOwn(record, "aad"), false, `${item.name}: the record carries no aad`);
       // The hand-built transcript, not the reference module, gives the AAD,
       // and the recorded projection a port checks its builder against agrees.
@@ -666,42 +750,50 @@ for (const { file, vector } of sealVectors) {
     const [issuer] = vector.input.issuers;
     const privateKey = await importIssuerPrivateKey(issuer.privateKeyJwk);
     const renderId = resourceOf(vector.expected.dcaData).renderId;
-    const sealedPeriodKeys =
-      vector.expected.dcaData.issuerData[issuer.issuerName].sealed.periodKeys;
+    const sealedPeriodKeys = keysByCoordinate(
+      issuerBlock(vector.expected.dcaData, issuer.issuerName).sealed,
+    ).periodKeys;
 
     for (const item of vector.input.content) {
-      const groups = vector.expected.dcaData.contentData[item.name].keys;
+      const entries = contentRecord(vector.expected.dcaData, item.name).keys;
 
-      for (const [accessGroup, entries] of Object.entries(/** @type {any} */ (groups))) {
-        for (const entry of /** @type {any[]} */ (entries)) {
-          const periodKey = await unseal(
-            sealedPeriodKeys[accessGroup][entry.t],
-            privateKey,
-            issuer.algorithm,
-            { binding: { renderId, accessGroup, t: entry.t } },
-          );
-          assert.equal(
-            base64urlEncode(periodKey),
-            vector.expected.periodKeys[accessGroup][entry.t],
-            "the sealed blob and the publisher-private input agree",
-          );
+      for (const entry of /** @type {any[]} */ (entries)) {
+        const { accessGroup, period } = entry;
+        const periodKey = await unseal(
+          sealedPeriodKeys[accessGroup][period],
+          privateKey,
+          issuer.algorithm,
+          { binding: { renderId, accessGroup, t: period } },
+        );
+        assert.equal(
+          base64urlEncode(periodKey),
+          vector.expected.periodKeys[accessGroup][period],
+          "the sealed blob and the publisher-private input agree",
+        );
 
-          // No AAD - the periodKey is already accessGroup-specific.
-          const contentKey = await decrypt(
-            periodKey,
-            base64urlDecode(entry.nonce),
-            base64urlDecode(entry.key),
-          );
-          assert.equal(base64urlEncode(contentKey), vector.expected.contentKeys[item.name]);
+        // No AAD - the periodKey is already accessGroup-specific. The entry
+        // carries its coordinate and no nonce: the wrap nonce derives from
+        // that coordinate.
+        assert.deepEqual(Object.keys(entry).sort(), ["accessGroup", "key", "period"]);
+        const contentKey = await decrypt(
+          periodKey,
+          contentKeyWrapNonceOctets({
+            renderId,
+            contentName: item.name,
+            accessGroup,
+            t: period,
+          }),
+          base64urlDecode(entry.key),
+        );
+        assert.equal(base64urlEncode(contentKey), vector.expected.contentKeys[item.name]);
 
-          const plaintext = await decrypt(
-            contentKey,
-            new Uint8Array(12),
-            base64urlDecode(vector.expected.sealedContent[item.name]),
-            contentAadOctets(vector.expected.dcaData, item.name),
-          );
-          assert.equal(utf8Decode(plaintext), item.value);
-        }
+        const plaintext = await decrypt(
+          contentKey,
+          new Uint8Array(12),
+          base64urlDecode(vector.expected.sealedContent[item.name]),
+          contentAadOctets(vector.expected.dcaData, item.name),
+        );
+        assert.equal(utf8Decode(plaintext), item.value);
       }
     }
   });
@@ -710,13 +802,19 @@ for (const { file, vector } of sealVectors) {
     // The two sides of the cached path are separate sections of the wire
     // and have to agree, or the client holds keys for periods no entry was
     // wrapped under.
-    const sealedPeriodKeys =
-      vector.expected.dcaData.issuerData[vector.input.issuers[0].issuerName].sealed.periodKeys;
+    const sealedPeriodKeys = keysByCoordinate(
+      issuerBlock(vector.expected.dcaData, vector.input.issuers[0].issuerName).sealed,
+    ).periodKeys;
 
-    for (const [contentName, record] of Object.entries(vector.expected.dcaData.contentData)) {
-      for (const [accessGroup, entries] of Object.entries(/** @type {any} */ (record).keys)) {
+    for (const { contentName, keys } of vector.expected.dcaData.contentData) {
+      /** @type {Map<string, string[]>} */
+      const periodsByGroup = new Map();
+      for (const { accessGroup, period } of keys) {
+        periodsByGroup.set(accessGroup, [...(periodsByGroup.get(accessGroup) ?? []), period]);
+      }
+      for (const [accessGroup, periods] of periodsByGroup) {
         assert.deepEqual(
-          /** @type {any[]} */ (entries).map((entry) => entry.t),
+          periods,
           Object.keys(sealedPeriodKeys[accessGroup]),
           `${contentName} under ${accessGroup}`,
         );
@@ -729,10 +827,11 @@ for (const { file, vector } of sealVectors) {
     // standard base64, produces strings that decode to the same bytes and
     // still fail every binding they enter, since the renderId is bound as
     // the string the wire carries.
+    // Records name their coordinate in identity fields beside `key`; the
+    // encoded values are the `key` fields.
     const encoded = wireStrings(vector.expected.dcaData.contentData)
-      .filter(([path]) => path.endsWith(".nonce") || path.endsWith(".key"))
       .concat(wireStrings(vector.expected.dcaData.issuerData))
-      .filter(([path]) => !path.endsWith(".unlockUrl") && !path.endsWith(".keyId"))
+      .filter(([path]) => path.endsWith(".key"))
       .concat(wireStrings(vector.expected.sealedContent))
       .concat(wireStrings(vector.expected.contentKeys))
       .concat(wireStrings(vector.expected.periodKeys))
@@ -749,7 +848,9 @@ for (const { file, vector } of sealVectors) {
     // ephemeral keypair the vector supplies is the one that reached the
     // wire, so a fresh generateKey slipping back in fails here.
     for (const ephemeral of vector.input.ephemeralKeys) {
-      const sealed = vector.expected.dcaData.issuerData[ephemeral.issuerName].sealed;
+      const sealed = keysByCoordinate(
+        issuerBlock(vector.expected.dcaData, ephemeral.issuerName).sealed,
+      );
       const blob = base64urlDecode(
         ephemeral.contentName === undefined
           ? sealed[ephemeral.chainKey === true ? "chainKeys" : "periodKeys"][ephemeral.accessGroup][
@@ -782,7 +883,9 @@ test("a recorded blob opens on the binding alone, and a stated kdf is refused", 
 
     const privateKey = await importIssuerPrivateKey(issuer.privateKeyJwk);
     const renderId = resourceOf(vector.expected.dcaData).renderId;
-    const sealed = vector.expected.dcaData.issuerData[issuer.issuerName].sealed.contentKeys;
+    const sealed = keysByCoordinate(
+      issuerBlock(vector.expected.dcaData, issuer.issuerName).sealed,
+    ).contentKeys;
 
     for (const [contentName, blob] of Object.entries(sealed)) {
       assert.equal(
@@ -885,25 +988,36 @@ describe("the refusals", () => {
   }
 
   /**
-   * What one response actually handed over, by the same coordinate names.
+   * What one response actually handed over, by the same coordinate names, one
+   * entry per response record. A coordinate answered twice appears twice, so
+   * it cannot pass as the one recorded coordinate.
    *
    * @param {any} body
-   * @returns {Map<string, string>}
+   * @returns {[string, string][]}
    */
   function answeredKeys(body) {
-    /** @type {Map<string, string>} */
-    const answered = new Map();
+    /** @type {[string, string][]} */
+    const answered = [];
     const keys = body?.keys ?? {};
 
-    for (const [contentName, value] of Object.entries(keys.contentKeys ?? {})) {
-      answered.set(`contentKeys.${contentName}`, /** @type {string} */ (value));
+    for (const { contentName, key } of keys.contentKeys ?? []) {
+      answered.push([`contentKeys.${contentName}`, key]);
     }
-    for (const [accessGroup, periods] of Object.entries(keys.periodKeys ?? {})) {
-      for (const [t, value] of Object.entries(/** @type {any} */ (periods))) {
-        answered.set(`periodKeys.${accessGroup}.${t}`, /** @type {string} */ (value));
-      }
+    for (const { accessGroup, period, key } of keys.periodKeys ?? []) {
+      answered.push([`periodKeys.${accessGroup}.${period}`, key]);
     }
     return answered;
+  }
+
+  /**
+   * The coordinates one response reported as failed, one entry per error
+   * record.
+   *
+   * @param {any} body
+   * @returns {string[]}
+   */
+  function failedCoordinates(body) {
+    return (body?.errors ?? []).map((/** @type {any} */ record) => record.coordinate);
   }
 
   for (const { file, vector } of rejectVectors) {
@@ -947,7 +1061,11 @@ describe("the refusals", () => {
       const answered = answeredKeys(body);
       const renderKeys = keysOf(baseOf(vector));
 
-      assert.deepEqual([...answered.keys()].sort(), [...granted].sort(), `${file}: what came back`);
+      assert.deepEqual(
+        answered.map(([coordinate]) => coordinate).sort(),
+        [...granted].sort(),
+        `${file}: what came back`,
+      );
       for (const [coordinate, value] of answered) {
         assert.equal(
           value,
@@ -965,14 +1083,18 @@ describe("the refusals", () => {
       }
 
       // Exactly the recorded coordinates fail, under the recorded codes.
-      const errors = body.errors ?? {};
+      const errors = body.errors ?? [];
       assert.deepEqual(
-        Object.keys(errors).sort(),
+        failedCoordinates(body).sort(),
         Object.keys(vector.expected.errors).sort(),
         `${file}: what failed per item`,
       );
       for (const [coordinate, code] of Object.entries(vector.expected.errors)) {
-        assert.equal(errors[coordinate]?.error, code, `${coordinate} failed with ${code}`);
+        assert.equal(
+          errors.find((/** @type {any} */ record) => record.coordinate === coordinate)?.error,
+          code,
+          `${coordinate} failed with ${code}`,
+        );
       }
 
       // How far the refusal got. An integrity failure is answered before the
@@ -1002,7 +1124,9 @@ describe("the refusals", () => {
 
       assert.equal(body.error, vector.expected.code ?? undefined);
       assert.deepEqual(
-        [...answeredKeys(body).keys()].sort(),
+        answeredKeys(body)
+          .map(([coordinate]) => coordinate)
+          .sort(),
         [...grantedCoordinates(vector.expected)].sort(),
       );
     });
@@ -1018,7 +1142,7 @@ describe("the refusals", () => {
       }).buildRequest(
         structuredClone(base.expected.dcaData),
         vector.issuer.issuerName,
-        Object.keys(base.expected.dcaData.contentData),
+        base.expected.dcaData.contentData.map((/** @type {any} */ record) => record.contentName),
       );
       const response = await unlockThroughAdmission(processor, endpoint, honest, registration);
 
@@ -1028,7 +1152,7 @@ describe("the refusals", () => {
         "the key material in this vector opens the render it was cut from",
       );
       assert.deepEqual(
-        /** @type {any} */ (response.body).keys.contentKeys,
+        keysByCoordinate(/** @type {any} */ (response.body).keys).contentKeys,
         base.expected.contentKeys,
         "and the keys it hands back are the render's own",
       );
@@ -1048,8 +1172,10 @@ describe("the refusals", () => {
 
     const base = baseOf(vector);
     const parsed = JSON.parse(/** @type {string} */ (vector.rawBody));
-    const arrived = parsed.sealed.contentKeys;
-    const sealed = base.expected.dcaData.issuerData[vector.issuer.issuerName].sealed.contentKeys;
+    const arrived = keysByCoordinate(parsed.sealed).contentKeys;
+    const sealed = keysByCoordinate(
+      issuerBlock(base.expected.dcaData, vector.issuer.issuerName).sealed,
+    ).contentKeys;
 
     // The swap, spelled out against the render: each name carries the other's
     // blob, byte for byte, so nothing was forged and nothing was edited.
@@ -1086,10 +1212,12 @@ describe("the refusals", () => {
 
     const base = baseOf(vector);
     const parsed = JSON.parse(/** @type {string} */ (vector.rawBody));
+    const arrived = keysByCoordinate(parsed.sealed).contentKeys;
     const mine = base64urlDecode(
-      base.expected.dcaData.issuerData[vector.issuer.issuerName].sealed.contentKeys.bodytext,
+      keysByCoordinate(issuerBlock(base.expected.dcaData, vector.issuer.issuerName).sealed)
+        .contentKeys.bodytext,
     );
-    const theirs = base64urlDecode(parsed.sealed.contentKeys.bodytext);
+    const theirs = base64urlDecode(arrived.bodytext);
 
     // Both renders were sealed with the same ephemeral keypair fixture, so the
     // issuer derives the same AES key from either blob's own point. What is
@@ -1113,20 +1241,15 @@ describe("the refusals", () => {
 
     assert.equal(
       base64urlEncode(
-        await unseal(
-          parsed.sealed.contentKeys["locked-data"],
-          privateKey,
-          vector.issuer.algorithm,
-          {
-            binding: { renderId, contentName: "locked-data" },
-          },
-        ),
+        await unseal(arrived["locked-data"], privateKey, vector.issuer.algorithm, {
+          binding: { renderId, contentName: "locked-data" },
+        }),
       ),
       base.expected.contentKeys["locked-data"],
     );
     await refuses(
       () =>
-        unseal(parsed.sealed.contentKeys.bodytext, privateKey, vector.issuer.algorithm, {
+        unseal(arrived.bodytext, privateKey, vector.issuer.algorithm, {
           binding: { renderId, contentName: "bodytext" },
         }),
       "unseal_failed",
@@ -1168,7 +1291,7 @@ describe("the refusals", () => {
     );
     assert.deepEqual(
       parsed.sealed.contentKeys,
-      base.expected.dcaData.issuerData[vector.issuer.issuerName].sealed.contentKeys,
+      issuerBlock(base.expected.dcaData, vector.issuer.issuerName).sealed.contentKeys,
     );
   });
 
@@ -1236,7 +1359,7 @@ describe("the refusals", () => {
     );
     assert.deepEqual(
       parsed.sealed,
-      base.expected.dcaData.issuerData[vector.issuer.issuerName].sealed,
+      issuerBlock(base.expected.dcaData, vector.issuer.issuerName).sealed,
       "and the blobs are the render's own, so an issuer that reads the claim answers with every key",
     );
   }
@@ -1279,7 +1402,7 @@ describe("the refusals", () => {
 
     assert.deepEqual(
       parsed.sealed,
-      base.expected.dcaData.issuerData[vector.issuer.issuerName].sealed,
+      issuerBlock(base.expected.dcaData, vector.issuer.issuerName).sealed,
     );
   });
 
@@ -1367,7 +1490,7 @@ describe("the refusals", () => {
     // vector exists to force.
     assert.deepEqual(
       parsed.sealed,
-      base.expected.dcaData.issuerData[vector.issuer.issuerName].sealed,
+      issuerBlock(base.expected.dcaData, vector.issuer.issuerName).sealed,
     );
   });
 
@@ -1650,8 +1773,11 @@ describe("the refusals", () => {
 
     return (
       body.error === (vector.expected.code ?? undefined) &&
-      same([...answeredKeys(body).keys()], [...grantedCoordinates(vector.expected)]) &&
-      same(Object.keys(body.errors ?? {}), Object.keys(vector.expected.errors))
+      same(
+        answeredKeys(body).map(([coordinate]) => coordinate),
+        [...grantedCoordinates(vector.expected)],
+      ) &&
+      same(failedCoordinates(body), Object.keys(vector.expected.errors))
     );
   }
 
@@ -1722,7 +1848,7 @@ describe("the refusals", () => {
       // issuer that accepts the header hands over every key of the render.
       assert.deepEqual(
         parsed.sealed,
-        base.expected.dcaData.issuerData[vector.issuer.issuerName].sealed,
+        issuerBlock(base.expected.dcaData, vector.issuer.issuerName).sealed,
       );
     }
   });
@@ -1831,17 +1957,29 @@ describe("the refusals", () => {
     assert.ok(found, "the duplicate-member vector is present");
     const { vector } = found;
 
+    // The witness is one record, `$.sealed.contentKeys[0]`, that names
+    // bodytext once and writes its `key` member twice. It is not two rival
+    // records: the string names one contentName.
     const raw = /** @type {string} */ (vector.rawBody);
-    const occurrences = [...raw.matchAll(/"bodytext": "([^"]+)"/g)].map((match) => match[1]);
+    assert.equal([...raw.matchAll(/"contentName":/g)].length, 1, "one record names an item");
+    const record = raw.match(/\{"contentName":\s*"bodytext"((?:,\s*"key":\s*"[^"]+")+)\s*\}/);
+    assert.ok(record, "the bodytext record carries only key members after its name");
+    const occurrences = [...record[1].matchAll(/"key":\s*"([^"]+)"/g)].map((match) => match[1]);
     assert.equal(occurrences.length, 2, "the member name is written twice");
     assert.notEqual(occurrences[0], occurrences[1], "and the two members disagree");
 
     // What a parser does with it: one member, the last one. This is the fact
     // the whole vector turns on, executed rather than asserted in prose.
     const parsed = JSON.parse(raw);
-    const names = Object.keys(parsed.sealed.contentKeys);
-    assert.deepEqual(names, ["bodytext"], "a parsed object cannot hold the name twice");
-    assert.equal(parsed.sealed.contentKeys.bodytext, occurrences[1], "last wins");
+    assert.equal(parsed.sealed.contentKeys.length, 1, "one record, before and after the parse");
+    const [parsedRecord] = parsed.sealed.contentKeys;
+    assert.equal(parsedRecord.contentName, "bodytext");
+    assert.deepEqual(
+      Object.keys(parsedRecord),
+      ["contentName", "key"],
+      "a parsed object cannot hold the name twice",
+    );
+    assert.equal(parsedRecord.key, occurrences[1], "last wins");
 
     // The protocol permits rejecting duplicates or keeping the lexical-last
     // member. The first blob still demonstrates why a first-wins parser is
@@ -1931,8 +2069,8 @@ describe("the refusals", () => {
       const at = /** @type {any} */ (coordinate);
       const blob =
         at.contentName === undefined
-          ? parsed.sealed.periodKeys[at.accessGroup][at.t]
-          : parsed.sealed.contentKeys[at.contentName];
+          ? keysByCoordinate(parsed.sealed).periodKeys[at.accessGroup]?.[at.t]
+          : keysByCoordinate(parsed.sealed).contentKeys[at.contentName];
       assert.equal(typeof blob, "string", `${name} presents the delimited coordinate`);
 
       const options = { binding: { renderId, ...at } };
@@ -1957,7 +2095,7 @@ describe("the refusals", () => {
       const vector = rejectVector(fixture);
       assert.equal(isContentName(name), false, fixture);
       assert.equal(name.includes(BIND_DELIMITER), false, fixture);
-      assert.ok(Object.hasOwn(vector.parsed.sealed.contentKeys, name), fixture);
+      assert.ok(Object.hasOwn(keysByCoordinate(vector.parsed.sealed).contentKeys, name), fixture);
       assert.equal(vector.vector.expected.code, "binding_failed", fixture);
       assert.equal(vector.vector.expected.privateKeyReached, false, fixture);
     }
@@ -1970,8 +2108,10 @@ describe("the refusals", () => {
     // the grammar every name a publisher emits is written in, which is where
     // a coordinate two implementations read differently dies.
     const content = rejectVector("reject-identifier-contentname");
-    const sealed =
-      content.base.expected.dcaData.issuerData[content.vector.issuer.issuerName].sealed;
+    const sealed = keysByCoordinate(
+      issuerBlock(content.base.expected.dcaData, content.vector.issuer.issuerName).sealed,
+    );
+    const presented = keysByCoordinate(content.parsed.sealed);
 
     assert.equal(isContentName("bodytext"), true, "the render's own name is a name");
     assert.equal(isContentName(UNADMITTED_CONTENT_NAME), false, "a digit-initial one is not");
@@ -1981,7 +2121,7 @@ describe("the refusals", () => {
       "and there is no delimiter in it",
     );
     assert.equal(
-      content.parsed.sealed.contentKeys[UNADMITTED_CONTENT_NAME],
+      presented.contentKeys[UNADMITTED_CONTENT_NAME],
       sealed.contentKeys.bodytext,
       "the presented coordinate holds the render's own bodytext blob",
     );
@@ -1991,14 +2131,11 @@ describe("the refusals", () => {
       "and the render sealed nothing there",
     );
     for (const name of ["bodytext", "locked-data"]) {
-      assert.equal(
-        content.parsed.sealed.contentKeys[name],
-        sealed.contentKeys[name],
-        `${name} is untouched`,
-      );
+      assert.equal(presented.contentKeys[name], sealed.contentKeys[name], `${name} is untouched`);
     }
 
     const group = rejectVector("reject-identifier-accessgroup");
+    const presentedGroups = keysByCoordinate(group.parsed.sealed).periodKeys;
     assert.equal(isAccessGroup("premium:sport"), true, "the colon spelling of the pair is a name");
     assert.equal(isAccessGroup(UNADMITTED_ACCESS_GROUP), false, "the spaced spelling is not");
     assert.equal(
@@ -2007,14 +2144,15 @@ describe("the refusals", () => {
       "and there is no delimiter in it",
     );
     assert.deepEqual(
-      group.parsed.sealed.periodKeys[UNADMITTED_ACCESS_GROUP],
-      group.parsed.sealed.periodKeys.premium,
+      presentedGroups[UNADMITTED_ACCESS_GROUP],
+      presentedGroups.premium,
       "the presented family holds the render's own premium blobs",
     );
     assert.deepEqual(
-      group.base.expected.dcaData.issuerData[group.vector.issuer.issuerName].sealed.periodKeys
-        .premium,
-      group.parsed.sealed.periodKeys.premium,
+      keysByCoordinate(
+        issuerBlock(group.base.expected.dcaData, group.vector.issuer.issuerName).sealed,
+      ).periodKeys.premium,
+      presentedGroups.premium,
       "and the honest family beside it is untouched",
     );
   });
@@ -2024,8 +2162,8 @@ describe("the refusals", () => {
 
     assert.deepEqual(
       parsed.sealed,
-      { contentKeys: {} },
-      "an empty map, and no periodKeys section beside it",
+      { contentKeys: [] },
+      "an empty collection, and no periodKeys section beside it",
     );
 
     // The envelope is the publisher's, unedited and verifying, so what the
@@ -2053,11 +2191,14 @@ describe("the refusals", () => {
 
     // The two honest coordinates are the render's own, byte for byte, so
     // the added one is the whole of the attack.
-    const sealed = base.expected.dcaData.issuerData[vector.issuer.issuerName].sealed.contentKeys;
-    assert.equal(parsed.sealed.contentKeys.bodytext, sealed.bodytext);
-    assert.equal(parsed.sealed.contentKeys["locked-data"], sealed["locked-data"]);
+    const sealed = keysByCoordinate(
+      issuerBlock(base.expected.dcaData, vector.issuer.issuerName).sealed,
+    ).contentKeys;
+    const presented = keysByCoordinate(parsed.sealed).contentKeys;
+    assert.equal(presented.bodytext, sealed.bodytext);
+    assert.equal(presented["locked-data"], sealed["locked-data"]);
 
-    const blob = parsed.sealed.contentKeys[DELIMITED_CONTENT_NAME];
+    const blob = presented[DELIMITED_CONTENT_NAME];
     const binding = { renderId, contentName: DELIMITED_CONTENT_NAME };
     const options = { binding };
 
@@ -2111,16 +2252,16 @@ describe("the refusals", () => {
     // The honest families are untouched, and the render has no family by
     // the delimited name: the blob under the added period came from a
     // publisher that never ran the ban.
-    const sealed = base.expected.dcaData.issuerData[vector.issuer.issuerName].sealed.periodKeys;
+    const sealed = keysByCoordinate(
+      issuerBlock(base.expected.dcaData, vector.issuer.issuerName).sealed,
+    ).periodKeys;
+    const presented = keysByCoordinate(parsed.sealed).periodKeys;
     assert.deepEqual(Object.keys(base.expected.periodKeys).sort(), ["locked-data", "premium"]);
     for (const t of Object.keys(sealed[RESPLIT_ACCESS_GROUP])) {
-      assert.equal(
-        parsed.sealed.periodKeys[RESPLIT_ACCESS_GROUP][t],
-        sealed[RESPLIT_ACCESS_GROUP][t],
-      );
+      assert.equal(presented[RESPLIT_ACCESS_GROUP][t], sealed[RESPLIT_ACCESS_GROUP][t]);
     }
 
-    const blob = parsed.sealed.periodKeys[RESPLIT_ACCESS_GROUP][RESPLIT_PERIOD];
+    const blob = presented[RESPLIT_ACCESS_GROUP][RESPLIT_PERIOD];
     const sealedAt = { renderId, accessGroup: DELIMITED_ACCESS_GROUP, t: SEALED_PERIOD };
     const presentedAt = { renderId, accessGroup: RESPLIT_ACCESS_GROUP, t: RESPLIT_PERIOD };
     const options = { binding: presentedAt };
@@ -2184,22 +2325,28 @@ describe("the refusals", () => {
     const parsed = JSON.parse(/** @type {string} */ (vector.rawBody));
     const arrived = parsed.sealed.contentKeys;
 
-    // JSON.parse defines both as own properties and leaves the prototype
-    // alone, so nothing is polluted by reading the request in.
-    assert.equal(
-      Object.getPrototypeOf(arrived),
-      Object.prototype,
-      "the parse did not move the prototype",
-    );
+    // Each name arrives as the `contentName` value of its own record, and
+    // JSON.parse leaves every record's prototype alone, so nothing is
+    // polluted by reading the request in. The hazard waits for a reader that
+    // indexes the records by name.
+    /** @type {Record<string, string>} */
+    const blobs = {};
     for (const name of ["constructor", "__proto__"]) {
-      assert.ok(Object.hasOwn(arrived, name), `${name} arrived as an own property`);
-      assert.equal(typeof arrived[name], "string", `${name} carries a wire string`);
+      const named = arrived.filter((/** @type {any} */ record) => record.contentName === name);
+      assert.equal(named.length, 1, `${name} arrived as one record's contentName`);
+      assert.equal(
+        Object.getPrototypeOf(named[0]),
+        Object.prototype,
+        "the parse did not move the prototype",
+      );
+      assert.equal(typeof named[0].key, "string", `${name} carries a wire string`);
+      defineName(blobs, name, named[0].key);
     }
 
     // What the recorded answer is. `__proto__` is not letter-initial, so
-    // identifier admission refuses the map it arrived in and the whole
+    // identifier admission refuses the collection it arrived in and the whole
     // request comes back refused: no keys, no per-coordinate errors, and no
-    // response map for either name to be written into.
+    // response record for either name to be written into.
     assert.equal(
       vector.expected.code,
       "binding_failed",
@@ -2220,7 +2367,7 @@ describe("the refusals", () => {
     ]) {
       assert.equal(
         base64urlEncode(
-          await unseal(arrived[name], privateKey, vector.issuer.algorithm, {
+          await unseal(blobs[name], privateKey, vector.issuer.algorithm, {
             binding: { renderId, contentName: sealedAt },
           }),
         ),

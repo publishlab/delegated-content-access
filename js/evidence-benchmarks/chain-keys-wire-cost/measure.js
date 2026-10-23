@@ -13,7 +13,7 @@
 //           22, generic mode
 //
 // Raw counts repeat exactly on a rerun. Every sealed value has a fixed width
-// (a 109-octet ECDH-P256 carrier, a 256-octet RSA-OAEP carrier at 2048 bits, a
+// (a 97-octet ECDH-P256 carrier, a 256-octet RSA-OAEP carrier at 2048 bits, a
 // 64-octet ES256 signature), so the random bytes inside change nothing about
 // the length. Compressed counts do move: an ECDH ephemeral key, an RSA-OAEP
 // seal and an ES256 signature are fresh random bytes on every render, and a
@@ -96,19 +96,22 @@ export function normalizer(dcaData) {
   const replaced = new Map();
   const signature = String(dcaData.resourceJWT).split(".")[2];
   replaced.set(signature, replacement("resourceJWT.signature", signature));
-  for (const [issuerName, block] of Object.entries(dcaData.issuerData)) {
-    for (const [section, members] of Object.entries(/** @type {any} */ (block).sealed)) {
-      for (const [outer, inner] of Object.entries(/** @type {any} */ (members))) {
-        if (typeof inner === "string") {
-          replaced.set(inner, replacement(`${issuerName}/${section}/${outer}`, inner));
-          continue;
-        }
-        for (const [t, value] of Object.entries(/** @type {any} */ (inner))) {
-          replaced.set(
-            /** @type {string} */ (value),
-            replacement(`${issuerName}/${section}/${outer}/${t}`, /** @type {string} */ (value)),
-          );
-        }
+  const fields = {
+    contentKeys: ["contentName"],
+    periodKeys: ["accessGroup", "period"],
+    chainKeys: ["accessGroup", "cutoff"],
+  };
+  for (const { issuerName, sealed } of dcaData.issuerData) {
+    for (const [section, coordinates] of Object.entries(fields)) {
+      for (const record of sealed[section] ?? []) {
+        // Only carrier bytes are random. Names, periods and selectors stay
+        // exactly as authored, even though they are strings in these records.
+        const label = JSON.stringify([
+          issuerName,
+          section,
+          ...coordinates.map((field) => record[field]),
+        ]);
+        replaced.set(record.key, replacement(label, record.key));
       }
     }
   }

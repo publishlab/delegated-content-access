@@ -2,6 +2,7 @@
 
 import test, { describe } from "node:test";
 import assert from "node:assert/strict";
+import { execFileSync } from "node:child_process";
 
 import { BrowserUnlockHttp } from "../../adapter-issuer/BrowserUnlockHttp.js";
 import { parseBearerAuthorization } from "../../adapter-issuer/parseBearerAuthorization.js";
@@ -71,6 +72,86 @@ describe("BrowserUnlockHttp", () => {
     }
   });
 
+  test("media parameters reject malformed and repeated fields before admission", async () => {
+    for (const contentType of [
+      'application/json; charset="unterminated',
+      "application/json; charset=utf-8, application/json",
+      "application/json, application/json",
+      "application/json; charset=",
+      "application/json; charset =utf-8",
+      "application/json; charset= utf-8",
+      "application/json; stray",
+      'application/json; x="bad\rvalue"',
+      'application/json; x="bad\nvalue"',
+      'application/json; x="bad\x00value"',
+      'application/json; x="bad\x7fvalue"',
+      'application/json; x="bad\u0100value"',
+      "\napplication/json",
+      "application/json\n",
+      ["application/json", "application/json"],
+    ]) {
+      const { adapter, calls } = fixture();
+      const response = await adapter.handle({
+        method: "POST",
+        origin: REGISTERED,
+        contentType,
+        body: "not JSON",
+      });
+      assert.equal(response.status, 415, JSON.stringify(contentType));
+      assert.equal(response.headers["access-control-allow-origin"], undefined);
+      assert.deepEqual(calls, [], "media refusal precedes admission and unlock");
+    }
+    for (const contentType of [
+      " \tAPPLICATION/JSON\t ",
+      'application/json; charset="utf-8"',
+      'application/json; x="a,b;c"; charset=utf-8',
+      'application/json; x=""',
+      'application/json; x="a\\"b\\\\c"',
+      'application/json; x="\t\x80\xff"',
+      "application/json; ; charset=utf-8;",
+    ]) {
+      const { adapter, calls } = fixture();
+      const response = await adapter.handle({
+        method: "POST",
+        origin: REGISTERED,
+        contentType,
+        body: {},
+      });
+      assert.equal(response.status, 200, JSON.stringify(contentType));
+      assert.deepEqual(
+        calls.map(([name]) => name),
+        ["admit", "unlock"],
+      );
+    }
+  });
+
+  test("long malformed empty parameter runs are refused without backtracking", () => {
+    const moduleUrl = new URL("../../adapter-issuer/BrowserUnlockHttp.js", import.meta.url).href;
+    // A child timeout can interrupt a synchronous parser stall; a test timer in
+    // the same event loop cannot. The real adapter must refuse before callbacks.
+    execFileSync(
+      process.execPath,
+      [
+        "--input-type=module",
+        "-e",
+        `
+      import assert from "node:assert/strict";
+      import { BrowserUnlockHttp } from ${JSON.stringify(moduleUrl)};
+      const adapter = new BrowserUnlockHttp({
+        originAdmission: { preflight: () => true, admit() { throw new Error("admission reached"); } },
+        unlock() { throw new Error("unlock reached"); },
+      });
+      const response = await adapter.handle({
+        method: "POST", origin: "https://publisher.example",
+        contentType: "application/json" + ";     ".repeat(10000) + "@", body: {},
+      });
+      assert.equal(response.status, 415);
+    `,
+      ],
+      { timeout: 5000, stdio: "pipe" },
+    );
+  });
+
   test("bearer parsing accepts its consumer grammar and rejects extra syntax", () => {
     assert.equal(parseBearerAuthorization("bearer  abc+/=="), "abc+/==");
     assert.equal(parseBearerAuthorization("BEARER token"), "token");
@@ -106,7 +187,7 @@ describe("BrowserUnlockHttp", () => {
       },
       unlock(_body, context) {
         calls.push(context.authorization);
-        return { status: 200, body: { keys: { contentKeys: {} } } };
+        return { status: 200, body: { keys: { contentKeys: [] } } };
       },
     });
     const preflight = await adapter.handle({ method: "OPTIONS", origin: REGISTERED });

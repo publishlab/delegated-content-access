@@ -3,9 +3,9 @@
 // Opens an ECDH P-256 envelope the way an issuer does, so a test can check
 // which key a render sealed at a coordinate. The construction is the one in
 // docs/spec--sealed-key-envelopes.md, section 4. The first 65 bytes are the
-// ephemeral public point, the next 12 are the nonce, and the rest is the
+// ephemeral public point, and the rest is the
 // sealed key and its tag. The 32-byte ECDH x-coordinate is the AES-256-GCM key
-// with no KDF, and the BIND string is the additional data.
+// with no KDF, twelve zero nonce bytes, and the BIND string as additional data.
 //
 // This uses only Node's Buffer and WebCrypto, not
 // `core-shared--publisher-issuer/keySealing.js`. An assertion helper is test
@@ -32,6 +32,7 @@ const ECDH_P256 = { name: "ECDH", namedCurve: "P-256" };
  */
 export async function openEcdhEnvelope(envelope, bind, privateKeyPem) {
   const bytes = new Uint8Array(Buffer.from(envelope, "base64url"));
+  assert.equal(bytes.length, 97, "ordinary ECDH envelope: point65 + ciphertext32");
   const der = Buffer.from(
     privateKeyPem.replace(/-----(BEGIN|END) PRIVATE KEY-----/g, "").replace(/\s+/g, ""),
     "base64",
@@ -46,11 +47,11 @@ export async function openEcdhEnvelope(envelope, bind, privateKeyPem) {
     opened = await subtle.decrypt(
       {
         name: "AES-GCM",
-        iv: bytes.subarray(POINT_BYTES, POINT_BYTES + NONCE_BYTES),
+        iv: new Uint8Array(NONCE_BYTES),
         additionalData: new TextEncoder().encode(bind),
       },
       key,
-      bytes.subarray(POINT_BYTES + NONCE_BYTES),
+      bytes.subarray(POINT_BYTES),
     );
   } catch {
     assert.fail(`the envelope does not open at ${bind} under the issuer's private key`);

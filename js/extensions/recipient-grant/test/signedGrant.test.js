@@ -379,7 +379,7 @@ test("same publisher token opens through two independently trusted provisioned r
         grantReference: token,
         fetch: async (_url, init) => {
           const request = JSON.parse(init.body);
-          request.sealed.contentKeys = {};
+          request.sealed.contentKeys = [];
           const result = await browser.handle({
             method: "POST",
             contentType: "application/json",
@@ -398,7 +398,12 @@ test("same publisher token opens through two independently trusted provisioned r
         method: "POST",
         contentType: "application/json",
         origin: ORIGIN,
-        body: JSON.stringify({ ...admittedRequest, sealed: { periodKeys: {} } }),
+        // The admitted content-key supply plus an empty period-key section:
+        // the section's presence alone is what this grant refuses.
+        body: JSON.stringify({
+          ...admittedRequest,
+          sealed: { ...admittedRequest.sealed, periodKeys: [] },
+        }),
         authorization: `Bearer ${token}`,
         hostContext: { registration, capturedAtMs: NOW },
       });

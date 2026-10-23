@@ -51,6 +51,8 @@ import {
 import { Clock } from "../../../demo/actors/Clock.js";
 import { Random } from "../../../demo/actors/Random.js";
 import { wholeRenderIssuerSupplyPlan } from "../../../core-publisher/issuerSupplyPlan.js";
+import { issuerBlockOf, periodsOn, wrapGroupsOn } from "../../../test-lib/helpers/inspect.js";
+import { periodKeyMap } from "../../../test-reference/support/namedRecords.js";
 
 const { subtle } = globalThis.crypto;
 
@@ -710,10 +712,10 @@ describe("A base publisher on the period-key adapter alone", () => {
     const vector = recorded("c1");
     const generation = generationFor(vector);
     const { page, unlock } = await baseWorld(generation);
-    const sealed = page.issuerData[ISSUER_NAME].sealed;
+    const sealed = issuerBlockOf(page, ISSUER_NAME).sealed;
 
     assert.deepEqual(
-      Object.keys(sealed.periodKeys.premium),
+      Object.keys(periodKeyMap(sealed.periodKeys).premium),
       ["251023T1415", "251023T1430"],
       "the render ships the base periods of a fifteen-minute publisher, in the profile label form",
     );
@@ -731,7 +733,7 @@ describe("A base publisher on the period-key adapter alone", () => {
     const answer = await unlock(request);
     assert.equal(answer.status, 200);
     assert.equal(answer.body.keys.chainKeys, undefined);
-    assert.deepEqual(Object.keys(answer.body.keys.periodKeys.premium), [
+    assert.deepEqual(Object.keys(periodKeyMap(answer.body.keys.periodKeys).premium), [
       "251023T1415",
       "251023T1430",
     ]);
@@ -919,13 +921,13 @@ describe("A base publisher on two period-key adapters, one per family", () => {
     const planned = ["251023T1415", "251023T1430"];
     for (const item of items) {
       assert.deepEqual(
-        Object.keys(page.contentData[item.name].keys),
+        wrapGroupsOn(page, item.name),
         item.accessGroups,
         `${item.name}: wrapped under the groups it named`,
       );
       for (const accessGroup of item.accessGroups) {
         assert.deepEqual(
-          page.contentData[item.name].keys[accessGroup].map((/** @type {any} */ entry) => entry.t),
+          periodsOn(page, item.name, accessGroup),
           planned,
           `${item.name}/${accessGroup}: one wrap per planned coordinate`,
         );

@@ -17,6 +17,8 @@ import { ChainKeyCache } from "../core-client/ChainKeyCache.js";
 import { ChainKeyRequestBuilder } from "../core-client/ChainKeyRequestBuilder.js";
 import { chainKeyIssuerEngine } from "../core-issuer/chainKeyIssuerEngine.js";
 import { referenceChainKeyProfile } from "../referenceProfile.js";
+import { issuerBlockOf } from "../../../test-lib/helpers/inspect.js";
+import { periodKeyMap } from "../../../test-reference/support/namedRecords.js";
 import {
   candidatesOffered,
   chainBrowser,
@@ -110,14 +112,20 @@ test("optimized T1-only ordinary source serves chain and explicit T1 grants from
   const browser = chainBrowser(world);
   const oldPage = await world.render("A");
   assert.deepEqual(coordinatesOf(oldPage), [T0, "251023T2345", T1]);
-  assert.equal(Object.hasOwn(oldPage.asJson().issuerData[ISSUER_NAME].sealed, "chainKeys"), false);
+  assert.equal(
+    Object.hasOwn(issuerBlockOf(oldPage.asJson(), ISSUER_NAME).sealed, "chainKeys"),
+    false,
+  );
   const oldLoad = browser.load(rootFromPage(oldPage));
   assert.deepEqual(await oldLoad.resolve([CONTENT_NAME]), { covered: [], missing: [CONTENT_NAME] });
   const oldExchange = await exchangesPosted(world.network, () =>
     oldLoad.unlock({ issuerName: ISSUER_NAME }),
   );
   assert.equal(oldExchange.result.ok, true, JSON.stringify(oldExchange.exchanges));
-  assert.deepEqual(Object.keys(oldExchange.exchanges[0].body.keys.periodKeys[ACCESS_GROUP]), [T0]);
+  assert.deepEqual(
+    Object.keys(periodKeyMap(oldExchange.exchanges[0].body.keys.periodKeys)[ACCESS_GROUP]),
+    [T0],
+  );
   assert.match(utf8Decode((await oldLoad.open(CONTENT_NAME)).bytes), /rezone the harbour/);
 
   const generation = chainGeneration(17);
@@ -126,10 +134,16 @@ test("optimized T1-only ordinary source serves chain and explicit T1 grants from
   const savedPage = await world.render("B");
   const data = savedPage.asJson();
   assert.deepEqual(coordinatesOf(savedPage), [T0, "251023T2345", T1]);
-  assert.deepEqual(Object.keys(data.issuerData[ISSUER_NAME].sealed.periodKeys[ACCESS_GROUP]), [T1]);
-  assert.deepEqual(Object.keys(data.issuerData[ISSUER_NAME].sealed.chainKeys[ACCESS_GROUP]), [
-    "251023T2345",
-  ]);
+  assert.deepEqual(
+    Object.keys(periodKeyMap(issuerBlockOf(data, ISSUER_NAME).sealed.periodKeys)[ACCESS_GROUP]),
+    [T1],
+  );
+  assert.deepEqual(
+    Object.keys(
+      periodKeyMap(issuerBlockOf(data, ISSUER_NAME).sealed.chainKeys, "cutoff")[ACCESS_GROUP],
+    ),
+    ["251023T2345"],
+  );
   assert.deepEqual(data.periodGeometry, GEOMETRY);
 
   // The optimized article supports an explicit ordinary T1 decision even
@@ -142,13 +156,20 @@ test("optimized T1-only ordinary source serves chain and explicit T1 grants from
     nextLoad.unlock({ issuerName: ISSUER_NAME }),
   );
   assert.equal(nextExchange.result.ok, true, JSON.stringify(nextExchange.exchanges));
-  assert.deepEqual(Object.keys(nextExchange.exchanges[0].request.sealed.periodKeys[ACCESS_GROUP]), [
-    T1,
-  ]);
-  assert.deepEqual(Object.keys(nextExchange.exchanges[0].request.sealed.chainKeys[ACCESS_GROUP]), [
-    "251023T2345",
-  ]);
-  assert.deepEqual(Object.keys(nextExchange.exchanges[0].body.keys.periodKeys[ACCESS_GROUP]), [T1]);
+  assert.deepEqual(
+    Object.keys(periodKeyMap(nextExchange.exchanges[0].request.sealed.periodKeys)[ACCESS_GROUP]),
+    [T1],
+  );
+  assert.deepEqual(
+    Object.keys(
+      periodKeyMap(nextExchange.exchanges[0].request.sealed.chainKeys, "cutoff")[ACCESS_GROUP],
+    ),
+    ["251023T2345"],
+  );
+  assert.deepEqual(
+    Object.keys(periodKeyMap(nextExchange.exchanges[0].body.keys.periodKeys)[ACCESS_GROUP]),
+    [T1],
+  );
   assert.match(utf8Decode((await nextLoad.open(CONTENT_NAME)).bytes), /second reading/);
 
   // Issuer later selects its chain input for the identical saved article.
@@ -168,9 +189,12 @@ test("optimized T1-only ordinary source serves chain and explicit T1 grants from
     activeLoad.unlock({ issuerName: ISSUER_NAME }),
   );
   assert.equal(chainExchange.result.ok, true, JSON.stringify(chainExchange.exchanges));
-  assert.deepEqual(Object.keys(chainExchange.exchanges[0].body.keys.chainKeys[ACCESS_GROUP]), [
-    "251023T2345",
-  ]);
+  assert.deepEqual(
+    Object.keys(
+      periodKeyMap(chainExchange.exchanges[0].body.keys.chainKeys, "cutoff")[ACCESS_GROUP],
+    ),
+    ["251023T2345"],
+  );
   assert.match(utf8Decode((await activeLoad.open(CONTENT_NAME)).bytes), /second reading/);
   assert.match(
     utf8Decode((await browser.load(rootFromPage(oldPage)).open(CONTENT_NAME)).bytes),
@@ -199,8 +223,8 @@ test("optimized T1-only ordinary source serves chain and explicit T1 grants from
     JSON.stringify({ result: unavailable.result, exchanges: unavailable.exchanges }),
   );
   assert.equal(unavailable.result.ok, false);
-  assert.deepEqual(unavailable.exchanges[0].body.keys.periodKeys ?? {}, {});
-  assert.deepEqual(unavailable.exchanges[0].body.keys.chainKeys ?? {}, {});
+  assert.deepEqual(unavailable.exchanges[0].body.keys.periodKeys ?? [], []);
+  assert.deepEqual(unavailable.exchanges[0].body.keys.chainKeys ?? [], []);
 
   // The same chain-capable issuer can choose an explicit ordinary grant for
   // T1; its enabled chain input has not disabled its period-key route.
@@ -212,9 +236,12 @@ test("optimized T1-only ordinary source serves chain and explicit T1 grants from
     ordinaryAtT1.unlock({ issuerName: ISSUER_NAME }),
   );
   assert.equal(later.result.ok, true, JSON.stringify(later.exchanges));
-  assert.deepEqual(Object.keys(later.exchanges[0].body.keys.periodKeys[ACCESS_GROUP]), [T1]);
+  assert.deepEqual(
+    Object.keys(periodKeyMap(later.exchanges[0].body.keys.periodKeys)[ACCESS_GROUP]),
+    [T1],
+  );
   assert.equal(
-    later.exchanges[0].body.keys.periodKeys[ACCESS_GROUP][T1],
+    periodKeyMap(later.exchanges[0].body.keys.periodKeys)[ACCESS_GROUP][T1],
     base64urlEncode(await generation.periodKey(ACCESS_GROUP, T1)),
   );
   assert.match(utf8Decode((await ordinaryAtT1.open(CONTENT_NAME)).bytes), /second reading/);
@@ -274,7 +301,7 @@ test("a granted T+6 cutoff cannot open a T+7-only article in the same stationary
     load7.unlock({ issuerName: ISSUER_NAME }),
   );
   assert.equal(refused.result.ok, false);
-  assert.deepEqual(refused.exchanges[0].body.keys?.chainKeys ?? {}, {});
+  assert.deepEqual(refused.exchanges[0].body.keys?.chainKeys ?? [], []);
 });
 
 test("full dual supply preserves an ordinary relay before the issuer selects chain grants on the saved article", async () => {
@@ -325,9 +352,15 @@ test("full dual supply preserves an ordinary relay before the issuer selects cha
   active = true;
   world.publisher.rotatePeriodKeySupply(chainSupply(generation, 1, 3));
   const savedPage = await world.render("B");
-  const sealed = savedPage.asJson().issuerData[ISSUER_NAME].sealed;
-  assert.deepEqual(Object.keys(sealed.periodKeys[ACCESS_GROUP]), [T0, "251023T2345", T1]);
-  assert.deepEqual(Object.keys(sealed.chainKeys[ACCESS_GROUP]), ["251023T2345"]);
+  const sealed = issuerBlockOf(savedPage.asJson(), ISSUER_NAME).sealed;
+  assert.deepEqual(Object.keys(periodKeyMap(sealed.periodKeys)[ACCESS_GROUP]), [
+    T0,
+    "251023T2345",
+    T1,
+  ]);
+  assert.deepEqual(Object.keys(periodKeyMap(sealed.chainKeys, "cutoff")[ACCESS_GROUP]), [
+    "251023T2345",
+  ]);
   const newT0 = await generation.periodKey(ACCESS_GROUP, T0);
   assert.equal(
     (await oldT0).some((key) => sameBytes(key, newT0)),
@@ -345,7 +378,10 @@ test("full dual supply preserves an ordinary relay before the issuer selects cha
   );
   assert.equal(ordinary.result.ok, true);
   assert.equal(Object.hasOwn(ordinary.exchanges[0].request.sealed, "chainKeys"), false);
-  assert.deepEqual(Object.keys(ordinary.exchanges[0].body.keys.periodKeys[ACCESS_GROUP]), [T0]);
+  assert.deepEqual(
+    Object.keys(periodKeyMap(ordinary.exchanges[0].body.keys.periodKeys)[ACCESS_GROUP]),
+    [T0],
+  );
   assert.match(utf8Decode((await ordinaryLoad.open(CONTENT_NAME)).bytes), /second reading/);
   assert.match(
     utf8Decode((await ordinaryBrowser.load(rootFromPage(oldPage)).open(CONTENT_NAME)).bytes),
@@ -382,12 +418,14 @@ test("full dual supply preserves an ordinary relay before the issuer selects cha
     capable.unlock({ issuerName: ISSUER_NAME }),
   );
   assert.equal(chain.result.ok, true);
-  assert.deepEqual(Object.keys(chain.exchanges[0].request.sealed.chainKeys[ACCESS_GROUP]), [
-    "251023T2345",
-  ]);
-  assert.deepEqual(Object.keys(chain.exchanges[0].body.keys.chainKeys[ACCESS_GROUP]), [
-    "251023T2345",
-  ]);
+  assert.deepEqual(
+    Object.keys(periodKeyMap(chain.exchanges[0].request.sealed.chainKeys, "cutoff")[ACCESS_GROUP]),
+    ["251023T2345"],
+  );
+  assert.deepEqual(
+    Object.keys(periodKeyMap(chain.exchanges[0].body.keys.chainKeys, "cutoff")[ACCESS_GROUP]),
+    ["251023T2345"],
+  );
   assert.match(utf8Decode((await capable.open(CONTENT_NAME)).bytes), /second reading/);
   // The two engines operate on the identical signed article and registration.
   // The first consumes the ordinary serialized request without chain input;
@@ -402,7 +440,7 @@ test("full dual supply preserves an ordinary relay before the issuer selects cha
       }),
     },
   }).unlock(baseRequest, world.publisherRegistration);
-  assert.equal(baseResult.periodKeys[ACCESS_GROUP][T0], base64urlEncode(newT0));
+  assert.equal(periodKeyMap(baseResult.periodKeys)[ACCESS_GROUP][T0], base64urlEncode(newT0));
   const chainRequest = parseDcaRequest(JSON.stringify(chain.exchanges[0].request));
   const chainResult = await chainKeyIssuerEngine({
     operatingIssuerNames: [ISSUER_NAME],
@@ -418,7 +456,7 @@ test("full dual supply preserves an ordinary relay before the issuer selects cha
       }),
     },
   }).unlock(chainRequest, world.publisherRegistration);
-  assert.equal(chainResult.periodKeys[ACCESS_GROUP][T0], base64urlEncode(newT0));
+  assert.equal(periodKeyMap(chainResult.periodKeys)[ACCESS_GROUP][T0], base64urlEncode(newT0));
   assert.deepEqual(await ordinaryBrowser.load(rootFromPage(savedPage)).resolve([CONTENT_NAME]), {
     covered: [CONTENT_NAME],
     missing: [],

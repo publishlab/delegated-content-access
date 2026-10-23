@@ -13,6 +13,43 @@ import { omissionContribution } from "../core-publisher/omissionSealing.js";
 import { EXTENSION_NAME, OMISSION_BIND_IDENTIFIER } from "../core-shared/omissionBind.js";
 import { ISSUER_A, ISSUER_B, ITEMS, world } from "../test-lib/world.js";
 
+/**
+ * The record in one named-record collection whose identity member is `name`.
+ * A missing record fails here, as reading the old map's absent member did.
+ *
+ * @param {any[]} collection @param {string} member @param {string} name
+ */
+function recordNamed(collection, member, name) {
+  const record = collection.find((entry) => entry[member] === name);
+  assert.ok(record, `no record with ${member} ${name}`);
+  return record;
+}
+
+/**
+ * One item's wraps grouped by access group, as the old `keys` map held them.
+ *
+ * @param {any} dcaData @param {string} contentName
+ * @returns {any[][]}
+ */
+function wrapGroups(dcaData, contentName) {
+  /** @type {Map<string, any[]>} */
+  const groups = new Map();
+  for (const entry of recordNamed(dcaData.contentData, "contentName", contentName).keys) {
+    groups.set(entry.accessGroup, [...(groups.get(entry.accessGroup) ?? []), entry]);
+  }
+  return [...groups.values()];
+}
+
+/** @param {any[]} records @returns {string[]} the content names, sorted */
+function contentNamesOf(records) {
+  return records.map((record) => record.contentName).sort();
+}
+
+/** @param {any[]} records @returns {string[]} the access groups covered, sorted */
+function groupsOf(records) {
+  return [...new Set(records.map((record) => record.accessGroup))].sort();
+}
+
 function article() {
   return {
     resourceId: "123456",
@@ -39,18 +76,18 @@ describe("Explicit publisher integration composition", () => {
     );
 
     for (const name of ["bodytext", "sidebar"]) {
-      for (const entries of Object.values(dcaData.contentData[name].keys)) {
+      for (const entries of wrapGroups(dcaData, name)) {
         assert.ok(entries.length > 0);
         assert.ok(entries.every((entry) => entry.bind === OMISSION_BIND_IDENTIFIER));
       }
     }
-    const active = dcaData.issuerData[ISSUER_A];
-    const ordinary = dcaData.issuerData[ISSUER_B];
+    const active = recordNamed(dcaData.issuerData, "issuerName", ISSUER_A);
+    const ordinary = recordNamed(dcaData.issuerData, "issuerName", ISSUER_B);
     assert.deepEqual(active.extensions, [EXTENSION_NAME]);
     assert.equal(Object.hasOwn(active.sealed, "contentKeys"), false);
-    assert.deepEqual(Object.keys(active.sealed.periodKeys), ["premium"]);
+    assert.deepEqual(groupsOf(active.sealed.periodKeys), ["premium"]);
     assert.equal(Object.hasOwn(ordinary, "extensions"), false);
-    assert.deepEqual(Object.keys(ordinary.sealed.contentKeys), ["bodytext", "sidebar"]);
+    assert.deepEqual(contentNamesOf(ordinary.sealed.contentKeys), ["bodytext", "sidebar"]);
   });
 
   test("baseline and all-inactive selection keep ordinary wrap and item envelopes", async () => {
@@ -60,11 +97,11 @@ describe("Explicit publisher integration composition", () => {
     const inactive = await createPublisher(config, omissionContribution(config)).publish(article());
 
     for (const render of [baseline, inactive]) {
-      const issuer = render.dcaData.issuerData[ISSUER_A];
+      const issuer = recordNamed(render.dcaData.issuerData, "issuerName", ISSUER_A);
       assert.equal(Object.hasOwn(issuer, "extensions"), false);
-      assert.deepEqual(Object.keys(issuer.sealed.contentKeys), ["bodytext", "sidebar"]);
+      assert.deepEqual(contentNamesOf(issuer.sealed.contentKeys), ["bodytext", "sidebar"]);
       for (const name of ["bodytext", "sidebar"]) {
-        for (const entries of Object.values(render.dcaData.contentData[name].keys)) {
+        for (const entries of wrapGroups(render.dcaData, name)) {
           assert.ok(entries.length > 0);
           assert.ok(entries.every((entry) => !Object.hasOwn(entry, "bind")));
         }

@@ -18,7 +18,7 @@ const CONFIG = {
   operatingIssuerNames: ["issuerA"],
   accessPolicy: { decide: () => ({}) },
 };
-const SECTION = { path: ["fakeSection"], depth: 1, keyKind: "contentKey" };
+const SECTION = { path: ["fakeSection"], fields: ["contentName"], keyKind: "contentKey" };
 
 /** @param {string[]} members @param {string} [name] */
 function source(members, name = "fake") {
@@ -63,12 +63,18 @@ test("the core exposes the union of declared sections, settled", () => {
     {
       name: "fake2",
       responseSectionSource: source(["periodGeometry"], "fake2"),
-      responseSections: [{ path: ["otherSection", "inner"], depth: 2, keyKind: "periodKey" }],
+      responseSections: [
+        {
+          path: ["otherSection", "inner"],
+          fields: ["accessGroup", "period"],
+          keyKind: "periodKey",
+        },
+      ],
     },
   );
   assert.deepEqual(core.responseSections, [
     SECTION,
-    { path: ["otherSection", "inner"], depth: 2, keyKind: "periodKey" },
+    { path: ["otherSection", "inner"], fields: ["accessGroup", "period"], keyKind: "periodKey" },
   ]);
   assert.ok(Object.isFrozen(core.responseSections));
   assert.deepEqual(createIssuerCore(CONFIG).responseSections, []);
@@ -98,7 +104,7 @@ test("declared sections are a list of well-formed, distinct sections", () => {
   for (const responseSections of [
     SECTION,
     [{ ...SECTION, path: ["keys"] }],
-    [{ ...SECTION, depth: 0 }],
+    [{ ...SECTION, fields: [] }],
     [SECTION, SECTION],
   ])
     assert.throws(

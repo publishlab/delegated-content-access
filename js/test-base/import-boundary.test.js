@@ -1,45 +1,24 @@
 // @ts-check
 //
-// Who inside the core may import whom. The rules come from the layout design
-// § "The core split by role", stated there as the assertions this file runs.
-// The split has landed: the flat `core/` is now four sibling directories -
-// `core-shared/`, `core-publisher/`, `core-issuer/`, `core-client/` - and
-// a module takes its role from the directory it sits in.
+// Source boundaries for role slices and the surrounding reusable layers.
+// ../design--reference.md defines "Role slices and extraction", "Layers and
+// application boundary" and "Extension composition".
 //
-// The role map below walks the four directory trees recursively, so membership
-// follows a file's path and cannot drift from disk, and no table has to be kept
-// in step with the tree. The set of role directories itself still has to be
-// pinned - a new `core-*` dir the rules do not iterate would carry modules no
-// rule here examines - and the last test holds that.
+// Each core directory names one of the seven extraction-consumer sets. The
+// recursive role map gives nested modules the same ownership; a tree check
+// catches directories missing from the map. Outer layers have explicit allowed
+// dependencies. Demo assemblies may cross roles without entering a reusable
+// role's import closure.
 //
-// The filesystem makes the rules exhaustive. A `.js` file anywhere below a
-// core role directory has that role whether or not anyone thought about it, so
-// a new core module gets a role the moment it lands and every rule below
-// reaches it. This is the strength the flat version bought with a table held
-// against `readdir`; the directories give it for free.
+// These guards inspect source without executing core. Runtime closure follows
+// static imports, re-exports and runtime import() edges; unsupported or unresolved
+// runtime forms fail. JSDoc type imports are erased at runtime and are accounted
+// for separately where extracted declarations need them.
 //
-// Every rule reads source text and parses import statements on purpose; nothing
-// in the core is executed here. A role's implementer has to carry an import
-// edge along whether or not today's run reaches it, so a role's slice is exactly
-// its import closure - which is why splitting the client-bound
-// transport out of `keySealing.js` keeps `bind.js` and the seal side out of the
-// client's closure entirely.
-//
-// Role guards follow static imports, re-exports and runtime import() edges.
-// Unsupported or unresolved runtime forms fail rather than disappearing from
-// the graph. JSDoc type imports are erased at runtime; extracted-contract
-// checks account for them separately where the public type surface needs them.
-//
-// Scope: rules 1-5 bind the four core directories only. `adapter-*/`, `ports/`,
-// `demo/`, `tools/`, `experiments/`, `test-lib/` and `test/`
-// and `test-reference/` cross roles by design, and
-// `demo/browser/` simulates every role in one tab - which is why the
-// shipped-to-the-browser rule is pointed at `demo/actors/Browser.js` and
-// `demo/actors/PageLoad.js`, the client walk, and never at `demo/browser/`.
-//
-// Reading source needs the filesystem, which core, ports and actors never
-// touch. This is a test file, so `node:fs` is at hand here the way `node:test`
-// is.
+// Actor manifests select supported core, adapter and integration files. Every
+// copied module's runtime imports must remain inside that selection; an optional
+// adapter need not be reached by the role's default integration entry.
+// Filesystem access here belongs to development checks, not reusable core.
 
 import {
   importsOf,
@@ -885,6 +864,16 @@ describe("What the browser is handed", () => {
     );
   });
 
+  test("the ordinary browser assembly does not load the optional denial cache", () => {
+    assert.equal(
+      closureOf(["integration-client/createBrowserClient.js"]).has(
+        "adapter-client/DeniedUnlockCache.js",
+      ),
+      false,
+      "denial scheduling is included by the host rather than by ordinary client composition",
+    );
+  });
+
   test("nothing the client walk loads reaches a publisher or issuer module", () => {
     // Rule 7, and the assertion that carries the shipped-to-the-browser
     // claim. `demo/browser/` could never be the entry point here: it is the
@@ -938,10 +927,12 @@ describe("What the browser is handed", () => {
         "core-shared--client-issuer/responseKeys.js",
         "core-shared--client-publisher/contentAad.js",
         "core-shared--client-publisher/contentHandling.js",
+        "core-shared--client-publisher/deliveryRecords.js",
         "core-shared/aead.js",
         "core-shared/binaryStrings.js",
         "core-shared/codec.js",
         "core-shared/compactJwt.js",
+        "core-shared/contentKeyWrapNonce.js",
         "core-shared/cryptoProvider.js",
         "core-shared/errors.js",
         "core-shared/markupPlacement.js",
@@ -1323,16 +1314,18 @@ function extractedCoreSharedTests() {
 }
 
 /**
- * An extracted core test may use reference support when that support is
- * itself confined to reusable core source. The support directory is deliberately
- * reference-only; it is not a new implementation role.
+ * An extracted core test may use reference support or shared requirement suites
+ * when their complete import closure is confined to reusable core source.
+ * These test-only directories are not implementation roles.
  *
  * @param {string} rel
  * @param {{ specifier: string, target: string }[]} edges
  */
 function assertExtractedCoreSharedTestImports(rel, edges) {
   for (const edge of edges) {
-    const isSharedSupport = edge.target.startsWith("test-reference/support/");
+    const isSharedSupport =
+      edge.target.startsWith("test-reference/support/") ||
+      edge.target.startsWith("test-lib/suites/");
     assert.ok(
       edge.specifier.startsWith("node:") ||
         CORE_ROLES.includes(roleOf(edge.target)) ||
@@ -1452,31 +1445,35 @@ describe("The extracted core-shared reference-test slice", () => {
     );
   });
 
-  test("the closure guard allows test-to-support but rejects support-to-demo or another target", () => {
+  test("the closure guard allows test support and shared suites but rejects their forbidden dependencies", () => {
     const entry = "test-reference/core-shared/new.test.js";
-    const support = "test-reference/support/new-helper.js";
     const shared = "core-shared/codec.js";
-    const testToSupport = { specifier: "../support/new-helper.js", target: support };
-    const supportToShared = { specifier: "../../core-shared/codec.js", target: shared };
-    const allowed = new Map([
-      [entry, [testToSupport]],
-      [support, [supportToShared]],
-      [shared, []],
-    ]);
+    for (const support of [
+      "test-reference/support/new-helper.js",
+      "test-lib/suites/new-requirement.js",
+    ]) {
+      const testToSupport = { specifier: "../../" + support, target: support };
+      const supportToShared = { specifier: "../../core-shared/codec.js", target: shared };
+      const allowed = new Map([
+        [entry, [testToSupport]],
+        [support, [supportToShared]],
+        [shared, []],
+      ]);
 
-    // A direct-only check would stop at the allowed first edge. The actual
-    // closure must also inspect the support node's second-hop edge.
-    assert.doesNotThrow(() => assertExtractedCoreSharedTestImports(entry, [testToSupport]));
-    assert.doesNotThrow(() => assertExtractedCoreSharedTestGraph([entry], allowed));
+      // A direct-only check would stop at the allowed first edge. The actual
+      // closure must also inspect the support node's second-hop edge.
+      assert.doesNotThrow(() => assertExtractedCoreSharedTestImports(entry, [testToSupport]));
+      assert.doesNotThrow(() => assertExtractedCoreSharedTestGraph([entry], allowed));
 
-    for (const target of ["demo/actors/Random.js", "ports/UnlockEndpoint.js"]) {
-      const forbidden = new Map(allowed);
-      forbidden.set(support, [{ specifier: "../../" + target, target }]);
-      assert.throws(
-        () => assertExtractedCoreSharedTestGraph([entry], forbidden),
-        /extracted core tests and their shared support reach only reusable core source/,
-        `support must not conceal a second-hop ${target} edge`,
-      );
+      for (const target of ["demo/actors/Random.js", "ports/UnlockEndpoint.js"]) {
+        const forbidden = new Map(allowed);
+        forbidden.set(support, [{ specifier: "../../" + target, target }]);
+        assert.throws(
+          () => assertExtractedCoreSharedTestGraph([entry], forbidden),
+          /extracted core tests and their shared support reach only reusable core source/,
+          `${support} must not conceal a second-hop ${target} edge`,
+        );
+      }
     }
   });
 

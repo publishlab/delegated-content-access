@@ -32,6 +32,44 @@ import {
   world,
 } from "../test-lib/world.js";
 
+// The wire carries keys, errors and sealed content as arrays of named records.
+// These helpers reach one record's value by its name, the way the old map
+// lookups did.
+
+/**
+ * The key of the contentKeys record for `contentName`.
+ *
+ * @param {any[]} contentKeys
+ * @param {string} contentName
+ */
+function contentKeyOf(contentKeys, contentName) {
+  return contentKeys.find((record) => record.contentName === contentName)?.key;
+}
+
+/**
+ * The error record for one coordinate.
+ *
+ * @param {any[]} errors
+ * @param {string} coordinate
+ */
+function errorAt(errors, coordinate) {
+  return errors.find((record) => record.coordinate === coordinate);
+}
+
+/**
+ * The sealed content of one item on the page.
+ *
+ * @param {any} page
+ * @param {string} contentName
+ */
+function sealedContentOf(page, contentName) {
+  return page.sealedContent.find((/** @type {any} */ record) => record.contentName === contentName)
+    ?.content;
+}
+
+/** @param {any[]} records */
+const contentNames = (records) => records.map((record) => record.contentName);
+
 test("the omission issuer composition admits only the options it reads", () => {
   const accessPolicy = new AllowAllPolicy();
   assert.doesNotThrow(() =>
@@ -106,16 +144,17 @@ test("the request carries the support signal and one bound candidate per period"
   const document = request.toObject();
 
   assert.deepEqual(document.extensions, [EXTENSION_NAME]);
+  // Array position means nothing, so both sides are compared sorted.
   assert.deepEqual(
-    document.boundCandidates.bodytext.map((/** @type {any} */ candidate) => [
-      candidate.accessGroup,
-      candidate.t,
-    ]),
-    PERIODS.map((t) => ["premium", t]),
+    document.boundCandidates
+      .filter((/** @type {any} */ candidate) => candidate.contentName === "bodytext")
+      .map((/** @type {any} */ candidate) => [candidate.accessGroup, candidate.period])
+      .sort(),
+    PERIODS.map((t) => ["premium", t]).sort(),
   );
   assert.deepEqual(
     document.sealed.contentKeys,
-    {},
+    [],
     "an active issuer sealed no contentKey to forward",
   );
 });
@@ -128,7 +167,7 @@ test("an ordinary render's request forwards no bound candidates", async () => {
     .toObject();
 
   assert.deepEqual(document.extensions, [EXTENSION_NAME]);
-  assert.deepEqual(Object.keys(document.sealed.contentKeys), ["bodytext", "note"]);
+  assert.deepEqual(contentNames(document.sealed.contentKeys).sort(), ["bodytext", "note"]);
   assert.equal(
     Object.hasOwn(document, "boundCandidates"),
     false,
@@ -145,19 +184,19 @@ test("the issuer returns one item contentKey and no period key beside it", async
 
   const result = await engine.unlock(request, registration);
 
-  assert.deepEqual(Object.keys(result.contentKeys), ["bodytext"]);
-  assert.deepEqual(result.periodKeys, {}, "the content-key route returns no period key");
+  assert.deepEqual(contentNames(result.contentKeys), ["bodytext"]);
+  assert.deepEqual(result.periodKeys, [], "the content-key route returns no period key");
   assert.equal(
     Object.hasOwn(result, "chainKeys"),
     false,
     "the content-key route has no chainKeys section",
   );
-  assert.deepEqual(result.errors, {});
+  assert.deepEqual(result.errors, []);
 
   const plaintext = await openContent(
-    base64urlDecode(result.contentKeys.bodytext),
+    base64urlDecode(contentKeyOf(result.contentKeys, "bodytext")),
     "bodytext",
-    page.sealedContent.bodytext,
+    sealedContentOf(page, "bodytext"),
     contentAadOctets(page, "bodytext"),
   );
   assert.equal(utf8Decode(plaintext), ARTICLE);
@@ -172,8 +211,8 @@ test("only the granted item comes back, from a request presenting two", async ()
 
   const result = await engine.unlock(request, registration);
 
-  assert.deepEqual(Object.keys(result.contentKeys), ["note"]);
-  assert.deepEqual(result.errors, {});
+  assert.deepEqual(contentNames(result.contentKeys), ["note"]);
+  assert.deepEqual(result.errors, []);
 });
 
 test("periodGrants supplies an omitted sourceGrants selection for a content-key grant", async () => {
@@ -193,14 +232,19 @@ test("periodGrants supplies an omitted sourceGrants selection for a content-key 
 
   const result = await engine.unlock(request, registration);
 
-  assert.deepEqual(Object.keys(result.contentKeys), ["bodytext"]);
-  assert.deepEqual(Object.keys(result.periodKeys.premium), [PERIODS[0]]);
-  assert.deepEqual(result.errors, {});
+  assert.deepEqual(contentNames(result.contentKeys), ["bodytext"]);
+  assert.deepEqual(
+    result.periodKeys
+      .filter((/** @type {any} */ record) => record.accessGroup === "premium")
+      .map((/** @type {any} */ record) => record.period),
+    [PERIODS[0]],
+  );
+  assert.deepEqual(result.errors, []);
 
   const plaintext = await openContent(
-    base64urlDecode(result.contentKeys.bodytext),
+    base64urlDecode(contentKeyOf(result.contentKeys, "bodytext")),
     "bodytext",
-    page.sealedContent.bodytext,
+    sealedContentOf(page, "bodytext"),
     contentAadOctets(page, "bodytext"),
   );
   assert.equal(utf8Decode(plaintext), ARTICLE);
@@ -210,7 +254,12 @@ for (const member of ["sourceGrants", "periodGrants"]) {
   test(`${member} unions split grants before selecting an omitted item's candidate`, async () => {
     const { page, request, registration } = await activeRender();
     const document = request.toObject();
-    document.boundCandidates.bodytext = document.boundCandidates.bodytext.slice(0, 1);
+    // Keep only the bodytext candidate at the first period: the split grant
+    // for that period alone must be enough.
+    document.boundCandidates = document.boundCandidates.filter(
+      (/** @type {any} */ candidate) =>
+        candidate.contentName !== "bodytext" || candidate.period === PERIODS[0],
+    );
     const engine = omissionIssuerEngine({
       operatingIssuerNames: [ISSUER_A],
       accessPolicy: {
@@ -221,13 +270,13 @@ for (const member of ["sourceGrants", "periodGrants"]) {
       },
     });
     const result = await engine.unlock(request, registration);
-    assert.deepEqual(result.errors, {});
+    assert.deepEqual(result.errors, []);
     assert.equal(
       utf8Decode(
         await openContent(
-          base64urlDecode(result.contentKeys.bodytext),
+          base64urlDecode(contentKeyOf(result.contentKeys, "bodytext")),
           "bodytext",
-          page.sealedContent.bodytext,
+          sealedContentOf(page, "bodytext"),
           contentAadOctets(page, "bodytext"),
         ),
       ),
@@ -251,8 +300,13 @@ test("empty ordinary grant selection leaves a sealed sibling usable beside an om
     ISSUER_A,
     ["bodytext", "note"],
   );
-  delete request.toObject().sealed.contentKeys.bodytext;
-  delete request.toObject().boundCandidates.note;
+  const document = request.toObject();
+  document.sealed.contentKeys = document.sealed.contentKeys.filter(
+    (/** @type {any} */ record) => record.contentName !== "bodytext",
+  );
+  document.boundCandidates = document.boundCandidates.filter(
+    (/** @type {any} */ candidate) => candidate.contentName !== "note",
+  );
   for (const selection of [{}, { periodGrants: [{ accessGroup: "premium", periods: [] }] }]) {
     const engine = omissionIssuerEngine({
       operatingIssuerNames: [ISSUER_A],
@@ -261,14 +315,14 @@ test("empty ordinary grant selection leaves a sealed sibling usable beside an om
       },
     });
     const result = await engine.unlock(request, registration);
-    assert.deepEqual(Object.keys(result.contentKeys), ["note"]);
-    assert.equal(result.errors.bodytext.error, "unseal_failed");
+    assert.deepEqual(contentNames(result.contentKeys), ["note"]);
+    assert.equal(errorAt(result.errors, "bodytext")?.error, "unseal_failed");
     assert.equal(
       utf8Decode(
         await openContent(
-          base64urlDecode(result.contentKeys.note),
+          base64urlDecode(contentKeyOf(result.contentKeys, "note")),
           "note",
-          page.sealedContent.note,
+          sealedContentOf(page, "note"),
           contentAadOctets(page, "note"),
         ),
       ),
@@ -280,8 +334,12 @@ test("empty ordinary grant selection leaves a sealed sibling usable beside an om
 test("ordinary-label fallback does not move permission to a later forwarded candidate", async () => {
   const { request, registration } = await activeRender();
   const document = request.toObject();
-  const [, later] = document.boundCandidates.bodytext;
-  document.boundCandidates.bodytext = [later];
+  // Forward only the bodytext candidate at the later period, which the
+  // policy below does not grant.
+  document.boundCandidates = document.boundCandidates.filter(
+    (/** @type {any} */ candidate) =>
+      candidate.contentName === "bodytext" && candidate.period === PERIODS[1],
+  );
 
   const engine = omissionIssuerEngine({
     operatingIssuerNames: [ISSUER_A],
@@ -298,8 +356,8 @@ test("ordinary-label fallback does not move permission to a later forwarded cand
 
   const result = await engine.unlock(request, registration);
 
-  assert.deepEqual(result.contentKeys, {});
-  assert.equal(result.errors.bodytext.error, "unseal_failed");
+  assert.deepEqual(result.contentKeys, []);
+  assert.equal(errorAt(result.errors, "bodytext")?.error, "unseal_failed");
 });
 
 test("an explicit empty sourceGrants selection does not fall back to periodGrants", async () => {
@@ -320,8 +378,8 @@ test("an explicit empty sourceGrants selection does not fall back to periodGrant
 
   const result = await engine.unlock(request, registration);
 
-  assert.deepEqual(result.contentKeys, {});
-  assert.equal(result.errors.bodytext.error, "unseal_failed");
+  assert.deepEqual(result.contentKeys, []);
+  assert.equal(errorAt(result.errors, "bodytext")?.error, "unseal_failed");
 });
 
 test("a present malformed sourceGrants member does not fall back to ordinary grants", async () => {
@@ -409,8 +467,8 @@ test("an injected period-key source answers when the request forwards no sealed 
     accessPolicy: contentOnlyPolicy(["bodytext"]),
   });
   const bare = await withoutPeriodKeyLookup.unlock(withoutSealedPeriods, registration);
-  assert.deepEqual(bare.contentKeys, {}, "no period source is no key");
-  assert.equal(bare.errors.bodytext.error, "unseal_failed");
+  assert.deepEqual(bare.contentKeys, [], "no period source is no key");
+  assert.equal(errorAt(bare.errors, "bodytext")?.error, "unseal_failed");
 
   // The period-key view is held for this registration and takes the coordinate
   // alone. Which publisher's material it holds was settled when the
@@ -428,7 +486,7 @@ test("an injected period-key source answers when the request forwards no sealed 
   });
 
   const result = await engine.unlock(withoutSealedPeriods, registration);
-  assert.deepEqual(Object.keys(result.contentKeys), ["bodytext"]);
+  assert.deepEqual(contentNames(result.contentKeys), ["bodytext"]);
 });
 
 test("a base issuer engine composed without this extension returns no key for an active render", async () => {
@@ -442,8 +500,99 @@ test("a base issuer engine composed without this extension returns no key for an
 
   assert.deepEqual(
     result.contentKeys,
-    {},
+    [],
     "the forwarded member is unknown to base and grants nothing",
   );
-  assert.deepEqual(result.errors, {});
+  assert.deepEqual(result.errors, []);
+});
+
+test("held-key omission exposes source labels separately and tries both rollover orders", async () => {
+  const { request, registration, periodKeySupply } = await activeRender();
+  const document = structuredClone(request.toObject());
+  delete document.sealed.periodKeys;
+  for (const reverse of [false, true]) {
+    const periodKeyLookup = new WeakMap([
+      [
+        registration,
+        async (group, t) => {
+          const right = await periodKeySupply.derive(group, t);
+          const wrong = new Uint8Array(16);
+          return reverse ? [right, wrong] : [wrong, right];
+        },
+      ],
+    ]);
+    const engine = omissionIssuerEngine({
+      operatingIssuerNames: [ISSUER_A],
+      periodKeyLookup,
+      accessPolicy: {
+        decide(_claims, requested) {
+          assert.deepEqual(requested.periodCoordinates, {});
+          assert.deepEqual(requested.sourcePeriodCoordinates, { premium: PERIODS });
+          return {
+            contentNames: ["bodytext"],
+            periodGrants: [
+              { accessGroup: "premium", periods: requested.sourcePeriodCoordinates.premium },
+            ],
+            sourceGrants: [
+              { accessGroup: "premium", periods: requested.sourcePeriodCoordinates.premium },
+            ],
+          };
+        },
+      },
+    });
+    const result = await engine.unlock(new DcaRequest(document), registration);
+    assert.deepEqual(contentNames(result.contentKeys), ["bodytext"]);
+    assert.equal(result.periodKeys.length, 0);
+  }
+});
+
+test("malformed and over-bound trusted held-key results fail as host faults", async () => {
+  const { request, registration } = await activeRender();
+  const document = structuredClone(request.toObject());
+  delete document.sealed.periodKeys;
+  for (const held of [
+    undefined,
+    {},
+    [new Uint8Array(15)],
+    Array.from({ length: 5 }, (_, i) => new Uint8Array(16).fill(i)),
+  ]) {
+    const periodKeyLookup = new WeakMap([[registration, async () => held]]);
+    const engine = omissionIssuerEngine({
+      operatingIssuerNames: [ISSUER_A],
+      accessPolicy: contentOnlyPolicy(["bodytext"]),
+      periodKeyLookup,
+    });
+    await assert.rejects(engine.unlock(new DcaRequest(document), registration), {
+      code: "internal_error",
+    });
+  }
+});
+
+test("held rivals deduplicate and snapshot once per coordinate within each unlock", async () => {
+  const { request, registration, periodKeySupply } = await activeRender({
+    items: ["bodytext", "note"],
+  });
+  const document = structuredClone(request.toObject());
+  delete document.sealed.periodKeys;
+  let calls = 0;
+  const periodKeyLookup = new WeakMap([
+    [
+      registration,
+      async (group, t) => {
+        calls++;
+        const right = await periodKeySupply.derive(group, t);
+        return [new Uint8Array(16), right, right, right, right];
+      },
+    ],
+  ]);
+  const engine = omissionIssuerEngine({
+    operatingIssuerNames: [ISSUER_A],
+    accessPolicy: contentOnlyPolicy(["bodytext", "note"]),
+    periodKeyLookup,
+  });
+  for (let unlock = 1; unlock <= 2; unlock++) {
+    const result = await engine.unlock(new DcaRequest(document), registration);
+    assert.deepEqual(contentNames(result.contentKeys), ["bodytext", "note"]);
+    assert.equal(calls, unlock, "one coordinate snapshot per unlock, shared by both items");
+  }
 });

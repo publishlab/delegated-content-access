@@ -12,31 +12,24 @@ each extension README identifies the profile, proposal or experiment its code
 serves. Directory names describe the implementation mechanism without adding
 a second protocol identifier vocabulary.
 
-The boundaries:
+The [reference architecture](../design--reference.md#extension-composition)
+defines source and composition constraints. Extension-local obligations:
 
-- Base imports nothing from here. `npm run check:boundaries` runs base with
-  this directory deleted.
-- An extension may import base, its own source and required sibling extension
-  implementations. Runtime imports follow role boundaries and must not reach
-  tests, scenarios or other development code. Dependency cycles are rejected.
-- Base loads without extensions. Each extension loads with its required
-  dependencies; unrelated extensions can be removed. A missing required
-  dependency is a prerequisite failure, not passing skipped coverage.
+- Each extension README states its affected behavior, required dependencies,
+  base seams, copied base code and status. Everything under an extension
+  directory is provisional until a specification names it.
 - Tests and bench scenarios stay with their primary feature owner even when
   they import siblings. Shared interactions without a primary owner belong in
   `../test-extensions/`. Development prerequisites are separate from runtime
   source dependencies.
-- Role slices inside an extension use the `core-*` names and follow the same
-  role import rules as base: a `core-client` slice reaches no publisher or
-  issuer module, a pairwise slice only its two roles and `core-shared`.
-- An extension reaches base through the injection seams base already has.
-- Where base has no seam for what an extension needs, the extension copies the
-  base lines into itself. The module names the lines it copied and why no seam
-  existed, so base and other extensions can be refactored without it.
-- Nothing here changes base.
-- Each extension's README states what it changes, which base seams it uses,
-  what it copied, and its own status. Everything under an extension directory
-  is provisional until a spec names it.
+
+## Nonce omission prototypes
+
+`nonce-free-envelope/` and `nonce-free-response/` are isolated candidate
+implementations with behavior tests. They are not registered profiles and do
+not change the currently specified procedures. Their READMEs state the exact
+candidate, setup, seam limitations and evidence. Tests and portable assertion
+suites stay inside those extensions until any later adoption.
 
 ## Content-groups proposal extension
 
@@ -91,6 +84,9 @@ its `content-key-seal-omission/core-client/OmissionRequestBuilder.js` and
 `content-key-seal-omission/core-client/BoundContentKeyResolver.js` stand in
 for the base request builder and resolver, so a client selects it through
 `requestBuilderFactory` and `resolverFactory`.
+Resolver factories used by a delivery client must provide `resolveAuthenticated`
+as well as its other required operations; item authentication selects among all
+admitted candidates. Construction refuses an incomplete resolver.
 
 Anything an extension needs beyond these boundaries (a seam, a wire member,
 an error code) changes base at the design level. Write it up as a design

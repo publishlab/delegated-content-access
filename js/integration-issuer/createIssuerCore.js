@@ -260,7 +260,7 @@ function composeDeclaredSelections(engine, options, hostSelected) {
  * @property {readonly Readonly<import('../core-shared--client-issuer/responseKeys.js').ComposedSection>[]} [responseSections] -
  *   the key-bearing sections its source writes, each rooted at one of the
  *   source's members; client-bound transport wraps their entries and admits
- *   each section's optional `errorPath` map of fixed `key_retired` leaves
+ *   each section's optional `errorPath` array of coordinate records carrying `key_retired`
  * @property {Record<string, import('../core-issuer/IssuerEngine.js').EnvelopeProcedure
  *   | import('../core-issuer/IssuerEngine.js').DeclaredEnvelopeProcedure>} [envelopeProcedures] -
  *   envelope procedures by name for the base engine; a request selects one

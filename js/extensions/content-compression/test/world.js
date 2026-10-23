@@ -20,8 +20,10 @@ import {
 import { DcaData } from "../../../core-client/DcaData.js";
 import { decrypt } from "../../../core-shared/aead.js";
 import { base64urlDecode } from "../../../core-shared/codec.js";
+import { wrapNonceOf } from "../../../test-reference/support/contentKeyWrapNonceOctets.js";
 import { deterministicEcdhFixtureSealing } from "../../../tools/vector-fixtures/deterministicEcdhSealing.js";
 import { wholeRenderIssuerSupplyPlan } from "../../../core-publisher/issuerSupplyPlan.js";
+import { wire as onWire, wrapsOf } from "../../../test-lib/helpers/inspect.js";
 
 const { subtle } = globalThis.crypto;
 
@@ -155,8 +157,9 @@ export async function world() {
 }
 
 /**
- * A render as the wire carries it: JSON round-tripped, so a test reads plain
- * data and never a live object the sealer still holds.
+ * A render as the wire carries it: JSON round-tripped, with the ciphertexts as
+ * `{contentName, content}` records, so a test reads plain data and never a
+ * live object the sealer still holds.
  *
  * @param {any} sealer
  * @param {{ name: string, value: string|Uint8Array|{ bytes: Uint8Array, contentType: string, contentEncodings: string[] }, contentType?: string, options?: object }[]} items
@@ -177,14 +180,14 @@ export async function render(sealer, items, options = {}) {
       sealer.content(item.name, item.value, item.contentType ?? "text/html", contentOptions);
     }
   }
-  const sealed = await sealer.seal();
-  return JSON.parse(JSON.stringify({ ...sealed.dcaData, sealedContent: sealed.sealedContent }));
+  return onWire(await sealer.seal());
 }
 
 /**
  * The content key of one item, taken back off the render the way the cached
  * path takes it: the period key this supply holds unwraps the first candidate
- * the item carries. The ordinary wrap binds no aad, which is base's v1 shape.
+ * the item carries. The ordinary wrap binds no aad, which is base's v1 shape,
+ * and its nonce derives from the render and the wrap's coordinate.
  *
  * @param {any} wire - a `render()` result
  * @param {string} contentName
@@ -192,9 +195,10 @@ export async function render(sealer, items, options = {}) {
  * @returns {Promise<Uint8Array>}
  */
 export async function contentKeyOf(wire, contentName, periodKeySupply) {
-  const entry = wire.contentData[contentName].keys[GROUP][0];
-  const periodKey = await periodKeySupply.derive(GROUP, entry.t);
-  return decrypt(periodKey, base64urlDecode(entry.nonce), base64urlDecode(entry.key), undefined);
+  const entry = wrapsOf(wire, contentName, GROUP)[0];
+  const periodKey = await periodKeySupply.derive(GROUP, entry.period);
+  const nonce = wrapNonceOf(wire, contentName, GROUP, entry.period);
+  return decrypt(periodKey, nonce, base64urlDecode(entry.key), undefined);
 }
 
 /**

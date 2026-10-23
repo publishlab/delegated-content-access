@@ -18,6 +18,11 @@ import { INHERITED } from "../../test-lib/fixtures/inherited-names.js";
 
 const PUBLISHER_ORIGIN = "https://publisher.example";
 
+/** The ciphertext a delivery carries for one item. */
+function contentOf(delivery, contentName) {
+  return delivery.sealedContent.find((record) => record.contentName === contentName)?.content;
+}
+
 /**
  * The smallest thing that answers `querySelector` the way
  * `MarkupDeliveryReader` asks: the two inert JSON script blocks, `.dca-data` and
@@ -25,7 +30,7 @@ const PUBLISHER_ORIGIN = "https://publisher.example";
  * these tests are about the pair agreeing.
  */
 function markupOver(page) {
-  const { sealedContent = {}, ...dcaData } = page;
+  const { sealedContent = [], ...dcaData } = page;
   const carrier = (value) => ({
     tagName: "script",
     textContent: JSON.stringify(value),
@@ -52,7 +57,7 @@ describe("The object delivery, read back", () => {
     assert.equal(Object.hasOwn(page.dcaData, "sealedContent"), false, "the blobs are not dca-data");
     assert.equal(page.dcaData.version, delivered.version);
     assert.deepEqual(page.dcaData.resource, delivered.resource);
-    assert.equal(page.extract(CONTENT_NAME), delivered.sealedContent[CONTENT_NAME]);
+    assert.equal(page.extract(CONTENT_NAME), contentOf(delivered, CONTENT_NAME));
   });
 
   test("a string delivery and the object it parses to read alike", async () => {
@@ -70,7 +75,7 @@ describe("The object delivery, read back", () => {
 
   test("an unknown name is a miss, and never an inherited member", () => {
     const page = new ObjectDeliveryReader(
-      { sealedContent: { bodytext: "AAAA" } },
+      { sealedContent: [{ contentName: "bodytext", content: "AAAA" }] },
       { publisherOrigin: PUBLISHER_ORIGIN },
     );
 
@@ -90,7 +95,7 @@ describe("The object delivery, read back", () => {
     // And a member that is not a string is not ciphertext.
     assert.equal(
       new ObjectDeliveryReader(
-        { sealedContent: { bodytext: 17 } },
+        { sealedContent: [{ contentName: "bodytext", content: 17 }] },
         { publisherOrigin: PUBLISHER_ORIGIN },
       ).extract("bodytext"),
       null,
@@ -109,14 +114,15 @@ describe("The object delivery, read back", () => {
     }
   });
 
-  test("an enclosing array and a sealedContent that is no map are structural failures", () => {
+  test("an enclosing array and a sealedContent that is no array are structural failures", () => {
     // The object form's own rules: an enclosing array fails the delivery,
-    // and a present `sealedContent` that is not a non-array object is a
+    // and a present `sealedContent` that is not an array of records is a
     // carrier the delivery said it had and did not.
     for (const delivery of [
       [],
       [{ version: "1" }],
-      { sealedContent: [] },
+      { sealedContent: {} },
+      { sealedContent: { bodytext: "QUJD" } },
       { sealedContent: 42 },
       {
         sealedContent: "QUJD",
@@ -143,7 +149,9 @@ describe("The object delivery, read back", () => {
     // The native-object consumer reads `sealedContent` as an own member, so
     // a prototype carrying one supplies no ciphertext and leaves no member
     // on the data beside it.
-    const inherited = Object.create({ sealedContent: { bodytext: "QUJD" } });
+    const inherited = Object.create({
+      sealedContent: [{ contentName: "bodytext", content: "QUJD" }],
+    });
     inherited.version = "1";
     const page = new ObjectDeliveryReader(inherited, { publisherOrigin: PUBLISHER_ORIGIN });
 
@@ -172,7 +180,7 @@ describe("The object delivery, read back", () => {
       object.dcaData,
       "the same dca-data, whichever form carried it",
     );
-    for (const name of Object.keys(delivered.sealedContent)) {
+    for (const { contentName: name } of delivered.sealedContent) {
       assert.equal(markup.extract(name), object.extract(name), `the same ciphertext for ${name}`);
     }
     assert.equal(
@@ -185,7 +193,12 @@ describe("The object delivery, read back", () => {
   test("the two delivery forms refuse the same carrier and share the same misses", () => {
     // One member name outside the grammar rejects the carrier, in both
     // delivery forms and with the same code.
-    const rejected = { sealedContent: { "bad|name": "QUJD", bodytext: "QUJD" } };
+    const rejected = {
+      sealedContent: [
+        { contentName: "bad|name", content: "QUJD" },
+        { contentName: "bodytext", content: "QUJD" },
+      ],
+    };
     for (const build of [
       () => new ObjectDeliveryReader(rejected, { publisherOrigin: PUBLISHER_ORIGIN }),
       () => new MarkupDeliveryReader(markupOver(rejected)),
@@ -194,7 +207,7 @@ describe("The object delivery, read back", () => {
     }
 
     // Over an admitted carrier the two answer the same misses.
-    const delivered = { sealedContent: { bodytext: 17 } };
+    const delivered = { sealedContent: [{ contentName: "bodytext", content: 17 }] };
     const readers = [
       new ObjectDeliveryReader(delivered, { publisherOrigin: PUBLISHER_ORIGIN }),
       new MarkupDeliveryReader(markupOver(delivered)),
@@ -216,6 +229,26 @@ describe("The object delivery, read back", () => {
       assert.equal(reader.extract("absent"), null, "an absent member is a miss");
       assert.equal(reader.extract("constructor"), null, "an inherited member is a miss");
       assert.equal(reader.extract("bodytext"), null, "a present non-string is not ciphertext");
+    }
+  });
+
+  test("both delivery forms read the last whole record for a repeated name, in any order", () => {
+    // A repeated contentName resolves to its last record, and the records
+    // of two names answer alike in either array order.
+    const forward = [
+      { contentName: "bodytext", content: "Rmlyc3Q" },
+      { contentName: "premiumtext", content: "UHJlbQ" },
+      { contentName: "bodytext", content: "TGFzdA" },
+    ];
+    for (const sealedContent of [forward, [...forward].reverse()]) {
+      const last = sealedContent.findLast((record) => record.contentName === "bodytext").content;
+      for (const reader of [
+        new ObjectDeliveryReader({ sealedContent }, { publisherOrigin: PUBLISHER_ORIGIN }),
+        new MarkupDeliveryReader(markupOver({ sealedContent })),
+      ]) {
+        assert.equal(reader.extract("bodytext"), last);
+        assert.equal(reader.extract("premiumtext"), "UHJlbQ");
+      }
     }
   });
 });

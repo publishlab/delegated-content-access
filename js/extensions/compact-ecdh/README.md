@@ -7,7 +7,9 @@ The [compact-ECDH profile](../../../docs/spec-profile--compact-ecdh.md) holds th
 publisher seals a 16- or 32-octet payload to the issuer's P-256 key with RFC 9180 HPKE in Base mode,
 suite `0x0010`/`0x0001`/`0x0002`, `info` `dca-derivation-compact-ecdh` and the BIND octets as AAD. The
 wire carries the ephemeral point compressed: `02|03 || X || ciphertext`, 65 octets for a key and 81
-for a 32-octet payload, against 109 and 125 for the ordinary ECDH envelope.
+for a generic 32-octet payload. The 16-octet key saves 32 octets against the ordinary
+97-octet envelope. The generic payload capacity does not define composition with content groups;
+that composition remains undefined and must be refused.
 
 Base imports nothing from here. Base carries the generic parts: an issuer config `envelope`
 member the Sealer passes to the key sealing and writes into the issuer block, the client's relay

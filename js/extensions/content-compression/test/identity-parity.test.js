@@ -10,6 +10,7 @@ import assert from "node:assert/strict";
 
 import { Sealer } from "../../../core-publisher/Sealer.js";
 import { CompressingSealer } from "../core-publisher/CompressingSealer.js";
+import { contentRecordOf, sealedContentOf } from "../../../test-lib/helpers/inspect.js";
 import { ARTICLE, SIDEBAR, ephemeralPool, render, world } from "./world.js";
 
 /** @param {string} token @returns {string} the compact JWT's header and payload */
@@ -57,12 +58,12 @@ test("a compressed render differs from the base render only in the two members i
     [{ name: "bodytext", value: ARTICLE }],
   );
 
-  assert.notEqual(composed.sealedContent.bodytext, base.sealedContent.bodytext);
-  assert.deepEqual(composed.contentData.bodytext.contentEncodings, ["gzip"]);
+  assert.notEqual(sealedContentOf(composed, "bodytext"), sealedContentOf(base, "bodytext"));
+  assert.deepEqual(contentRecordOf(composed, "bodytext").contentEncodings, ["gzip"]);
 
-  const { contentEncodings, ...rest } = composed.contentData.bodytext;
+  const { contentEncodings, ...rest } = contentRecordOf(composed, "bodytext");
   assert.deepEqual(contentEncodings, ["gzip"]);
-  assert.deepEqual(rest, base.contentData.bodytext);
+  assert.deepEqual(rest, contentRecordOf(base, "bodytext"));
   assert.deepEqual(composed.resource, base.resource);
   assert.equal(payloadOf(composed.resourceJWT), payloadOf(base.resourceJWT));
   assert.deepEqual(composed.issuerData, base.issuerData);

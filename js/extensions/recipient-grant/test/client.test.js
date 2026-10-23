@@ -59,9 +59,19 @@ test("a recipient response with reusable results or chain geometry is refused be
   });
   await capture.unlock(["body"]);
   for (const addition of [
-    { keys: { ...valid.keys, periodKeys: { premium: { "260929T1200": "key" } } } },
-    { keys: { ...valid.keys, chainKeys: { premium: { "260929T1200": "key" } } } },
-    { keys: { ...valid.keys, periodKeys: {} } },
+    {
+      keys: {
+        ...valid.keys,
+        periodKeys: [{ accessGroup: "premium", period: "260929T1200", key: "key" }],
+      },
+    },
+    {
+      keys: {
+        ...valid.keys,
+        chainKeys: [{ accessGroup: "premium", cutoff: "260929T1200", key: "key" }],
+      },
+    },
+    { keys: { ...valid.keys, periodKeys: [], contentGroupKeys: [{ key: "ignored" }] } },
     { keys: { ...valid.keys, chainKeys: null } },
     { periodGeometry: {} },
     { chainGeometry: {} },
@@ -84,13 +94,31 @@ test("a recipient response with reusable results or chain geometry is refused be
   }
 });
 
+test("unselected proposal result members are ignored without adding a capability", async () => {
+  const w = await world();
+  const { root } = await w.render();
+  const c = client(root, async (url, init) => {
+    const answer = await w.fetch(url, init);
+    const body = await answer.json();
+    body.keys.contentGroupKeys = [{ accessGroup: "premium", key: "ignored" }];
+    return response(body);
+  });
+  const result = await c.unlock(["body"]);
+  assert.equal(result.application.accepted, 1);
+  assert.equal(new TextDecoder().decode((await c.open("body")).bytes), "first article text");
+  assert.equal(await c.resolver.contentKeyFor(c.dcaData, "extra"), null);
+});
+
 test("ordinary response association excludes an unpresented item", async () => {
   const w = await world();
   const { root } = await w.render();
   const c = client(root, async (url, init) => {
     const answer = await w.fetch(url, init);
     const body = await answer.json();
-    body.keys.contentKeys.extra = body.keys.contentKeys.body;
+    const { key } = body.keys.contentKeys.find(
+      (/** @type {any} */ record) => record.contentName === "body",
+    );
+    body.keys.contentKeys.push({ contentName: "extra", key });
     return response(body);
   });
   const result = await c.unlock(["body"]);
@@ -106,7 +134,7 @@ test("failed grants and redirects end the attempt without another issuer or cred
     let calls = 0;
     const c = client(root, async () => {
       calls++;
-      return response({ keys: { contentKeys: {} } }, status);
+      return response({ keys: { contentKeys: [] } }, status);
     });
     assert.deepEqual(await c.unlock(["body"]), { status, body: null, application: null });
     assert.equal(calls, 1);
@@ -239,3 +267,22 @@ test("recipient composition recursively resets item grants and fences pending ac
   await c.unlock(["body"]);
   assert.equal(new TextDecoder().decode((await c.openLocal("body")).bytes), "first article text");
 });
+
+for (const wrongFirst of [true, false]) {
+  test(`recipient client authenticates rival content keys, wrong first: ${wrongFirst}`, async () => {
+    const w = await world();
+    const { root } = await w.render();
+    const c = client(root, async (url, init) => {
+      const answer = await w.fetch(url, init);
+      const body = await answer.json();
+      const wrong = { contentName: "body", key: Buffer.alloc(16, 99).toString("base64url") };
+      body.keys.contentKeys = wrongFirst
+        ? [wrong, ...body.keys.contentKeys]
+        : [...body.keys.contentKeys, wrong];
+      return response(body);
+    });
+    assert.equal((await c.unlock(["body"])).status, 200);
+    assert.equal(new TextDecoder().decode((await c.open("body")).bytes), "first article text");
+    assert.equal(w.calls.length, 1);
+  });
+}

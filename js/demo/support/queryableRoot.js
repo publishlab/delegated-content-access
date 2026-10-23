@@ -5,7 +5,7 @@
 // with one carrier each, the way
 // `adapter-client/MarkupDeliveryReader.js` reads a delivered page: the `.dca-data`
 // block carries the dca-data as JSON, and the `.dca-sealed-content` block
-// carries one JSON object keyed by contentName.
+// carries one JSON array of `{contentName, content}` records.
 //
 // Scenarios use this fixture. A cross-role scenario holds a `Page` value
 // and hands its render to `Browser.load` as an already-parsed root, without
@@ -16,15 +16,15 @@
 import { DATA_SELECTOR, SEALED_SELECTOR } from "../../core-shared/markupPlacement.js";
 
 /**
- * @param {{ publisherOrigin: string, dcaData: object, sealedContent?: Record<string, string> }} values -
- *   one render split as the writer takes it: dca-data, and the sealed content
- *   beside it under its own member.
+ * @param {{ publisherOrigin: string, dcaData: object, sealedContent?: { contentName: string, content: string }[] }} values -
+ *   one render split as the JSON form carries it: dca-data, and the sealed
+ *   content records beside it under their own member.
  * @returns {{ querySelector: (selector: string) => any,
  *   querySelectorAll: (selector: string) => any[] }}
  */
 function queryableRoot({ publisherOrigin, dcaData, sealedContent }) {
   const dataText = JSON.stringify(dcaData);
-  const sealedText = JSON.stringify(sealedContent ?? {});
+  const sealedText = JSON.stringify(sealedContent ?? []);
   const carrier = (/** @type {string} */ textContent) => ({
     tagName: "script",
     textContent,

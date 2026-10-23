@@ -66,7 +66,7 @@ test("a contribution's envelope procedure reaches the base engine", async () => 
     registration,
   );
   assert.equal(status, 200);
-  assert.equal(body.keys.contentKeys[BODY], base64urlEncode(OPENED));
+  assert.deepEqual(body.keys.contentKeys, [{ contentName: BODY, key: base64urlEncode(OPENED) }]);
 });
 
 test("two owners of one procedure name refuse", () => {

@@ -45,6 +45,7 @@ import { actorWorld, readArticle } from "../../demo/scenarios/world.js";
 import { rootFromPage } from "../../demo/support/queryableRoot.js";
 import { AllowAllPolicy } from "../../demo/support/AllowAllPolicy.js";
 import { unlockThroughAdmission } from "../../test-lib/harnesses/unlockThroughAdmission.js";
+import { periodKeyMap } from "../support/namedRecords.js";
 import {
   ACCESS_GROUP,
   ARTICLES,
@@ -128,7 +129,11 @@ test("a content key one unlock delivered is not re-requested by the next walk", 
       return {
         status: 200,
         body: {
-          keys: { contentKeys: { [CONTENT_NAME]: base64urlEncode(new Uint8Array(16).fill(4)) } },
+          keys: {
+            contentKeys: [
+              { contentName: CONTENT_NAME, key: base64urlEncode(new Uint8Array(16).fill(4)) },
+            ],
+          },
         },
       };
     },
@@ -145,7 +150,9 @@ test("a content key one unlock delivered is not re-requested by the next walk", 
   const first = await load.unlock();
   assert.equal(first.ok, true);
   assert.ok(
-    CONTENT_NAME in posted[0].sealed.contentKeys,
+    posted[0].sealed.contentKeys.some(
+      (/** @type {any} */ record) => record.contentName === CONTENT_NAME,
+    ),
     "the first unlock asked for the content key",
   );
 
@@ -166,7 +173,11 @@ describe("Page - inert", () => {
     const json = page.asJson();
     assert.equal(typeof json, "object");
     assert.equal(json.version, "1");
-    assert.equal(typeof json.sealedContent[CONTENT_NAME], "string");
+    assert.ok(Array.isArray(json.sealedContent), "the ciphertext travels as records");
+    assert.equal(
+      typeof json.sealedContent.find((record) => record.contentName === CONTENT_NAME)?.content,
+      "string",
+    );
     assert.deepEqual(
       JSON.parse(JSON.stringify(json)),
       json,
@@ -480,8 +491,11 @@ describe("Network - routing, reachability per caller, wire safety, cost", () => 
     network.serve(PRIMARY_UNLOCK, () => ({ status: 200, body: { ok: true } }));
 
     for (const [label, payload] of [
-      ["raw key bytes", { sealed: { contentKeys: { bodytext: new Uint8Array(16) } } }],
-      ["a CryptoKey", { keys: { contentKeys: { bodytext: key } } }],
+      [
+        "raw key bytes",
+        { sealed: { contentKeys: [{ contentName: "bodytext", key: new Uint8Array(16) }] } },
+      ],
+      ["a CryptoKey", { keys: { contentKeys: [{ contentName: "bodytext", key }] } }],
       ["a function", { onDone: () => undefined }],
       ["a Date", { issuedAt: new Date() }],
       ["a Map", { sealed: new Map() }],
@@ -504,11 +518,11 @@ describe("Network - routing, reachability per caller, wire safety, cost", () => 
       () =>
         network.post(
           PRIMARY_UNLOCK,
-          { sealed: { contentKeys: { bodytext: new Uint8Array(4) } } },
+          { sealed: { contentKeys: [{ contentName: "bodytext", key: new Uint8Array(4) }] } },
           { from: caller, origin: PUBLISHER_ORIGIN },
         ),
       (/** @type {any} */ err) =>
-        /sealed\.contentKeys\.bodytext/.test(err.message) && /Uint8Array/.test(err.message),
+        /sealed\.contentKeys\[0\]\.key/.test(err.message) && /Uint8Array/.test(err.message),
     );
 
     // A refused payload never reached the server, so it is not an attempt -
@@ -519,7 +533,7 @@ describe("Network - routing, reachability per caller, wire safety, cost", () => 
     // caught where it would have been serialised.
     network.serve(FALLBACK_UNLOCK, () => ({
       status: 200,
-      body: { keys: { contentKeys: { bodytext: new Uint8Array(16) } } },
+      body: { keys: { contentKeys: [{ contentName: "bodytext", key: new Uint8Array(16) }] } },
     }));
     await assert.rejects(
       () =>
@@ -533,7 +547,7 @@ describe("Network - routing, reachability per caller, wire safety, cost", () => 
       PRIMARY_UNLOCK,
       {
         version: "1.0",
-        sealed: { contentKeys: { bodytext: "BASE64URL" } },
+        sealed: { contentKeys: [{ contentName: "bodytext", key: "BASE64URL" }] },
         list: [1, true, null, { a: "b" }],
       },
       { from: caller, origin: PUBLISHER_ORIGIN },
@@ -685,7 +699,7 @@ describe("The two ends, over the wire", () => {
       publisherRegistration,
     );
     assert.equal(direct.status, 200);
-    assert.ok(direct.body.keys.periodKeys[ACCESS_GROUP]);
+    assert.ok(periodKeyMap(direct.body.keys.periodKeys)[ACCESS_GROUP]);
     assert.equal(servers.primary.stats().requests, 1, "and the deployment never saw it");
   });
 
@@ -745,6 +759,43 @@ describe("The two ends, over the wire", () => {
 });
 
 describe("The breaker", () => {
+  test("an earlier eligible failure stays scoped through a skipped intermediate issuer", async () => {
+    const stage = await actorWorld();
+    const middle = "https://middle.example/unlock";
+    const last = "https://last.example/unlock";
+    await stage.standUp("middle", middle, { role: "primary" });
+    await stage.standUp("last", last, { role: "primary" });
+    const page = await stage.render("A");
+    stage.network.offline(PRIMARY_UNLOCK);
+    const load = new PageLoad({
+      delivery: new MarkupDeliveryReader(rootFromPage(page)),
+      clock: stage.clock,
+      network: stage.network,
+      cache: stage.browser.cache,
+      relayPeriodKeys: true,
+      issuers: stage.routes,
+      caller: {},
+      breaker: {
+        timeout: 5000,
+        allows: (url) => url !== middle,
+        recordFailure() {},
+        recordSuccess() {},
+      },
+    });
+    await load.resolve([CONTENT_NAME]);
+    const result = await load.unlock();
+    assert.deepEqual(
+      result.attempts.map(({ outcome }) => outcome),
+      ["offline", "skipped", "answered"],
+    );
+    assert.equal(result.issuerName, "last");
+    assert.equal(stage.network.stats()[middle], undefined, "the skipped issuer was never called");
+    assert.ok(
+      (await load.open(CONTENT_NAME)).bytes,
+      "the last issuer's scoped capability opens the article",
+    );
+  });
+
   test("the breaker opens at its threshold, skips while open, half-opens after the window, and closes on success", async () => {
     const { clock, network, browser, render } = await actorWorld();
     const attemptsOnPrimary = () => network.stats()[PRIMARY_UNLOCK].attempts;
@@ -871,38 +922,32 @@ describe("The fallback", () => {
     // labels.
     const request = {
       sealed: {
-        periodKeys: {
-          hourly: {
-            "251023T1300": "hour-ended",
-            "251023T1400": "hour-current",
-            "251023T1500": "hour-ahead",
-          },
-          quarter_hour: {
-            "251023T1400": "quarter-ended",
-            "251023T1415": "quarter-current",
-            "251023T1430": "quarter-ahead",
-          },
-          not_started: {
-            "251023T1430": "not-started-soon",
-            "251023T1445": "not-started-later",
-          },
-        },
+        periodKeys: [
+          { accessGroup: "hourly", period: "251023T1300", key: "hour-ended" },
+          { accessGroup: "hourly", period: "251023T1400", key: "hour-current" },
+          { accessGroup: "hourly", period: "251023T1500", key: "hour-ahead" },
+          { accessGroup: "quarter_hour", period: "251023T1400", key: "quarter-ended" },
+          { accessGroup: "quarter_hour", period: "251023T1415", key: "quarter-current" },
+          { accessGroup: "quarter_hour", period: "251023T1430", key: "quarter-ahead" },
+          { accessGroup: "not_started", period: "251023T1430", key: "not-started-soon" },
+          { accessGroup: "not_started", period: "251023T1445", key: "not-started-later" },
+        ],
       },
     };
     const response = {
       keys: {
-        contentKeys: { [CONTENT_NAME]: "content-key-remains" },
+        contentKeys: [{ contentName: CONTENT_NAME, key: "content-key-remains" }],
         periodKeys: request.sealed.periodKeys,
       },
     };
 
     assert.deepEqual(trimToCurrentPeriod(response, clock.now()), {
       keys: {
-        contentKeys: { [CONTENT_NAME]: "content-key-remains" },
-        periodKeys: {
-          hourly: { "251023T1400": "hour-current" },
-          quarter_hour: { "251023T1415": "quarter-current" },
-        },
+        contentKeys: [{ contentName: CONTENT_NAME, key: "content-key-remains" }],
+        periodKeys: [
+          { accessGroup: "hourly", period: "251023T1400", key: "hour-current" },
+          { accessGroup: "quarter_hour", period: "251023T1415", key: "quarter-current" },
+        ],
       },
     });
   });
@@ -1039,7 +1084,7 @@ describe("The fallback", () => {
     const page = await quarterly.render(article("A"));
     const request = await unlockRequestOf(browser, page, FALLBACK);
     assert.deepEqual(
-      Object.keys(request.sealed.periodKeys[ACCESS_GROUP]),
+      Object.keys(periodKeyMap(request.sealed.periodKeys)[ACCESS_GROUP]),
       ["251023T1415", "251023T1430", "251023T1445"],
       "three quarter-hours, current first",
     );
@@ -1055,12 +1100,12 @@ describe("The fallback", () => {
 
     assert.equal(answer.status, 200);
     assert.deepEqual(
-      Object.keys(answer.body.keys.periodKeys ?? {}),
+      Object.keys(periodKeyMap(answer.body.keys.periodKeys) ?? {}),
       [ACCESS_GROUP],
       "the group came back at all",
     );
     assert.deepEqual(
-      Object.keys(answer.body.keys.periodKeys[ACCESS_GROUP]),
+      Object.keys(periodKeyMap(answer.body.keys.periodKeys)[ACCESS_GROUP]),
       [formatT(clock.now(), 15)],
       "the quarter-hour it is reading in, and neither of the two forward",
     );
@@ -1080,7 +1125,7 @@ describe("The fallback", () => {
     // the two has ended too. The greatest started label is the one the client
     // is holding content for, and the clock's own label is not on the page.
     const request = await unlockRequestOf(browser, await render("A"), FALLBACK);
-    assert.deepEqual(Object.keys(request.sealed.periodKeys[ACCESS_GROUP]), [
+    assert.deepEqual(Object.keys(periodKeyMap(request.sealed.periodKeys)[ACCESS_GROUP]), [
       "251023T1400",
       "251023T1500",
     ]);
@@ -1097,8 +1142,10 @@ describe("The fallback", () => {
     });
 
     assert.equal(answer.status, 200);
-    assert.deepEqual(Object.keys(answer.body.keys.periodKeys ?? {}), [ACCESS_GROUP]);
-    assert.deepEqual(Object.keys(answer.body.keys.periodKeys[ACCESS_GROUP]), ["251023T1500"]);
+    assert.deepEqual(Object.keys(periodKeyMap(answer.body.keys.periodKeys) ?? {}), [ACCESS_GROUP]);
+    assert.deepEqual(Object.keys(periodKeyMap(answer.body.keys.periodKeys)[ACCESS_GROUP]), [
+      "251023T1500",
+    ]);
     assert.equal(servers.fallback.stats().grants, 1);
   });
 
@@ -1112,7 +1159,10 @@ describe("The fallback", () => {
     // because a section that quietly disappears is a grant of nothing that
     // reads like a grant.
     const request = await unlockRequestOf(browser, page, FALLBACK);
-    delete request.sealed.periodKeys[ACCESS_GROUP]["251023T1400"];
+    request.sealed.periodKeys = request.sealed.periodKeys.filter(
+      (/** @type {any} */ record) =>
+        !(record.accessGroup === ACCESS_GROUP && record.period === "251023T1400"),
+    );
 
     network.offline(PRIMARY_UNLOCK);
     network.offline(PRIMARY_HEALTH);
@@ -1288,12 +1338,12 @@ describe("The catch-22", () => {
     assert.equal(browser.stats().unlockFailures, 2);
 
     // The breaker counted the two unreachable calls and has opened, so a third
-    // article stops asking the primary - and still gets nothing, because the
-    // fallback's vantage has not changed.
+    // article stops asking the primary. That local skip does not qualify
+    // another conditional call to the fallback.
     const third = await readArticle(browser, await render("C"), [CONTENT_NAME]);
     assert.deepEqual(
       third.unlock.attempts.map((/** @type {any} */ a) => a.outcome),
-      ["skipped", "refused"],
+      ["skipped"],
     );
     assert.equal(network.stats()[PRIMARY_UNLOCK].attempts, 2);
   });
@@ -1336,7 +1386,7 @@ describe("Two tabs at once", () => {
     assert.equal(network.stats()[PRIMARY_UNLOCK].attempts, 2);
   });
 
-  test("once the breaker is open, the next article goes straight to the fallback", async () => {
+  test("a fresh breaker skip does not qualify conditional fallback", async () => {
     const { clock, network, browser, servers, render } = await actorWorld({
       fallback: true,
       // One failure is enough to open it, and the window outlasts this test:
@@ -1357,23 +1407,25 @@ describe("Two tabs at once", () => {
     assert.equal(browser.stats().breaker[PRIMARY_UNLOCK].state, "open");
 
     // The fallback trimmed its grant to the period it granted in, so crossing
-    // into the next one is another unlock - and this one never touches the
-    // primary at all.
+    // into the next one is another unlock. A local skip supplies no new
+    // retry permission, so neither issuer is asked in that walk.
     clock.advance(41 * 60 * SECOND);
     const second = await readArticle(browser, await render("B"), [CONTENT_NAME]);
 
-    assert.equal(second.texts[CONTENT_NAME], ARTICLES.B);
-    assert.equal(second.unlock.issuerName, FALLBACK);
+    assert.equal(second.texts[CONTENT_NAME], null);
     assert.deepEqual(
       second.unlock.attempts.map((/** @type {any} */ a) => a.outcome),
-      ["skipped", "answered"],
+      ["skipped"],
     );
     assert.equal(
       network.stats()[PRIMARY_UNLOCK].attempts,
       1,
       "the primary was asked once, an article ago",
     );
-    assert.equal(network.stats()[FALLBACK_UNLOCK].attempts, 2);
+    assert.equal(network.stats()[FALLBACK_UNLOCK].attempts, 1);
+    assert.equal(servers.fallback.stats().grants, 1);
+    const independent = await second.load.unlock({ issuerName: FALLBACK });
+    assert.equal(independent.ok, true, "an explicit independent invocation remains permitted");
     assert.equal(servers.fallback.stats().grants, 2);
   });
 });
@@ -1461,14 +1513,14 @@ describe("What a 5xx is counted as", () => {
 
     // Crossing into the next period is another unlock, since the fallback
     // trimmed its grant to the period it granted in. This one skips the broken
-    // primary without a call and still opens off the fallback, so the primary
-    // was asked exactly once across both reads.
+    // primary without a call. That skip alone permits no conditional fallback;
+    // the primary was asked exactly once across both reads.
     clock.advance(41 * 60 * SECOND);
     const second = await readArticle(browser, await render("B"), [CONTENT_NAME]);
-    assert.equal(second.texts[CONTENT_NAME], ARTICLES.B);
+    assert.equal(second.texts[CONTENT_NAME], null);
     assert.deepEqual(
       second.unlock.attempts.map((/** @type {any} */ a) => a.outcome),
-      ["skipped", "answered"],
+      ["skipped"],
     );
     assert.equal(network.stats()[PRIMARY_UNLOCK].attempts, 1);
   });

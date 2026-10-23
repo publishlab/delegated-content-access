@@ -93,8 +93,15 @@ async function clientKeys() {
  * @returns {string[]}
  */
 function periodsOn(page) {
-  const entries = own(own(own(own(page, "contentData"), CONTENT_NAME), "keys"), ACCESS_GROUP);
-  return Array.isArray(entries) ? entries.map((entry) => own(entry, "t")) : [];
+  const record = own(page, "contentData").find(
+    (/** @type {any} */ item) => own(item, "contentName") === CONTENT_NAME,
+  );
+  const entries = own(record, "keys");
+  return Array.isArray(entries)
+    ? entries
+        .filter((/** @type {any} */ entry) => own(entry, "accessGroup") === ACCESS_GROUP)
+        .map((/** @type {any} */ entry) => own(entry, "period"))
+    : [];
 }
 
 /**

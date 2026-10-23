@@ -45,15 +45,24 @@ import { portableTest, test } from "../support/portable-test.js";
 import { assertRefusalCase, refusal } from "../support/refusal.js";
 import {
   dynamicRefusals,
+  sealerOriginSetup,
   sealerRefusalCases,
   sealerRuntimeSetup,
   typedRefusals,
 } from "../support/sealerCases.js";
 import { wholeRenderIssuerSupplyPlan } from "../../core-publisher/issuerSupplyPlan.js";
+import { wrapNonceOf } from "../support/contentKeyWrapNonceOctets.js";
+import {
+  contentNamesOn,
+  contentRecordOf,
+  issuerBlockOf,
+  wrapsOf,
+} from "../../test-lib/helpers/inspect.js";
 
 const portableRefusalTest = portableTest("portable-sealer-refusals");
 const portableDynamicRefusalTest = portableTest("portable-sealer-refusals-dynamic");
 const portableRuntimeTest = portableTest("portable-sealer-runtime");
+const portableOwnershipTest = portableTest("portable-sealer-ownership");
 
 const ISSUER = {
   issuerName: ISSUER_NAME,
@@ -114,8 +123,8 @@ describe("The Sealer factory", () => {
 
     assert.equal(dcaData.resource.issuedAt, new Date(AT).toISOString());
     assert.equal(dcaData.resource.renderId, base64url(stream.subarray(0, 16)));
-    assert.equal(Object.hasOwn(dcaData.contentData[CONTENT_NAME], "nonce"), false);
-    assert.equal(dcaData.issuerData[ISSUER_NAME].keyId, KEY_ID);
+    assert.equal(Object.hasOwn(contentRecordOf(dcaData, CONTENT_NAME), "nonce"), false);
+    assert.equal(issuerBlockOf(dcaData, ISSUER_NAME).keyId, KEY_ID);
 
     // The signing key imported from the PKCS#8 document signs what the public
     // half of the same key pair verifies.
@@ -136,16 +145,29 @@ describe("The Sealer factory", () => {
     assert.equal(verified, true);
   });
 
-  test("each call answers a new Sealer", async () => {
-    const setup = testSetup();
+  portableOwnershipTest("each call owns its Sealer, render state and random stream", async () => {
+    const setup = sealerOriginSetup(AT, "sealer-ownership");
     const first = await sealerForRender(setup);
     const second = await sealerForRender(setup);
     assert.notEqual(first, second);
 
-    // Each reads its own copy of the stream: both renders draw the same bytes.
-    const one = await sealOne(first, []);
-    const two = await sealOne(second, []);
-    assert.equal(one.dcaData.resource.renderId, two.dcaData.resource.renderId);
+    // Interleave both objects before sealing either: per-render mutable state
+    // and the callback's stream cursor must belong to their own instance.
+    assert.equal(await first.resource(`${RESOURCE_ID}-first`, {}), first);
+    assert.equal(await second.resource(`${RESOURCE_ID}-second`, {}), second);
+    assert.equal(await first.content(CONTENT_NAME, ARTICLES.A, CONTENT_TYPE), first);
+    assert.equal(await second.content(CONTENT_NAME, ARTICLES.B, "text/html"), second);
+    const one = await first.seal();
+    const two = await second.seal();
+    for (const { dcaData } of [one, two]) {
+      assert.equal(dcaData.resource.issuedAt, new Date(AT).toISOString());
+      assert.equal(dcaData.resource.renderId, base64url(setup.randomStream.subarray(0, 16)));
+      assert.deepEqual(contentNamesOn(dcaData), [CONTENT_NAME]);
+    }
+    assert.equal(one.dcaData.resource.resourceId, `${RESOURCE_ID}-first`);
+    assert.equal(two.dcaData.resource.resourceId, `${RESOURCE_ID}-second`);
+    assert.equal(contentRecordOf(one.dcaData, CONTENT_NAME).contentType, CONTENT_TYPE);
+    assert.equal(contentRecordOf(two.dcaData, CONTENT_NAME).contentType, "text/html");
   });
 
   test("without test setup the Sealer reads the wall clock and draws secure random bytes", async () => {
@@ -194,11 +216,21 @@ describe("The Sealer factory", () => {
   );
 
   test("a read past the end of the random stream is refused", async () => {
-    const sealer = await sealerForRender(testSetup({ randomStream: randomStream(1, 38) }));
-
-    await assert.rejects(sealOne(sealer, []), {
+    // A render draws its render ID (16 bytes), then its content key (16). The
+    // ordinary ECDH envelope draws nothing: its IV is the implicit zero IV.
+    const short = await sealerForRender(testSetup({ randomStream: randomStream(1, 30) }));
+    await assert.rejects(sealOne(short, []), {
       code: "bad_config",
-      message: "the random stream has 6 bytes left, asked for 12",
+      message: "the random stream has 14 bytes left, asked for 16",
+    });
+
+    // 32 bytes are exactly one render: it seals, and the next render's first
+    // draw finds the stream used up.
+    const exact = await sealerForRender(testSetup({ randomStream: randomStream(1, 32) }));
+    await sealOne(exact, []);
+    await assert.rejects(exact.seal(), {
+      code: "bad_config",
+      message: "the random stream has 0 bytes left, asked for 16",
     });
   });
 
@@ -220,15 +252,15 @@ describe("The Sealer factory", () => {
     );
 
     const { dcaData } = await sealOne(sealer, [ACCESS_GROUP]);
-    const entries = dcaData.contentData[CONTENT_NAME].keys[ACCESS_GROUP];
+    const entries = wrapsOf(dcaData, CONTENT_NAME, ACCESS_GROUP);
     assert.deepEqual(
-      entries.map((/** @type {any} */ entry) => entry.t),
+      entries.map((/** @type {any} */ entry) => entry.period),
       [T14, T15],
     );
     for (const entry of entries) {
       const contentKey = await decrypt(
-        periodKeys[entry.t],
-        Buffer.from(entry.nonce, "base64url"),
+        periodKeys[entry.period],
+        wrapNonceOf(dcaData, CONTENT_NAME, ACCESS_GROUP, entry.period),
         Buffer.from(entry.key, "base64url"),
       );
       assert.deepEqual(new Uint8Array(contentKey), stream.subarray(16, 32));

@@ -1,6 +1,6 @@
 // @ts-check
 //
-// Admission of the `contentGroups` response member against the one captured
+// Admission of the `contentGroupKeys` response member against the one captured
 // exchange. There is no second pending token: the request comes from the
 // resolver's `ResponseAssociation`, read once per captured request with the
 // same reader the issuer uses. Admission is atomic for the member. Raw entries
@@ -12,11 +12,7 @@
 // any key open, each under the kind its section fixes, and only when every key
 // opened does the answer reach `retain`. An error opens and files nothing.
 
-import {
-  composedSectionEntries,
-  composedSectionErrors,
-} from "../../../core-client/responseSectionEntries.js";
-import { isRetirementLeaf } from "../../../core-shared--client-issuer/responseKeys.js";
+import { composedSectionEntries } from "../../../core-client/responseSectionEntries.js";
 import { DcaError, dcaError } from "../../../core-shared/errors.js";
 import { own } from "../../../core-shared/wire.js";
 import { CONTRACT, checkedGeometry, record, settleLimits } from "../core-shared/construction.js";
@@ -80,33 +76,60 @@ function refuse(why) {
  */
 
 /**
- * Raw own entries of the member, counted before anything is admitted.
+ * Raw records of the member, key and error records alike, counted before
+ * anything is admitted. A section that is not an array counts nothing here and
+ * refuses the member when it is read.
  * @param {Record<string, unknown>} section
  */
 function rawEntries(section) {
   let count = 0;
-  for (const name of [WIRE.chainKeys, WIRE.periodKeys]) {
-    const names = own(section, name);
-    if (!record(names)) continue;
-    for (const groups of Object.values(names)) {
-      if (!record(groups)) continue;
-      for (const entries of Object.values(groups))
-        if (record(entries)) count += Object.keys(entries).length;
-    }
+  const reported = own(section, WIRE.errors);
+  for (const name of SECTIONS) {
+    for (const list of [own(section, name), own(reported, name)])
+      if (Array.isArray(list)) count += list.length;
   }
-  const items = own(section, WIRE.contentKeys);
-  if (record(items)) count += Object.keys(items).length;
-  const response = { [WIRE.response]: section };
-  for (const descriptor of RESPONSE_SECTIONS)
-    count += composedSectionErrors(response, descriptor).entries.length;
   return count;
 }
 
 /**
- * Admit one `contentGroups` member against its exchange's request, without
+ * The records of one section, each exactly its coordinate fields, every one a
+ * string, and `last`: `key` for a key record, `error` for an error record.
+ * Any other shape refuses the member.
+ * @param {unknown} list @param {readonly string[]} fields @param {string} last @param {string} label
+ * @returns {Record<string, any>[]}
+ */
+function records(list, fields, last, label) {
+  if (list === undefined) return [];
+  if (!Array.isArray(list)) refuse(`${label} is an array of records`);
+  for (const entry of list)
+    if (
+      !record(entry) ||
+      Object.keys(entry).length !== fields.length + 1 ||
+      !Object.hasOwn(entry, last) ||
+      !fields.every((field) => typeof own(entry, field) === "string")
+    )
+      refuse(`${label} holds records of ${[...fields, last].join(", ")}`);
+  return /** @type {Record<string, any>[]} */ (list);
+}
+
+/** @type {Readonly<Record<string, readonly string[]>>} */
+const FIELDS = Object.freeze(
+  Object.fromEntries(
+    RESPONSE_SECTIONS.map((descriptor) => [descriptor.path.at(-1), descriptor.fields]),
+  ),
+);
+
+/**
+ * Admit one `contentGroupKeys` member against its exchange's request, without
  * opening anything. Throws a `bad_response` DcaError naming the first fault;
  * the caller refuses the whole member on it.
- * @param {unknown} section - the response's `contentGroups` member
+ *
+ * Several key records at one coordinate are candidates, and every one is
+ * staged. A chain window has one selected cutoff: chain keys at another
+ * cutoff of that window, or a chain error beside its keys, refuse the member.
+ * An error record repeated at one coordinate is the same report, so the last
+ * whole record stands. Raw records count toward every bound.
+ * @param {unknown} section - the response's `contentGroupKeys` member
  * @param {unknown} request - the request the association captured
  * @param {{ chain: any, limits?: Record<string, number>,
  *   read?: (request: unknown) => ReturnType<typeof readContentGroupRequest> }} options
@@ -117,7 +140,7 @@ export function admitContentGroupResponse(section, request, options) {
   const limits = settleLimits(options.limits);
   const view = (options.read ?? ((r) => readContentGroupRequest(r, limits)))(request);
   if (view === null) refuse("no pending content-group exchange asked for this member");
-  if (!record(section)) refuse("the member is a map");
+  if (!record(section)) refuse("the member is an object of record sections");
   if (rawEntries(section) > limits.maxResponseMembers)
     refuse("raw response bound exceeded before admission");
   for (const name of Object.keys(section))
@@ -140,6 +163,13 @@ export function admitContentGroupResponse(section, request, options) {
     if (at.t !== t) refuse(`${JSON.stringify(t)} is no canonical period label`);
     return at;
   };
+  // Each window's ceiling is the lowest requested cutoff label of it; the
+  // labels were admitted when the request was built and the issuer admits
+  // them again, so an unreadable one here refuses the member.
+  /** @type {Map<string, number>} */
+  const ceilings = new Map();
+  for (const [window, labels] of Object.entries(view.cutoffs ?? {}))
+    ceilings.set(window, Math.min(...labels.map((label) => coordinate(label).position)));
   /** @param {string} contentName @param {string} group */
   const pending = (contentName, group) => {
     const held = own(view.contentGroups, contentName);
@@ -150,153 +180,171 @@ export function admitContentGroupResponse(section, request, options) {
   /** @param {{ windows: readonly string[] }} held @param {string} t */
   const reach = (held, t) => {
     const at = coordinate(t);
-    const cutoff = view.cutoffs === undefined ? undefined : own(view.cutoffs, at.startT);
-    if (!held.windows.includes(at.startT) || (view.cutoffs !== undefined && cutoff === undefined))
+    const ceiling = ceilings.get(at.startT);
+    if (!held.windows.includes(at.startT) || (view.cutoffs !== undefined && ceiling === undefined))
       refuse(`${t} is outside the pending windows`);
-    if (cutoff !== undefined && at.position > coordinate(cutoff).position)
-      refuse(`${t} exceeds the requested cutoff ${cutoff}`);
+    if (ceiling !== undefined && at.position > ceiling)
+      refuse(`${t} exceeds the requested cutoff of its window`);
     return at;
   };
-  /**
-   * @param {string} member
-   * @param {(contentName: string, group: string, t: string, value: unknown) => void} visit
-   * @param {unknown} [from] - the map holding `member`: the section, or its error map
-   */
-  const eachFamilyEntry = (member, visit, from = section) => {
-    const names = own(from, member) ?? {};
-    if (!record(names)) refuse(`${member} is a map`);
-    for (const [contentName, groups] of Object.entries(names)) {
-      if (!record(groups)) refuse(`${member}.${contentName} is a map`);
-      for (const [group, entries] of Object.entries(groups)) {
-        if (!record(entries)) refuse(`${member}.${contentName}.${group} is a map`);
-        pending(contentName, group);
-        for (const [t, value] of Object.entries(entries)) visit(contentName, group, t, value);
-      }
+  /** @param {string} contentName */
+  const askedItem = (contentName) => {
+    const routes = own(view.contentKeys, contentName);
+    if (routes === undefined) return undefined;
+    // An item's alternatives may name several groups; report the lowest.
+    return [.../** @type {readonly { group: string }[]} */ (routes)].map((r) => r.group).sort()[0];
+  };
+
+  const errorsIn = own(section, WIRE.errors);
+  const reported = errorsIn === undefined ? {} : errorsIn;
+  if (!record(reported)) refuse(`${WIRE.errors} is an object of record sections`);
+  for (const name of Object.keys(reported))
+    if (!SECTIONS.includes(name)) refuse(`unknown content-group error section ${name}`);
+  const keyed = (/** @type {string} */ name) =>
+    records(own(section, name), FIELDS[name], "key", name);
+  const failed = (/** @type {string} */ name) => {
+    const list = own(reported, name);
+    const label = `${WIRE.errors}.${name}`;
+    if (list === undefined) return [];
+    if (!Array.isArray(list)) refuse(`${label} is an array of records`);
+    const fields = FIELDS[name];
+    /** @type {Map<string, Record<string, any>>} */
+    const last = new Map();
+    for (const entry of list) {
+      // Admit every raw identity and count it before replacement. Only the
+      // last whole record at that identity supplies the error payload.
+      if (!record(entry) || !fields.every((field) => typeof own(entry, field) === "string"))
+        refuse(`${label} holds records with its coordinate fields`);
+      if (name === WIRE.periodKeys)
+        countPeriod(/** @type {string} */ (entry.contentName), /** @type {string} */ (entry.group));
+      last.set(JSON.stringify(fields.map((field) => own(entry, field))), entry);
     }
+    return records([...last.values()], fields, "error", label);
+  };
+  /** @param {unknown} leaf */
+  const retirement = (leaf) => {
+    if (leaf !== "key_retired") refuse('an error record carries error "key_retired"');
+  };
+
+  // One selected cutoff per content name, group and window, whether it
+  // carries chain keys or a chain error; distinct windows count toward
+  // maxWindowsPerGroup.
+  /** @type {Map<string, { cutoff: string, error: boolean }>} */
+  const selected = new Map();
+  /** @type {Map<string, Set<string>>} */
+  const chainWindows = new Map();
+  /** @param {string} contentName @param {string} group @param {string} cutoff @param {boolean} error */
+  const selectCutoff = (contentName, group, cutoff, error) => {
+    const at = reach(pending(contentName, group), cutoff);
+    const window = JSON.stringify([contentName, group, at.startT]);
+    const held = selected.get(window);
+    if (held !== undefined && held.cutoff !== cutoff)
+      refuse("records at different cutoffs of one window conflict");
+    if (held !== undefined && held.error !== error)
+      refuse("a window carries chain keys or a chain error, never both");
+    selected.set(window, { cutoff, error });
+    const family = JSON.stringify([contentName, group]);
+    const windows = chainWindows.get(family) ?? new Set();
+    chainWindows.set(family, windows);
+    windows.add(at.startT);
+    if (windows.size > limits.maxWindowsPerGroup) refuse("chain windows over maxWindowsPerGroup");
+    return at;
   };
 
   /** @type {StagedChain[]} */
   const chains = [];
-  /** @type {Map<string, Set<string>>} */
-  const chainWindows = new Map();
-  eachFamilyEntry(WIRE.chainKeys, (contentName, group, t, leaf) => {
-    const at = reach(pending(contentName, group), t);
-    const family = JSON.stringify([contentName, group]);
-    const windows = chainWindows.get(family) ?? new Set();
-    chainWindows.set(family, windows);
-    if (windows.has(at.startT)) refuse("a response carries one chain key per window");
-    windows.add(at.startT);
-    if (windows.size > limits.maxWindowsPerGroup) refuse("chain windows over maxWindowsPerGroup");
+  for (const { contentName, group, cutoff, key } of keyed(WIRE.chainKeys)) {
+    const at = selectCutoff(contentName, group, cutoff, false);
     chains.push({
       contentName,
       group,
       windowStart: at.startT,
-      cutoffT: t,
+      cutoffT: cutoff,
       position: at.position,
       keyKind: CONTRACT.keyKinds.chainKey,
-      value: leaf,
+      value: key,
     });
-  });
+  }
 
-  /** @type {StagedPeriod[]} */
-  const periods = [];
+  // Raw period records, key and error, count toward
+  // maxPeriodKeysPerContentGroup with the others of their content name and group.
   /** @type {Map<string, number>} */
   const periodCounts = new Map();
-  eachFamilyEntry(WIRE.periodKeys, (contentName, group, t, value) => {
-    const at = reach(pending(contentName, group), t);
+  /** @param {string} contentName @param {string} group */
+  const countPeriod = (contentName, group) => {
     const family = JSON.stringify([contentName, group]);
     const count = (periodCounts.get(family) ?? 0) + 1;
     periodCounts.set(family, count);
     if (count > limits.maxPeriodKeysPerContentGroup)
       refuse("period keys over maxPeriodKeysPerContentGroup");
+  };
+  /** @type {StagedPeriod[]} */
+  const periods = [];
+  for (const { contentName, group, period, key } of keyed(WIRE.periodKeys)) {
+    const at = reach(pending(contentName, group), period);
+    countPeriod(contentName, group);
     periods.push({
       contentName,
       group,
       windowStart: at.startT,
-      t,
+      t: period,
       position: at.position,
       keyKind: CONTRACT.keyKinds.periodKey,
-      value,
+      value: key,
     });
-  });
+  }
 
   /** @type {StagedContentKey[]} */
   const contentKeys = [];
-  const items = own(section, WIRE.contentKeys) ?? {};
-  if (!record(items)) refuse(`${WIRE.contentKeys} is a map`);
-  for (const [contentName, value] of Object.entries(items)) {
-    const asked = own(view.contentKeys, contentName);
-    if (asked === undefined) refuse(`content key ${contentName} is outside the requested items`);
-    contentKeys.push({ contentName, group: asked.group, keyKind: "contentKey", value });
+  for (const { contentName, key } of keyed(WIRE.contentKeys)) {
+    const group = askedItem(contentName);
+    if (group === undefined) refuse(`content key ${contentName} is outside the requested items`);
+    contentKeys.push({ contentName, group, keyKind: "contentKey", value: key });
   }
 
-  /** @type {StagedError[]} */
-  const errors = [];
-  const reported = own(section, WIRE.errors) ?? {};
-  if (!record(reported)) refuse(`${WIRE.errors} is a map`);
-  for (const name of Object.keys(reported))
-    if (!SECTIONS.includes(name)) refuse(`unknown content-group error map ${name}`);
-  /** @param {unknown} leaf */
-  const retirement = (leaf) => {
-    if (!isRetirementLeaf(leaf)) refuse('an error is exactly {error: "key_retired"}');
-  };
-  // A chain error takes its window's one place, as a chain key does.
-  eachFamilyEntry(
-    WIRE.chainKeys,
-    (contentName, group, t, leaf) => {
-      const at = reach(pending(contentName, group), t);
-      retirement(leaf);
-      const family = JSON.stringify([contentName, group]);
-      const windows = chainWindows.get(family) ?? new Set();
-      chainWindows.set(family, windows);
-      if (windows.has(at.startT)) refuse("a window carries one chain key or chain error");
-      windows.add(at.startT);
-      if (windows.size > limits.maxWindowsPerGroup) refuse("chain windows over maxWindowsPerGroup");
-      errors.push({
-        section: "chainKeys",
-        contentName,
-        group,
-        windowStart: at.startT,
-        t,
-        error: "key_retired",
-      });
-    },
-    reported,
-  );
-  eachFamilyEntry(
-    WIRE.periodKeys,
-    (contentName, group, t, leaf) => {
-      const at = reach(pending(contentName, group), t);
-      retirement(leaf);
-      if (periods.some((p) => p.contentName === contentName && p.group === group && p.t === t))
-        refuse(`period ${t} carries both a key and an error`);
-      const family = JSON.stringify([contentName, group]);
-      const count = (periodCounts.get(family) ?? 0) + 1;
-      periodCounts.set(family, count);
-      if (count > limits.maxPeriodKeysPerContentGroup)
-        refuse("period keys over maxPeriodKeysPerContentGroup");
-      errors.push({
-        section: "periodKeys",
-        contentName,
-        group,
-        windowStart: at.startT,
-        t,
-        error: "key_retired",
-      });
-    },
-    reported,
-  );
-  const itemErrors = own(reported, WIRE.contentKeys) ?? {};
-  if (!record(itemErrors)) refuse(`${WIRE.errors}.${WIRE.contentKeys} is a map`);
-  for (const [contentName, leaf] of Object.entries(itemErrors)) {
-    const asked = own(view.contentKeys, contentName);
-    if (asked === undefined) refuse(`item error ${contentName} is outside the requested items`);
-    retirement(leaf);
-    if (Object.hasOwn(items, contentName))
-      refuse(`item ${contentName} carries both a key and an error`);
-    errors.push({ section: "contentKeys", contentName, group: asked.group, error: "key_retired" });
+  // Errors: the last whole record per full coordinate stands.
+  /** @type {Map<string, StagedError>} */
+  const errors = new Map();
+  for (const { contentName, group, cutoff, error } of failed(WIRE.chainKeys)) {
+    const at = selectCutoff(contentName, group, cutoff, true);
+    retirement(error);
+    errors.set(JSON.stringify(["chainKeys", contentName, group, cutoff]), {
+      section: "chainKeys",
+      contentName,
+      group,
+      windowStart: at.startT,
+      t: cutoff,
+      error: "key_retired",
+    });
   }
-  return { chains, periods, contentKeys, errors, periodGeometry: geometry };
+  for (const { contentName, group, period, error } of failed(WIRE.periodKeys)) {
+    const at = reach(pending(contentName, group), period);
+    retirement(error);
+    if (periods.some((p) => p.contentName === contentName && p.group === group && p.t === period))
+      refuse(`period ${period} carries both a key and an error`);
+    errors.set(JSON.stringify(["periodKeys", contentName, group, period]), {
+      section: "periodKeys",
+      contentName,
+      group,
+      windowStart: at.startT,
+      t: period,
+      error: "key_retired",
+    });
+  }
+  for (const { contentName, error } of failed(WIRE.contentKeys)) {
+    const group = askedItem(contentName);
+    if (group === undefined) refuse(`item error ${contentName} is outside the requested items`);
+    retirement(error);
+    if (contentKeys.some((entry) => entry.contentName === contentName))
+      refuse(`item ${contentName} carries both a key and an error`);
+    errors.set(JSON.stringify(["contentKeys", contentName]), {
+      section: "contentKeys",
+      contentName,
+      group,
+      error: "key_retired",
+    });
+  }
+  return { chains, periods, contentKeys, errors: [...errors.values()], periodGeometry: geometry };
 }
 
 /**
@@ -312,7 +360,7 @@ export function admitContentGroupResponse(section, request, options) {
  */
 
 /**
- * The resolver's response-section consumer for `contentGroups`. `retain`
+ * The resolver's response-section consumer for `contentGroupKeys`. `retain`
  * files one wholly admitted and opened answer; it runs only after every key
  * opened, and never under a retired reader. Recovered item keys are then held
  * through the resolver's `holdContentKey`. `promote`, `attempted` and

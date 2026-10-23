@@ -44,6 +44,12 @@ import {
   UNLOCK_URL,
 } from "../demo/scenarios/fixtures.js";
 import { Page } from "../demo/support/Page.js";
+import {
+  contentRecordOf,
+  issuerBlockOf,
+  sealedContentOf,
+  wrapsOf,
+} from "../test-lib/helpers/inspect.js";
 import { originForHost } from "../demo/support/provisioning.js";
 import { CompressingSealer } from "../extensions/content-compression/core-publisher/CompressingSealer.js";
 import {
@@ -161,20 +167,20 @@ test(
     // the selected layer, and only the period-key route reaches the issuer.
     const pageA = await compressedRender("A");
     const deliveryA = pageA.asJson();
-    const recordA = deliveryA.contentData[CONTENT_NAME];
+    const recordA = contentRecordOf(deliveryA, CONTENT_NAME);
     assert.deepEqual(recordA.contentEncodings, [ENCODING]);
     assert.equal(recordA.contentType, CONTENT_TYPE);
     assert.equal(encoded.length, 1);
     assert.deepEqual(encoded[0].input, utf8Encode(ARTICLES.A));
     assert.equal(
-      base64urlDecode(deliveryA.sealedContent[CONTENT_NAME]).length,
+      base64urlDecode(sealedContentOf(deliveryA, CONTENT_NAME) ?? "").length,
       encoded[0].output.length + TAG_LENGTH,
       "the sealed plaintext is the gzip output",
     );
-    const issuerA = deliveryA.issuerData[ISSUER_NAME];
+    const issuerA = issuerBlockOf(deliveryA, ISSUER_NAME);
     assert.equal(Object.hasOwn(issuerA.sealed, "contentKeys"), false);
-    assert.ok(issuerA.sealed.periodKeys[ACCESS_GROUP]);
-    assert.ok(recordA.keys[ACCESS_GROUP].length > 0);
+    assert.ok(issuerA.sealed.periodKeys.some(({ accessGroup }) => accessGroup === ACCESS_GROUP));
+    assert.ok(wrapsOf(deliveryA, CONTENT_NAME, ACCESS_GROUP).length > 0);
 
     // Issuer: one exchange returns the period keys for the render's two periods
     // and no content key. The representation list never reaches the request.
@@ -183,16 +189,22 @@ test(
     assert.equal(exchanges.length, 1);
     const [{ url, request, response }] = exchanges;
     assert.equal(url, UNLOCK_URL);
-    assert.deepEqual(request.sealed.contentKeys, {});
-    assert.ok(request.sealed.periodKeys[ACCESS_GROUP]);
+    assert.deepEqual(request.sealed.contentKeys, []);
+    assert.ok(request.sealed.periodKeys.some(({ accessGroup }) => accessGroup === ACCESS_GROUP));
     assert.equal(JSON.stringify(request).includes("contentEncodings"), false);
-    assert.deepEqual(response.keys.contentKeys, {});
-    assert.deepEqual(response.keys.periodKeys, {
-      [ACCESS_GROUP]: {
-        [T_NOW]: base64urlEncode(await world.periodKeySupply.derive(ACCESS_GROUP, T_NOW)),
-        [T_NEXT]: base64urlEncode(await world.periodKeySupply.derive(ACCESS_GROUP, T_NEXT)),
+    assert.deepEqual(response.keys.contentKeys, []);
+    assert.deepEqual(response.keys.periodKeys, [
+      {
+        accessGroup: ACCESS_GROUP,
+        period: T_NOW,
+        key: base64urlEncode(await world.periodKeySupply.derive(ACCESS_GROUP, T_NOW)),
       },
-    });
+      {
+        accessGroup: ACCESS_GROUP,
+        period: T_NEXT,
+        key: base64urlEncode(await world.periodKeySupply.derive(ACCESS_GROUP, T_NEXT)),
+      },
+    ]);
 
     // Client: after the unlock the resolver unwraps the item key with the
     // cached period key and holds it for this render, and the open uses that
@@ -210,7 +222,7 @@ test(
     // Second article, same client and period: the cached period key resolves
     // its key with no unlock, and gzip again receives the decrypted gzip output.
     const pageB = await compressedRender("B");
-    assert.deepEqual(pageB.asJson().contentData[CONTENT_NAME].contentEncodings, [ENCODING]);
+    assert.deepEqual(contentRecordOf(pageB.asJson(), CONTENT_NAME).contentEncodings, [ENCODING]);
     const second = await readArticle(browser, pageB, [CONTENT_NAME]);
     assert.equal(second.unlock, null, "the retained period key avoids another issuer call");
     assert.equal(exchanges.length, 1);

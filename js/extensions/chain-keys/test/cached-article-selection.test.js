@@ -9,7 +9,6 @@ import { DcaRequest } from "../../../core-shared--client-issuer/DcaRequest.js";
 import {
   ACCESS_GROUP,
   CONTENT_NAME,
-  ISSUER_NAME,
   keyDerivationSecret,
 } from "../../../demo/scenarios/fixtures.js";
 import { ARTICLES } from "../../../demo/scenarios/fixtures.js";
@@ -20,7 +19,16 @@ import { ChainKeyCache } from "../core-client/ChainKeyCache.js";
 import { chainKeyCapabilitySource } from "../core-issuer/chainKeyCapabilitySource.js";
 import { periodFamilyGeneration } from "../core-shared--publisher-issuer/periodFamilyGeneration.js";
 import { periodFamilySupply } from "../core-publisher/periodFamilySupply.js";
-import { basePeriodOnlyPolicy, chainBrowser, deliveryPlan, exchangesPosted } from "./world.js";
+import { issuerBlockOf, issuerPeriodsOn, periodsOn } from "../../../test-lib/helpers/inspect.js";
+import { contentKeyMap, periodKeyMap } from "../../../test-reference/support/namedRecords.js";
+import {
+  basePeriodOnlyPolicy,
+  chainBrowser,
+  chainKeyRecords,
+  cutoffsOf,
+  deliveryPlan,
+  exchangesPosted,
+} from "./world.js";
 
 const P10 = "251023T1000";
 const P13 = "251023T1300";
@@ -49,22 +57,25 @@ test("the existing base period-key route still returns an old supplied article k
     accessPolicy: basePeriodOnlyPolicy(1),
   });
   const page = await world.render("A");
-  assert.deepEqual(
-    Object.keys(page.asJson().issuerData[ISSUER_NAME].sealed.periodKeys[ACCESS_GROUP]),
-    [P10],
-  );
+  assert.deepEqual(issuerPeriodsOn(page.asJson()), [P10]);
   world.clock.set(READ_AT);
   const read = await readArticle(world.makeBrowser(), page, [CONTENT_NAME]);
   assert.equal(read.unlock.ok, true);
   assert.equal(read.texts[CONTENT_NAME], ARTICLES.A);
 });
 
-/** @param {Record<string, Record<string, string>>} chainKeys @param {Record<string, string[]>} requestedPeriodKeys */
+/**
+ * @param {Record<string, Record<string, string>>} chainKeys - as `chainKeyRecords` spells it
+ * @param {Record<string, string[]>} requestedPeriodKeys - one `{accessGroup, periods}` record per group
+ */
 function sourceRequest(chainKeys, requestedPeriodKeys) {
   return new DcaRequest({
-    sealed: { contentKeys: {}, chainKeys },
+    sealed: { contentKeys: [], chainKeys: chainKeyRecords(chainKeys) },
     periodGeometry: GEOMETRY,
-    requestedPeriodKeys,
+    requestedPeriodKeys: Object.entries(requestedPeriodKeys).map(([accessGroup, periods]) => ({
+      accessGroup,
+      periods,
+    })),
   });
 }
 
@@ -156,16 +167,16 @@ async function cachedArticleWorld({
     },
   });
   const page = await world.render("A", { items });
+  assert.deepEqual(periodsOn(page.asJson()), [P10]);
+  const supply = issuerBlockOf(page.asJson()).sealed;
   assert.deepEqual(
-    page.asJson().contentData[CONTENT_NAME].keys[ACCESS_GROUP].map((entry) => entry.t),
-    [P10],
-  );
-  const supply = page.asJson().issuerData[ISSUER_NAME].sealed;
-  assert.deepEqual(
-    Object.keys(supply.chainKeys[ACCESS_GROUP]).sort(),
+    cutoffsOf(supply.chainKeys, ACCESS_GROUP).sort(),
     chainsPerDay === 1 ? [ACTOR_C23, "251024T2300"] : [ACTOR_C11, ACTOR_C23],
   );
-  assert.deepEqual(Object.keys(supply.contentKeys ?? {}).sort(), [...itemGrantNames].sort());
+  assert.deepEqual(
+    Object.keys(contentKeyMap(supply.contentKeys ?? [])).sort(),
+    [...itemGrantNames].sort(),
+  );
   world.clock.set(READ_AT);
   return { world, page, counters };
 }
@@ -178,9 +189,11 @@ test("an old article target is projected before optional future period keys", as
   const load = chainBrowser(world).load(rootFromPage(page));
   const { exchanges } = await exchangesPosted(world.network, () => load.unlock());
   assert.equal(exchanges.length, 1);
-  assert.deepEqual(exchanges[0].request.requestedPeriodKeys, { [ACCESS_GROUP]: [P10] });
+  assert.deepEqual(exchanges[0].request.requestedPeriodKeys, [
+    { accessGroup: ACCESS_GROUP, periods: [P10] },
+  ]);
   assert.equal(exchanges[0].status, 200);
-  const returned = exchanges[0].body.keys.periodKeys[ACCESS_GROUP];
+  const returned = periodKeyMap(exchanges[0].body.keys.periodKeys)[ACCESS_GROUP];
   assert.deepEqual(Object.keys(returned).sort(), [
     P10,
     P13,
@@ -211,7 +224,7 @@ test("narrow period policy projects only the old article target and its permitte
   const { exchanges } = await exchangesPosted(world.network, () => load.unlock());
   assert.equal(exchanges[0].status, 200);
   assert.deepEqual(
-    Object.keys(exchanges[0].body.keys.periodKeys[ACCESS_GROUP]).sort(),
+    Object.keys(periodKeyMap(exchanges[0].body.keys.periodKeys)[ACCESS_GROUP]).sort(),
     [...permitted].sort(),
   );
   assert.equal((await load.open(CONTENT_NAME)).error, null);
@@ -225,7 +238,9 @@ test("zero future count does not deny an independently authorized old article ta
   const load = chainBrowser(world).load(rootFromPage(page));
   const { exchanges } = await exchangesPosted(world.network, () => load.unlock());
   assert.equal(exchanges[0].status, 200);
-  assert.deepEqual(Object.keys(exchanges[0].body.keys.periodKeys[ACCESS_GROUP]), [P10]);
+  assert.deepEqual(Object.keys(periodKeyMap(exchanges[0].body.keys.periodKeys)[ACCESS_GROUP]), [
+    P10,
+  ]);
   assert.equal(exchanges[0].body.notDelivered, undefined);
   assert.equal((await load.open(CONTENT_NAME)).error, null);
 });
@@ -239,7 +254,9 @@ test("a broad chain agreement selects old and current windows independently", as
   const load = chainBrowser(world).load(rootFromPage(page));
   const { exchanges } = await exchangesPosted(world.network, () => load.unlock());
   assert.equal(exchanges[0].status, 200);
-  const cutoffs = Object.keys(exchanges[0].body.keys.chainKeys[ACCESS_GROUP]).sort();
+  const cutoffs = Object.keys(
+    periodKeyMap(exchanges[0].body.keys.chainKeys, "cutoff")[ACCESS_GROUP],
+  ).sort();
   assert.deepEqual(cutoffs, [P10, P18]);
   assert.equal((await load.open(CONTENT_NAME)).error, null);
 });
@@ -254,7 +271,10 @@ test("a daily broad chain agreement carries the authorized old prefix through th
   const load = chainBrowser(world).load(rootFromPage(page));
   const { exchanges } = await exchangesPosted(world.network, () => load.unlock());
   assert.equal(exchanges[0].status, 200);
-  assert.deepEqual(Object.keys(exchanges[0].body.keys.chainKeys[ACCESS_GROUP]), [P18]);
+  assert.deepEqual(
+    Object.keys(periodKeyMap(exchanges[0].body.keys.chainKeys, "cutoff")[ACCESS_GROUP]),
+    [P18],
+  );
   assert.equal((await load.open(CONTENT_NAME)).error, null);
 });
 
@@ -267,8 +287,11 @@ test("a chain-only answer does not widen narrow period authorization to a window
   const load = chainBrowser(world).load(rootFromPage(page));
   const { exchanges } = await exchangesPosted(world.network, () => load.unlock());
   assert.equal(exchanges.length, 1);
-  assert.equal(exchanges[0].body?.keys?.chainKeys?.[ACCESS_GROUP], undefined);
-  assert.equal(exchanges[0].body?.keys?.periodKeys?.[ACCESS_GROUP], undefined);
+  assert.equal(
+    periodKeyMap(exchanges[0].body?.keys?.chainKeys, "cutoff")?.[ACCESS_GROUP],
+    undefined,
+  );
+  assert.equal(periodKeyMap(exchanges[0].body?.keys?.periodKeys)?.[ACCESS_GROUP], undefined);
   assert.equal((await load.open(CONTENT_NAME)).error, "no_key");
 });
 
@@ -321,17 +344,19 @@ test("a reachable tampered hint is denied while the legitimate article target an
     network: {
       post(url, request, options) {
         const tampered = JSON.parse(JSON.stringify(request));
-        tampered.requestedPeriodKeys[ACCESS_GROUP].push("251023T0900");
+        tampered.requestedPeriodKeys
+          .find((/** @type {any} */ record) => record.accessGroup === ACCESS_GROUP)
+          .periods.push("251023T0900");
         return world.network.post(url, tampered, options);
       },
     },
   });
   const load = browser.load(rootFromPage(page));
   const { exchanges } = await exchangesPosted(world.network, () => load.unlock());
-  assert.deepEqual(exchanges[0].request.requestedPeriodKeys, {
-    [ACCESS_GROUP]: [P10, "251023T0900"],
-  });
-  const returned = exchanges[0].body.keys.periodKeys[ACCESS_GROUP];
+  assert.deepEqual(exchanges[0].request.requestedPeriodKeys, [
+    { accessGroup: ACCESS_GROUP, periods: [P10, "251023T0900"] },
+  ]);
+  const returned = periodKeyMap(exchanges[0].body.keys.periodKeys)[ACCESS_GROUP];
   assert.equal(Object.hasOwn(returned, "251023T0900"), false);
   assert.equal(Object.hasOwn(returned, P10), true);
   assert.equal(
@@ -351,9 +376,11 @@ test("an item grant stays item-scoped and cannot turn its period hint into a reu
   });
   const load = chainBrowser(world).load(rootFromPage(page));
   const { exchanges } = await exchangesPosted(world.network, () => load.unlock());
-  assert.deepEqual(exchanges[0].request.requestedPeriodKeys, { [ACCESS_GROUP]: [P10] });
-  assert.deepEqual(Object.keys(exchanges[0].body.keys.contentKeys), [CONTENT_NAME]);
-  assert.equal(exchanges[0].body.keys.periodKeys?.[ACCESS_GROUP], undefined);
+  assert.deepEqual(exchanges[0].request.requestedPeriodKeys, [
+    { accessGroup: ACCESS_GROUP, periods: [P10] },
+  ]);
+  assert.deepEqual(Object.keys(contentKeyMap(exchanges[0].body.keys.contentKeys)), [CONTENT_NAME]);
+  assert.equal(periodKeyMap(exchanges[0].body.keys.periodKeys)?.[ACCESS_GROUP], undefined);
   assert.equal((await load.open(CONTENT_NAME)).error, null);
   assert.equal((await load.open(second)).error, "no_key");
 });
@@ -365,13 +392,13 @@ test("malformed, off-grid and excess selectors are refused before policy or enve
   });
   const alterations = [
     (selector) => {
-      selector[ACCESS_GROUP] = "not-an-array";
+      selector[0].periods = "not-an-array";
     },
     (selector) => {
-      selector[ACCESS_GROUP] = ["251023T1001"];
+      selector[0].periods = ["251023T1001"];
     },
     (selector) => {
-      selector[ACCESS_GROUP] = Array(289).fill(P10);
+      selector[0].periods = Array(289).fill(P10);
     },
   ];
   let alteration = alterations[0];
@@ -412,6 +439,8 @@ test("an old-window projection opens its actual supplied coordinate", async () =
   const openedAt = [];
   const produce = source.capabilities({
     request,
+    periodKeyCount: 0,
+    selectedCapabilities: [{ accessGroup: "premium", selected: selected.selected }],
     open: async (_sealed, bind) => {
       openedAt.push(bind);
       return { bytes: new Uint8Array(16).fill(7) };
@@ -428,7 +457,7 @@ test("an old-window projection opens its actual supplied coordinate", async () =
   );
 });
 
-test("article targets across groups fill the 512-key response before optional future reach", () => {
+test("selection retains every article target for candidate accounting after opening", () => {
   const day = Array.from({ length: 96 }, (_, index) => {
     const hour = Math.floor(index / 4)
       .toString()
@@ -442,6 +471,7 @@ test("article targets across groups fill the 512-key response before optional fu
     ...groups.slice(1, 6).map((group) => [group, day]),
     [groups[6], day.slice(0, 31)],
   ]);
+  /** @type {Record<string, Record<string, string>>} */
   const chainKeys = Object.fromEntries(
     groups.map((group) => [group, { [C11]: "AQ", [C23]: "Ag" }]),
   );
@@ -453,9 +483,12 @@ test("article targets across groups fill the 512-key response before optional fu
   );
   assert.deepEqual(
     selectedTargets.map((targets) => targets.length),
-    [1, 96, 96, 96, 96, 96, 31],
+    [45, 96, 96, 96, 96, 96, 31],
   );
-  assert.deepEqual(selectedTargets[0], [day[0]]);
+  assert.deepEqual(
+    select(groups[0]).selected.flatMap(({ articleTs }) => articleTs),
+    [day[0]],
+  );
 });
 
 test("period authorization for one group does not transfer to another group with the same requested label", () => {
@@ -536,8 +569,8 @@ test("chain response capacity uses member bounds rather than the projected-key t
   const groups = ["a", "b", "c"];
   const request = new DcaRequest({
     sealed: {
-      contentKeys: {},
-      chainKeys: Object.fromEntries(groups.map((group) => [group, { "251023T2355": "Aw" }])),
+      contentKeys: [],
+      chainKeys: groups.map((accessGroup) => ({ accessGroup, cutoff: "251023T2355", key: "Aw" })),
     },
     periodGeometry: { chainsPerDay: 1, periodMinutes: 5 },
   });

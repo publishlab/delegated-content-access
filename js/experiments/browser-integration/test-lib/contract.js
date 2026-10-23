@@ -222,7 +222,7 @@ export function registerContracts(implementation) {
     let effects = 0;
     const handler = implementation.createContentHandler();
     const connection = handler.connect({
-      delivery: { contentData: { bodytext: { contentType: "text/html" } } },
+      delivery: { contentData: [{ contentName: "bodytext", contentType: "text/html" }] },
       isEligible: () => eligible,
       targets: {
         bodytext: async ({ commit }) => {
@@ -247,11 +247,11 @@ export function registerContracts(implementation) {
     const handler = implementation.createContentHandler();
     const connection = handler.connect({
       delivery: {
-        contentData: {
-          clean: { contentType: "text/plain" },
-          refusedAfterEffect: { contentType: "text/plain" },
-          handledWithoutEffect: { contentType: "text/plain" },
-        },
+        contentData: [
+          { contentName: "clean", contentType: "text/plain" },
+          { contentName: "refusedAfterEffect", contentType: "text/plain" },
+          { contentName: "handledWithoutEffect", contentType: "text/plain" },
+        ],
       },
       isEligible: () => true,
       targets: {
@@ -279,7 +279,7 @@ export function registerContracts(implementation) {
     let calls = 0;
     let effects = 0;
     const connection = implementation.createContentHandler().connect({
-      delivery: { contentData: { bodytext: { contentType: "text/html" } } },
+      delivery: { contentData: [{ contentName: "bodytext", contentType: "text/html" }] },
       isEligible: () => true,
       targets: {
         bodytext: ({ commit }) => {

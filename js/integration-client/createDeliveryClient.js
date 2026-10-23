@@ -73,12 +73,31 @@ import {
  */
 /** @typedef {{ missing: string[], attempts: RouteAttempt[], failed: {name: string, code: string}[] }} RouteWalkResult */
 /**
+ * Resolver operations awaited by delivery may complete synchronously too.
+ * @template {(...args: any[]) => any} F
+ * @typedef {(...args: Parameters<F>) => ReturnType<F>|Awaited<ReturnType<F>>} AwaitableMethod
+ */
+/**
+ * The six duties validated at delivery setup, including authenticated
+ * candidate selection, plus optional reset. Standalone delivery does not require browser cleanup.
+ * @typedef {object} DeliveryResolver
+ * @property {AwaitableMethod<import("../core-client/ContentKeyResolver.js").ContentKeyResolver['applyResponse']>} applyResponse
+ * @property {AwaitableMethod<import("../core-client/ContentKeyResolver.js").ContentKeyResolver['resolveDetailed']>} resolveDetailed
+ * @property {AwaitableMethod<import("../core-client/ContentKeyResolver.js").ContentKeyResolver['resolve']>} resolve
+ * @property {AwaitableMethod<import("../core-client/ContentKeyResolver.js").ContentKeyResolver['contentKeyFor']>} contentKeyFor
+ * @property {AwaitableMethod<import("../core-client/ContentKeyResolver.js").ContentKeyResolver['contentKeyWithOriginFor']>} contentKeyWithOriginFor
+ * @property {AwaitableMethod<import("../core-client/ContentKeyResolver.js").ContentKeyResolver['resolveAuthenticated']>} resolveAuthenticated
+ * @property {() => void|Promise<void>} [clearReaderContext]
+ * @property {() => void} [assertReaderContextReset]
+ */
+/** @typedef {import("./composeClient.js").ComposeClientOptions<DeliveryResolver>} DeliveryCompositionOptions */
+/**
  * @typedef {object} DeliveryClient
  * @property {{ dcaData: any, publisherOrigin: string, extract: (name: string) => string|null }} reader
  * @property {DcaData} dcaData
- * @property {any} cache
- * @property {any} resolver
- * @property {any} builder
+ * @property {import("./composeClient.js").ClientCache} cache
+ * @property {DeliveryResolver} resolver
+ * @property {import("./composeClient.js").RequestBuilder} builder
  * @property {import("../core-client/ContentRepresentationOpener.js").ContentRepresentationOpener} opener
  * @property {(contentNames: string[]) => Promise<{ covered: string[], missing: string[], origins: any[] }>} resolve
  * @property {(contentNames: string[]) => Promise<UnlockResult>} unlock
@@ -109,16 +128,16 @@ function isHttpAnswer(value) {
 
 /** @param {unknown} value */
 function hasKeyFamilyEntries(value) {
-  if (value === null || typeof value !== "object" || Array.isArray(value)) return false;
-  return Object.keys(value).some((accessGroup) => {
-    const family = own(value, accessGroup);
-    return (
-      family !== null &&
-      typeof family === "object" &&
-      !Array.isArray(family) &&
-      Object.keys(family).length > 0
-    );
-  });
+  return (
+    Array.isArray(value) &&
+    value.some(
+      (record) =>
+        record !== null &&
+        typeof record === "object" &&
+        !Array.isArray(record) &&
+        typeof own(record, "accessGroup") === "string",
+    )
+  );
 }
 
 /** @param {string} value @param {boolean} developmentHttpOrigin */
@@ -147,7 +166,7 @@ function admittedUrl(value, developmentHttpOrigin) {
  * that outcome without making it eligible for conditional fallback. Untyped
  * transport errors remain visible to the caller.
  *
- * @param {import("./composeClient.js").ComposeClientOptions & {
+ * @param {DeliveryCompositionOptions & {
  *   reader: { dcaData: any, publisherOrigin: string, extract: (name: string) => string|null },
  *   issuerName: string,
  *   transport: { post: (url: string, request: object, context: { origin: string }) => Promise<{ status: number, contentType: string|null, body?: any }> },
@@ -234,8 +253,9 @@ export function createDeliveryClient(config) {
     "resolve",
     "contentKeyFor",
     "contentKeyWithOriginFor",
+    "resolveAuthenticated",
   ])
-    if (typeof resolver?.[method] !== "function")
+    if (typeof resolver?.[/** @type {keyof DeliveryResolver} */ (method)] !== "function")
       throw dcaError("bad_config", `a resolverFactory result needs ${method}`);
   // A selected extension builder reports the coordinates it adds and how to
   // narrow them for a conditional retry. The walk reads no extension member.
@@ -516,15 +536,18 @@ export function createDeliveryClient(config) {
     const readerRevision = readerContext.capture();
     const seen = new Set();
     const resolved = readerContext.accept(
-      await resolver.resolveAuthenticated(
+      await /** @type {NonNullable<DeliveryResolver["resolveAuthenticated"]>} */ (
+        resolver.resolveAuthenticated
+      )(
         dcaData,
         contentNames,
-        /** @param {string} contentName @param {Uint8Array|CryptoKey} candidate */
-        async (contentName, candidate) => {
+        /** @param {string} contentName @param {Uint8Array|CryptoKey} candidate @param {{kind: string}} [origin] */
+        async (contentName, candidate, origin) => {
           const preflighted = items.get(contentName);
           if (!preflighted)
             throw dcaError("bad_config", `route coverage has no preflight for "${contentName}"`);
-          seen.add(contentName);
+          if (origin !== undefined && origin.kind !== "recovered-content-key")
+            seen.add(contentName);
           const { item, ciphertext } = preflighted;
           try {
             const plaintext = readerContext.accept(
@@ -731,6 +754,30 @@ export function createDeliveryClient(config) {
   }
 
   /**
+   * The key that the opener's predicate proves opens this item. Rival
+   * candidates for one item are held newest first, and the newest may be a
+   * wrong one, so a resolver that selects by authentication tries each. The
+   * key comes out of the predicate, not out of a second lookup: a second
+   * lookup would read the live delivery again after the await.
+   * @param {string} contentName
+   * @param {(candidate: Uint8Array|CryptoKey, origin?: { kind?: string }) => Promise<boolean>} authenticate
+   */
+  async function authenticatedKeyFor(contentName, authenticate) {
+    /** @type {Uint8Array|CryptoKey|null} */
+    let opened = null;
+    await resolver.resolveAuthenticated(
+      dcaData,
+      [contentName],
+      async (_name, candidate, origin) => {
+        const opens = await authenticate(candidate, origin);
+        if (opens) opened = candidate;
+        return opens;
+      },
+    );
+    return opened;
+  }
+
+  /**
    * Open one item from the view captured when its operation started. The AAD,
    * the decoders and the handed-off type all come from that view, never from a
    * reread after an await.
@@ -742,7 +789,7 @@ export function createDeliveryClient(config) {
       await opener.open({
         item,
         ciphertext,
-        resolveKey: () => resolver.contentKeyFor(dcaData, item.contentName),
+        resolveKey: (authenticate) => authenticatedKeyFor(item.contentName, authenticate),
       }),
       readerRevision,
     );

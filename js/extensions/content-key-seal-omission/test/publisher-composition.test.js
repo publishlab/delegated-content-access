@@ -361,11 +361,15 @@ describe("An issuer the contribution never saw", () => {
 test("the omission publisher budgets the support signal and bound candidates it asks clients to send", async () => {
   const w = await recordedPublisherWorld(RECORDS.active.input);
   const page = await w.sealed(new OmittingSealer(w.config()));
-  const issuerName = Object.keys(page.dcaData.issuerData)[0];
+  const issuerName = page.dcaData.issuerData[0].issuerName;
   const document = new OmissionRequestBuilder({ relayPeriodKeys: true })
-    .build(new DcaData(page.dcaData), issuerName, Object.keys(page.dcaData.contentData))
+    .build(
+      new DcaData(page.dcaData),
+      issuerName,
+      page.dcaData.contentData.map((/** @type {any} */ item) => item.contentName),
+    )
     .toObject();
-  assert.ok(Object.keys(document.boundCandidates).length > 0);
+  assert.ok(document.boundCandidates.length > 0);
   const bytes = new TextEncoder().encode(JSON.stringify(document)).length;
   for (const atLimit of [false, true]) {
     for (const path of ["entry", "composed", "convenience", "spread"]) {
@@ -394,9 +398,13 @@ test("the omission publisher budgets the support signal and bound candidates it 
 test("a render without bound wraps budgets the support signal only, as its client sends", async () => {
   const w = await recordedPublisherWorld(RECORDS.inactive.input);
   const page = await w.sealed(new OmittingSealer(w.config()));
-  const issuerName = Object.keys(page.dcaData.issuerData)[0];
+  const issuerName = page.dcaData.issuerData[0].issuerName;
   const document = new OmissionRequestBuilder({ relayPeriodKeys: true })
-    .build(new DcaData(page.dcaData), issuerName, Object.keys(page.dcaData.contentData))
+    .build(
+      new DcaData(page.dcaData),
+      issuerName,
+      page.dcaData.contentData.map((/** @type {any} */ item) => item.contentName),
+    )
     .toObject();
   assert.equal(Object.hasOwn(document, "boundCandidates"), false);
   const bytes = new TextEncoder().encode(JSON.stringify(document)).length;

@@ -4,7 +4,7 @@
 //
 // The reader sends those bytes. An ECDH-P256 sealed blob is a fixed layout with
 // no length prefixes: an uncompressed public point at offset 0, 65 bytes, then a
-// 12-byte nonce, then the ciphertext and its tag. The blob travels through the
+// ciphertext and its tag; the twelve-zero nonce is implicit. The blob travels through the
 // reader's browser, and an unlock request is whatever the reader posts, so
 // those 65 bytes are the reader's to write. `IssuerEngine` walks the request
 // and hands them to `keySealing.open`; nothing ahead of that call has looked
@@ -75,6 +75,7 @@ import { directWorld } from "../../demo/scenarios/world.js";
 import { CONTENT_NAME, ISSUER_NAME, article } from "../../demo/scenarios/fixtures.js";
 import { requestFor } from "../../test-lib/harnesses/issuer-endpoint.js";
 import { unlockThroughAdmission } from "../../test-lib/harnesses/unlockThroughAdmission.js";
+import { contentKeyMap, errorMap, keyAt, periodKeyMap, setKeyAt } from "../support/namedRecords.js";
 
 const { subtle } = globalThis.crypto;
 
@@ -255,8 +256,11 @@ test("the honest request opens both coordinates, and it is six agreements", asyn
   const body = /** @type {any} */ (result).body;
 
   assert.equal(result.status, 200);
-  assert.deepEqual(Object.keys(body.keys.contentKeys).sort(), [ATTACKED, HONEST].sort());
-  assert.equal(body.errors, undefined);
+  assert.deepEqual(
+    Object.keys(contentKeyMap(body.keys.contentKeys)).sort(),
+    [ATTACKED, HONEST].sort(),
+  );
+  assert.equal(errorMap(body.errors), undefined);
   assert.equal(count, 6, "two contentKeys and four periodKeys, one agreement each");
 });
 
@@ -267,9 +271,15 @@ test("a point the reader chose comes back with no key, and the rest of the reque
     await unlockThroughAdmission(processor, endpoint, request(), publisherRegistration)
   ).body;
 
-  for (const { label, point } of badPoints(request().sealed.contentKeys[ATTACKED])) {
+  for (const { label, point } of badPoints(
+    keyAt(request().sealed.contentKeys, { contentName: ATTACKED }),
+  )) {
     const attacked = request();
-    attacked.sealed.contentKeys[ATTACKED] = withPoint(attacked.sealed.contentKeys[ATTACKED], point);
+    setKeyAt(
+      attacked.sealed.contentKeys,
+      { contentName: ATTACKED },
+      withPoint(keyAt(attacked.sealed.contentKeys, { contentName: ATTACKED }), point),
+    );
 
     const { status, body } = await unlockThroughAdmission(
       processor,
@@ -280,7 +290,7 @@ test("a point the reader chose comes back with no key, and the rest of the reque
 
     assert.equal(status, 200, `${label}: one bad blob is not a bad request`);
     assert.equal(
-      body.keys.contentKeys[ATTACKED],
+      contentKeyMap(body.keys.contentKeys)[ATTACKED],
       undefined,
       `${label}: no key at the attacked coordinate`,
     );
@@ -289,19 +299,23 @@ test("a point the reader chose comes back with no key, and the rest of the reque
     // reads "AES-GCM auth tag mismatch" for a blob that never reached
     // AES-GCM - misleading to anyone debugging from the message, and worth
     // knowing before trusting it.
-    assert.equal(body.errors[ATTACKED].error, "unseal_failed", label);
-    assert.deepEqual(Object.keys(body.errors), [ATTACKED], `${label}: nothing else failed`);
+    assert.equal(errorMap(body.errors)[ATTACKED].error, "unseal_failed", label);
+    assert.deepEqual(
+      Object.keys(errorMap(body.errors)),
+      [ATTACKED],
+      `${label}: nothing else failed`,
+    );
 
     // The reader attacked one coordinate and asked for the others honestly.
     // A page has to keep working around a blob that will not open.
     assert.equal(
-      body.keys.contentKeys[HONEST],
-      control.keys.contentKeys[HONEST],
+      contentKeyMap(body.keys.contentKeys)[HONEST],
+      contentKeyMap(control.keys.contentKeys)[HONEST],
       `${label}: ${HONEST} opens`,
     );
     assert.deepEqual(
-      body.keys.periodKeys,
-      control.keys.periodKeys,
+      periodKeyMap(body.keys.periodKeys),
+      periodKeyMap(control.keys.periodKeys),
       `${label}: the periodKeys are untouched`,
     );
   }
@@ -316,9 +330,15 @@ test("the issuer performs no agreement against a point the reader chose", async 
   // is the only thing that moves, so it is the only thing that can say no.
   const { endpoint, processor, publisherRegistration, request } = await world();
 
-  for (const { label, point } of badPoints(request().sealed.contentKeys[ATTACKED])) {
+  for (const { label, point } of badPoints(
+    keyAt(request().sealed.contentKeys, { contentName: ATTACKED }),
+  )) {
     const attacked = request();
-    attacked.sealed.contentKeys[ATTACKED] = withPoint(attacked.sealed.contentKeys[ATTACKED], point);
+    setKeyAt(
+      attacked.sealed.contentKeys,
+      { contentName: ATTACKED },
+      withPoint(keyAt(attacked.sealed.contentKeys, { contentName: ATTACKED }), point),
+    );
 
     const { count } = await agreements(() =>
       unlockThroughAdmission(processor, endpoint, attacked, publisherRegistration),
@@ -336,8 +356,10 @@ test("a blob cut off inside the point is refused on its width, ahead of everythi
   const { endpoint, processor, publisherRegistration, request } = await world();
   const attacked = request();
 
-  const bytes = base64urlDecode(attacked.sealed.contentKeys[ATTACKED]).subarray(0, 40);
-  attacked.sealed.contentKeys[ATTACKED] = base64urlEncode(bytes);
+  const bytes = base64urlDecode(
+    keyAt(attacked.sealed.contentKeys, { contentName: ATTACKED }),
+  ).subarray(0, 40);
+  setKeyAt(attacked.sealed.contentKeys, { contentName: ATTACKED }, base64urlEncode(bytes));
 
   const { result, count } = await agreements(() =>
     unlockThroughAdmission(processor, endpoint, attacked, publisherRegistration),
@@ -345,8 +367,8 @@ test("a blob cut off inside the point is refused on its width, ahead of everythi
   const body = /** @type {any} */ (result).body;
 
   assert.equal(result.status, 200);
-  assert.equal(body.keys.contentKeys[ATTACKED], undefined);
-  assert.equal(body.errors[ATTACKED].error, "unseal_failed");
-  assert.equal(body.errors[ATTACKED].message, "sealed value could not be opened");
+  assert.equal(contentKeyMap(body.keys.contentKeys)[ATTACKED], undefined);
+  assert.equal(errorMap(body.errors)[ATTACKED].error, "unseal_failed");
+  assert.equal(errorMap(body.errors)[ATTACKED].message, "sealed value could not be opened");
   assert.equal(count, 5, "no agreement for a blob there was nothing to agree against");
 });

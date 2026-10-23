@@ -21,6 +21,7 @@ import { Clock } from "../../demo/actors/Clock.js";
 import { writeMarkupDelivery } from "../../adapter-publisher/writeMarkupDelivery.js";
 import { domOver } from "../../test-lib/helpers/domOver.js";
 import { unlockThroughAdmission } from "../../test-lib/harnesses/unlockThroughAdmission.js";
+import { contentRecordOf } from "../../test-lib/helpers/inspect.js";
 import {
   AT,
   BODY,
@@ -81,17 +82,16 @@ function gatedStorage() {
 
 /**
  * Every metadata edit the test makes at the suspension point: the item's type,
- * its encoding list, its nonce, and the delivery's token, each swapped for a
+ * its encoding list, and the delivery's token, each swapped for a
  * well-formed value that would change the AAD or the decoding.
  *
  * @param {any} dcaData
  * @param {string} otherToken - a valid-shaped token of another render
  */
 function editItem(dcaData, otherToken) {
-  const record = dcaData.contentData[ENCODED.name];
+  const record = contentRecordOf(dcaData, ENCODED.name);
   record.contentType = "text/plain";
   record.contentEncodings = ["x-identity"];
-  record.nonce = dcaData.contentData[LOCKED.name].nonce;
   dcaData.resourceJWT = otherToken;
 }
 
@@ -161,10 +161,9 @@ test("createDeliveryClient: open uses the item it captured before the unlock awa
     [
       "item fields",
       (dcaData) => {
-        const record = dcaData.contentData[ENCODED.name];
+        const record = contentRecordOf(dcaData, ENCODED.name);
         record.contentType = "text/plain";
         record.contentEncodings = ["x-identity"];
-        record.nonce = dcaData.contentData[LOCKED.name].nonce;
       },
       [],
     ],

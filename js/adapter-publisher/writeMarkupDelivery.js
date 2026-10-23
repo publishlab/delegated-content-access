@@ -4,8 +4,8 @@
 // publisher puts in the body, per spec--data-format.md Section 3, markup
 // delivery, and Section 5, the sealed-content carrier. The data block goes in a
 // `.dca-data` script element and the ciphertext goes in a second script
-// element, `.dca-sealed-content`, which carries one JSON object keyed by
-// contentName. `adapter-client/MarkupDeliveryReader.js` reads it back. Both
+// element, `.dca-sealed-content`, which carries one JSON array of
+// `{contentName, content}` records. `adapter-client/MarkupDeliveryReader.js` reads it back. Both
 // files take the block placement from `core-shared/markupPlacement.js`, so the
 // placement of each block is stated once and both sides use it.
 //
@@ -13,6 +13,10 @@
 // of large opaque payloads does not bury the metadata a client reads first, and
 // so a deferred item can be left out of the carrier without changing the item
 // inventory dca-data declares.
+//
+// Native writers preserve decoded JSON values and inert carrier behavior, not
+// JSON.stringify number spelling or object member order; see js/PORTING.md,
+// Markup writer values. Signed token and ciphertext strings remain exact.
 //
 // This module holds no state. It receives one render's dca-data and its
 // per-item sealed ciphertext as plain values, and it returns the placement as a
@@ -154,7 +158,8 @@ function validateCiphertext(contentName, ciphertext) {
  *
  * The writer puts the ciphertext in the sealed-content block and nowhere else.
  * The object delivery form differs from this form only there: it has a single
- * enclosing object and carries the same map under its `sealedContent` member.
+ * enclosing object and carries the same records under its `sealedContent`
+ * member.
  *
  * @param {object} render
  * @param {object} render.dcaData - what the publisher signed and shipped,
@@ -183,10 +188,15 @@ export function writeMarkupDelivery(render) {
     );
   }
 
-  /** @type {Record<string, string>} */
-  const carrier = {};
+  // The render holds ciphertext by name; the block carries one
+  // `{contentName, content}` record per item, in the render's item order.
+  /** @type {{ contentName: string, content: string }[]} */
+  const carrier = [];
   for (const [contentName, ciphertext] of Object.entries(sealedContent)) {
-    carrier[validateContentName(contentName)] = validateCiphertext(contentName, ciphertext);
+    carrier.push({
+      contentName: validateContentName(contentName),
+      content: validateCiphertext(contentName, ciphertext),
+    });
   }
 
   return [

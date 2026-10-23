@@ -47,6 +47,12 @@ function promisedMembers(promises) {
 }
 
 /**
+ * Item options owned by the content-groups contribution. Empty or omitted
+ * groups leave an item ordinary; runtime validation checks each group name.
+ * @typedef {{ contentGroups?: string[] }} ContentGroupsItemFields
+ */
+
+/**
  * @typedef {object} ContentGroupsPublisherOptions
  * @property {Uint8Array} retainedSecret - the publisher's 32-byte seed secret;
  *   copied when the contribution is made
@@ -203,7 +209,7 @@ export function contentGroupsPublisherContribution({
         const selection = contentGroupRequestSelection(
           delivery,
           issuerName,
-          Object.keys(delivery.contentData),
+          delivery.contentData.map((/** @type {any} */ record) => record.contentName),
           {},
           limits,
         );
@@ -251,14 +257,14 @@ export function contentGroupsPublisherContribution({
               chain,
             );
             handles.push(handle);
-            /** @type {Record<string, string>} */
-            const connectors = {};
+            /** @type {{ group: string, connector: string }[]} */
+            const connectors = [];
             for (const group of names) {
               const pad = await itemPad(await handle.periodKey(group, at.t), {
                 renderId,
                 contentName,
               });
-              connectors[group] = base64urlEncode(xor16(contentKey, pad));
+              connectors.push({ group, connector: base64urlEncode(xor16(contentKey, pad)) });
             }
             contentRecords[contentName] = { [CONTRACT.wire.connectors]: connectors };
           }
@@ -268,11 +274,10 @@ export function contentGroupsPublisherContribution({
             const issuer = issuers.find(
               (/** @type {any} */ entry) => entry.issuerName === issuerName,
             );
-            /** @type {Record<string, Record<string, string>>} */
-            const sealed = {};
+            /** @type {{ contentName: string, windowStart: string, key: string }[]} */
+            const sealed = [];
             for (const [contentName, windows] of byName) {
               if (!groups.has(contentName)) continue;
-              sealed[contentName] = {};
               for (const window of windows) {
                 const aad = await contentNameSeedAad(
                   {
@@ -285,14 +290,14 @@ export function contentGroupsPublisherContribution({
                   },
                   chain,
                 );
-                sealed[contentName][window] = await sealSeed(
-                  await seedFor(contentName, window),
-                  issuer.publicKey,
-                  aad,
-                );
+                sealed.push({
+                  contentName,
+                  windowStart: window,
+                  key: await sealSeed(await seedFor(contentName, window), issuer.publicKey, aad),
+                });
               }
             }
-            if (Object.keys(sealed).length > 0)
+            if (sealed.length > 0)
               issuerSealed[issuerName] = { [CONTRACT.wire.sealedSeeds]: sealed };
           }
           return {

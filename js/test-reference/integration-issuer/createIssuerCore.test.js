@@ -40,6 +40,9 @@ import { issuerKeypair, signingKeypair } from "../support/keys.js";
 import { refuses } from "../../test-lib/helpers/refuses.js";
 import { cryptoMeter } from "../../test-lib/fixtures/endpoint-hardening-world.js";
 import { contentAadOctets } from "../support/contentAadOctets.js";
+import { wrapNonceOf } from "../support/contentKeyWrapNonceOctets.js";
+import { contentKeyMap, keyAt, notDeliveredMap, periodKeyMap } from "../support/namedRecords.js";
+import { wrapsOf } from "../../test-lib/helpers/inspect.js";
 
 const V1 = new URL("../../", import.meta.url);
 
@@ -171,11 +174,12 @@ async function world({
  * @param {string} key - base64url, as the issuer returned it
  */
 async function openWith(dcaData, sealedContent, t, key) {
-  const record = dcaData.contentData[CONTENT_NAME];
-  const wrap = record.keys[GROUP].find((/** @type {any} */ entry) => entry.t === t);
+  const wrap = wrapsOf(dcaData, CONTENT_NAME, GROUP).find(
+    (/** @type {any} */ entry) => entry.period === t,
+  );
   const contentKey = await decrypt(
     base64urlDecode(key),
-    base64urlDecode(wrap.nonce),
+    wrapNonceOf(dcaData, CONTENT_NAME, GROUP, t),
     base64urlDecode(wrap.key),
   );
   const plaintext = await decrypt(
@@ -289,11 +293,11 @@ describe("What createIssuerCore takes", () => {
         version: "1",
         issuerName: ISSUER_NAME,
         keyId: KEY_ID,
-        sealed: { contentKeys: {} },
+        sealed: { contentKeys: [] },
         ...extra,
       });
     const chainOnly = document({
-      sealed: { contentKeys: {}, chainKeys: { [CONTENT_NAME]: { [GROUP]: { [T_NOW]: "AAAA" } } } },
+      sealed: { contentKeys: [], chainKeys: [{ accessGroup: GROUP, cutoff: T_NOW, key: "AAAA" }] },
     });
     const widgetOnly = document({ widget: {} });
 
@@ -348,7 +352,7 @@ describe("Contribution admission without ordinary key coordinates", () => {
     version: "1",
     issuerName: ISSUER_NAME,
     keyId: KEY_ID,
-    sealed: { contentKeys: {} },
+    sealed: { contentKeys: [] },
     widget: {},
   });
 
@@ -376,7 +380,7 @@ describe("Contribution admission without ordinary key coordinates", () => {
       { operatingIssuerNames: [ISSUER_NAME], accessPolicy: denyAll },
       {
         name: "widget",
-        responseSections: [{ path: ["widget"], depth: 1, keyKind: "contentKey" }],
+        responseSections: [{ path: ["widget"], fields: ["contentName"], keyKind: "contentKey" }],
         responseSectionSource: source,
       },
     );
@@ -393,7 +397,7 @@ describe("Contribution admission without ordinary key coordinates", () => {
         { operatingIssuerNames: [ISSUER_NAME], accessPolicy: denyAll },
         {
           name: "widget",
-          responseSections: [{ path: ["widget"], depth: 1, keyKind: "contentKey" }],
+          responseSections: [{ path: ["widget"], fields: ["contentName"], keyKind: "contentKey" }],
           extensionCoordinate: () => allow,
           responseSectionSource: {
             name: "widget",
@@ -431,7 +435,7 @@ describe("Each named member reaches its owning component", () => {
         version: "1",
         issuerName: "another_issuer_service",
         keyId: KEY_ID,
-        sealed: { contentKeys: { [CONTENT_NAME]: "opaque" } },
+        sealed: { contentKeys: [{ contentName: CONTENT_NAME, key: "opaque" }] },
       }),
     );
     assert.deepEqual(outside, { kind: "failure", code: "out_of_scope_issuer" });
@@ -446,7 +450,7 @@ describe("Each named member reaches its owning component", () => {
         version: "1",
         issuerName: "another_issuer_service",
         keyId: KEY_ID,
-        sealed: { contentKeys: { [CONTENT_NAME]: "opaque" } },
+        sealed: { contentKeys: [{ contentName: CONTENT_NAME, key: "opaque" }] },
       }),
     );
     assert.equal(explicitlyShared.kind, "admitted", "shared authority is an explicit host choice");
@@ -498,7 +502,9 @@ describe("Each named member reaches its owning component", () => {
       notDeliveredReport: "complete",
     }).endpoint.handleDocument(document, registration);
     assert.equal(complete.response.status, 200);
-    assert.deepEqual(complete.response.body.notDelivered, { [GROUP]: { reason: "denied" } });
+    assert.deepEqual(notDeliveredMap(complete.response.body.notDelivered), {
+      [GROUP]: { reason: "denied" },
+    });
     assert.equal(Object.hasOwn(complete.response.body.keys, "periodKeys"), false);
   });
 
@@ -560,12 +566,13 @@ describe("One serialized period-key request through the entry", () => {
     assert.equal(code, undefined);
 
     // The policy granted a prefix of one: the first label and nothing past it.
-    assert.deepEqual(response.body.keys.contentKeys, {});
-    assert.deepEqual(Object.keys(response.body.keys.periodKeys), [GROUP]);
-    assert.deepEqual(Object.keys(response.body.keys.periodKeys[GROUP]), [T_NOW]);
+    assert.deepEqual(response.body.keys.contentKeys, []);
+    const periodKeys = periodKeyMap(response.body.keys.periodKeys);
+    assert.deepEqual(Object.keys(periodKeys), [GROUP]);
+    assert.deepEqual(Object.keys(periodKeys[GROUP]), [T_NOW]);
 
     // The issuer opened the publisher's own period key for that label.
-    const returned = response.body.keys.periodKeys[GROUP][T_NOW];
+    const returned = periodKeys[GROUP][T_NOW];
     assert.equal(returned, base64urlEncode(PERIOD_KEYS[T_NOW]));
     assert.equal(await openWith(dcaData, sealedContent, T_NOW, returned), ARTICLE);
     assert.equal(JSON.stringify(response.body).includes("periodGeometry"), false);
@@ -604,11 +611,9 @@ describe("One serialized period-key request through the entry", () => {
       capturedAtMs: Date.parse(AT),
     });
     assert.equal(miss.response.status, 200);
-    assert.deepEqual(Object.keys(miss.response.body.keys.periodKeys[GROUP]), [T_NOW, T_NEXT]);
-    assert.equal(
-      miss.response.body.keys.periodKeys[GROUP][T_NEXT],
-      base64urlEncode(PERIOD_KEYS[T_NEXT]),
-    );
+    const missKeys = periodKeyMap(miss.response.body.keys.periodKeys);
+    assert.deepEqual(Object.keys(missKeys[GROUP]), [T_NOW, T_NEXT]);
+    assert.equal(missKeys[GROUP][T_NEXT], base64urlEncode(PERIOD_KEYS[T_NEXT]));
 
     const refused = processor.admit("{");
     assert.equal(refused.kind, "failure");
@@ -963,7 +968,10 @@ describe("Browser issuer composition", () => {
     const preflight = await browser.handle({ method: "OPTIONS", origin: ORIGIN });
     assert.equal(preflight.status, 204);
     assert.equal(preflight.headers?.["access-control-allow-credentials"], undefined);
-    assert.equal(answered.body.keys.periodKeys[GROUP][T_NOW], base64urlEncode(PERIOD_KEYS[T_NOW]));
+    assert.equal(
+      keyAt(answered.body.keys.periodKeys, { accessGroup: GROUP, period: T_NOW }),
+      base64urlEncode(PERIOD_KEYS[T_NOW]),
+    );
     assert.equal(policy.decisions.length, 1);
     assert.deepEqual(policy.decisions[0].input.principal, { id: "reader" });
     assert.deepEqual(policy.decisions[0].input.context, { plan: "monthly" });
@@ -1052,6 +1060,43 @@ describe("Browser issuer composition", () => {
       assert.equal(response.headers?.["access-control-allow-origin"], undefined);
       assert.equal(policy.decisions.length, 0);
       assert.equal(opened, 0);
+    }
+  });
+
+  test("preflight applies the selected origin scheme before trusted allow policy", async () => {
+    for (const [developmentHttpOrigin, origin, status] of [
+      [false, "https://publisher.example", 204],
+      [false, "http://publisher.example", 403],
+      [false, "http://localhost", 403],
+      [true, "http://localhost", 204],
+      [true, "http://127.0.0.1:8080", 204],
+      [true, "http://[::1]:8080", 403],
+      [true, "http://publisher.example", 403],
+    ]) {
+      const seen = [];
+      const browser = createBrowserIssuer({
+        core: configuredIssuerCore({ accessPolicy: prefixPolicy(), periodKeyInput: true }),
+        registrationForKid: () => {
+          throw new Error("preflight has no registration");
+        },
+        preflight: (value) => {
+          seen.push(value);
+          return true;
+        },
+        admitCaller: () => {
+          throw new Error("preflight has no caller");
+        },
+        clock: { now: () => new Date(AT) },
+        developmentHttpOrigin,
+      });
+      const response = await browser.handle({ method: "OPTIONS", origin });
+      assert.equal(response.status, status, `${developmentHttpOrigin}: ${origin}`);
+      assert.deepEqual(seen, status === 204 ? [origin] : []);
+      assert.equal(
+        response.headers["access-control-allow-origin"],
+        status === 204 ? origin : undefined,
+      );
+      assert.equal(response.headers.vary, "Origin");
     }
   });
 
@@ -1237,7 +1282,7 @@ describe("Browser issuer composition", () => {
     }
     assert.equal(response.status, 200);
     assert.equal(meter.counts.verify, 1);
-    const keys = response.body.keys.periodKeys[GROUP];
+    const keys = periodKeyMap(response.body.keys.periodKeys)[GROUP];
     const t = Object.keys(keys)[0];
     assert.equal(await openWith(dcaData, sealedContent, t, keys[t]), ARTICLE);
     assert.equal(policy.decisions.length, 1);
@@ -1424,7 +1469,7 @@ describe("Browser issuer composition", () => {
         verification: admitted.claims,
       });
       assert.equal(result.response.status, 200);
-      assert.ok(result.response.body.keys.contentKeys[CONTENT_NAME]);
+      assert.ok(contentKeyMap(result.response.body.keys.contentKeys)[CONTENT_NAME]);
     } finally {
       meter.stop();
     }
@@ -1568,7 +1613,7 @@ describe("A clean copy of the issuer manifest", () => {
       });
       const { response } = await endpoint.handleDocument(document, registration);
       assert.equal(response.status, 200);
-      const returned = response.body.keys.periodKeys[GROUP][T_NOW];
+      const returned = periodKeyMap(response.body.keys.periodKeys)[GROUP][T_NOW];
       assert.equal(await openWith(dcaData, sealedContent, T_NOW, returned), ARTICLE);
     } finally {
       rmSync(root, { recursive: true, force: true });

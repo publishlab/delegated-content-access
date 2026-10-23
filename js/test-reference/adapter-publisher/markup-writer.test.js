@@ -5,6 +5,7 @@
 
 import test, { describe } from "node:test";
 import assert from "node:assert/strict";
+import { parse } from "parse5";
 
 import {
   inertJsonScript,
@@ -17,14 +18,35 @@ import { CONTENT_NAME } from "../../demo/scenarios/fixtures.js";
 
 /**
  * One render, split the way the writer takes it: dca-data and the sealed content
- * beside it, as `asJson()` hands them over with the ciphertext under a member.
+ * beside it by name, from the records `asJson()` hands over under a member.
  *
  * @param {any} page
  * @returns {{ dcaData: any, sealedContent: Record<string, string> }}
  */
 function renderValues(page) {
   const { sealedContent, ...dcaData } = page.asJson();
-  return { dcaData, sealedContent };
+  return { dcaData, sealedContent: byName(sealedContent) };
+}
+
+/**
+ * The render's ciphertext by name as the block carries it: one
+ * `{contentName, content}` record per item, in the render's order.
+ *
+ * @param {Record<string, string>} sealedContent
+ * @returns {{ contentName: string, content: string }[]}
+ */
+function records(sealedContent) {
+  return Object.entries(sealedContent).map(([contentName, content]) => ({ contentName, content }));
+}
+
+/**
+ * The inverse of `records`, for a render read back from the JSON form.
+ *
+ * @param {{ contentName: string, content: string }[]} carried
+ * @returns {Record<string, string>}
+ */
+function byName(carried) {
+  return Object.fromEntries(carried.map(({ contentName, content }) => [contentName, content]));
 }
 
 /**
@@ -48,6 +70,41 @@ function dataBlockText(markup) {
   );
   assert.ok(block, "the markup carries a dca-data script block");
   return block[1];
+}
+
+/**
+ * Check portable carrier behavior through an HTML tokenizer, rather than pinning
+ * a serializer's numeric spelling, whitespace or object member order.
+ * @param {string} markup
+ * @param {{ dcaData: object, sealedContent: Record<string, string> }} expected
+ */
+function assertCarrierValues(markup, expected) {
+  const document = parse(
+    `<!doctype html><html><head></head><body>${markup}<p>after</p></body></html>`,
+  );
+  const html = document.childNodes.find((node) => node.nodeName === "html");
+  const body = html.childNodes.find((node) => node.nodeName === "body");
+  const elements = body.childNodes.filter((node) => node.nodeName !== "#text");
+  assert.deepEqual(
+    elements.map((node) => node.nodeName),
+    ["script", "script", "p"],
+  );
+  assert.equal(elements[2].childNodes[0].value, "after", "the carrier closed before later markup");
+  for (const [index, className, value] of [
+    [0, DATA_CLASS, expected.dcaData],
+    [1, SEALED_CLASS, records(expected.sealedContent)],
+  ]) {
+    const block = elements[index];
+    assert.deepEqual(Object.fromEntries(block.attrs.map(({ name, value }) => [name, value])), {
+      type: "application/json",
+      class: className,
+    });
+    assert.deepEqual(
+      block.childNodes.map((node) => node.nodeName),
+      ["#text"],
+    );
+    assert.deepEqual(JSON.parse(block.childNodes[0].value), value);
+  }
 }
 
 /** A deterministic finite IEEE-754 sample that crosses a PHP double unchanged. */
@@ -108,15 +165,66 @@ describe("The markup delivery writer", () => {
     assert.equal(markup.includes("data-dca-content-name"), false, "no name attribute");
   });
 
-  test("the sealed-content block is one JSON object of contentName to ciphertext", async () => {
+  test("the sealed-content block is one JSON array of {contentName, content} records", async () => {
     const { render } = await actorWorld();
     const { dcaData, sealedContent } = renderValues(await render("A"));
     const markup = writeMarkupDelivery({ dcaData, sealedContent });
 
     const parsed = JSON.parse(sealedBlockText(markup));
-    assert.deepEqual(parsed, sealedContent, "every item, byte for byte");
-    assert.equal(Array.isArray(parsed), false, "an object, never an array");
-    assert.ok(Object.hasOwn(parsed, CONTENT_NAME), "the item is filed under its own name");
+    assert.deepEqual(parsed, records(sealedContent), "every item, byte for byte");
+    assert.ok(Array.isArray(parsed), "an array of records");
+    assert.ok(
+      parsed.some((/** @type {any} */ record) => record.contentName === CONTENT_NAME),
+      "the item's record carries its own name",
+    );
+  });
+
+  test("portable markup preserves decoded values and inert carriers across legal JSON spellings", () => {
+    const render = {
+      dcaData: {
+        version: "1",
+        resourceJWT: "signed.token.bytes",
+        data: {
+          small: 0.0000001,
+          fraction: 0.30000000000000004,
+          values: [
+            null,
+            true,
+            false,
+            "</ScRiPt><img src=x onerror=alert(1)>",
+            "<!--<script>",
+            "é/雪",
+          ],
+          names: { "01": "ordinary", 2: "two", 1: "one" },
+        },
+      },
+      sealedContent: { bodytext: "QUJD", sidebar: "REVG" },
+    };
+    const markup = writeMarkupDelivery(render);
+    assertCarrierValues(markup, render);
+
+    // An independently spelled carrier is equally valid: exponent padding,
+    // whitespace and reversed object members are not changes to JSON values.
+    const data = JSON.stringify(render.dcaData)
+      .replace('"small":1e-7', '"small":0.0000001')
+      .replace('"1":"one","2":"two","01":"ordinary"', '"01":"ordinary","2":"two","1":"one"')
+      .replace(/</g, "\\u003c");
+    const alternative =
+      `<script class="${DATA_CLASS}" type="application/json"> ${data} </script>
+` +
+      `<script type="application/json" class="${SEALED_CLASS}">[ { "content":"QUJD", "contentName":"bodytext" },` +
+      ` {"contentName":"sidebar","content":"REVG"} ]</script>`;
+    assert.notEqual(alternative, markup);
+    assertCarrierValues(alternative, render);
+
+    assert.throws(() =>
+      assertCarrierValues(markup.replace("signed.token.bytes", "changed.token.bytes"), render),
+    );
+    assert.throws(() =>
+      assertCarrierValues(markup.replace("application/json", "text/javascript"), render),
+    );
+    assert.throws(() => assertCarrierValues(markup.replace(/\\u003c/g, "<"), render));
+    assert.throws(() => assertCarrierValues(markup.replace(/<\/script>\s*$/, ""), render));
   });
 
   test("the emission is exact: two blocks, the sealed JSON on its own line", () => {
@@ -130,7 +238,7 @@ describe("The markup delivery writer", () => {
       [
         '<script type="application/json" class="dca-data">{"version":"1"}</script>',
         '<script type="application/json" class="dca-sealed-content">',
-        '{"bodytext":"QUJD","premiumtext":"REVG"}',
+        '[{"contentName":"bodytext","content":"QUJD"},{"contentName":"premiumtext","content":"REVG"}]',
         "</script>",
       ].join("\n"),
     );
@@ -175,8 +283,8 @@ describe("The markup delivery writer", () => {
   test("the writer emits an empty object when every item is deferred", () => {
     const markup = writeMarkupDelivery({ dcaData: { version: "1" }, sealedContent: {} });
 
-    assert.equal(sealedBlockText(markup), "\n{}\n", "an empty carrier, not an absent one");
-    assert.deepEqual(JSON.parse(sealedBlockText(markup)), {});
+    assert.equal(sealedBlockText(markup), "\n[]\n", "an empty carrier, not an absent one");
+    assert.deepEqual(JSON.parse(sealedBlockText(markup)), []);
   });
 
   test("dca-data is an object, never an array-shaped carrier", () => {
@@ -231,13 +339,16 @@ describe("The markup delivery writer", () => {
         urlalphabet: "QUJD_w",
       },
     });
-    assert.deepEqual(JSON.parse(sealedBlockText(emitted)), {
-      empty: "",
-      onebyte: "QQ",
-      twobytes: "AAA",
-      fullquantum: "QUJD",
-      urlalphabet: "QUJD_w",
-    });
+    assert.deepEqual(
+      JSON.parse(sealedBlockText(emitted)),
+      records({
+        empty: "",
+        onebyte: "QQ",
+        twobytes: "AAA",
+        fullquantum: "QUJD",
+        urlalphabet: "QUJD_w",
+      }),
+    );
   });
 
   test("a non-string ciphertext is refused rather than serialized as its JSON type", () => {

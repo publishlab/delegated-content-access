@@ -43,9 +43,9 @@ carriage and browser content handling add reading only when those profiles are
 selected. Everything under Proposals is unselected.
 
 For a concrete first exchange, follow the
-[one-item baseline example](design--data-format--example.md#minimal-baseline-exchange-one-item)
-from JSON delivery through an issuer response to opened plaintext. It uses
-illustrative cryptographic placeholders and adds no optional profile.
+[minimal key exchange](design--data-format--example.md#minimal-key-exchange--html-delivery)
+from delivery through an issuer response to opened plaintext. It selects the
+optional HTML carrier and uses illustrative cryptographic placeholders.
 
 The optional [compact ECDH profile](spec-profile--compact-ecdh.md) combines
 HPKE with compressed-point envelope transport. Its per-issuer selector chooses
@@ -153,4 +153,4 @@ pieces interact, and how developers configure and debug it.
 | [guide--deployment-patterns.md](guide--deployment-patterns.md) | Browser, server, edge and hybrid ways to place the DCA client role |
 | [guide--unlock-fallback.md](guide--unlock-fallback.md) | Deployment-owned client route walk, fallback issuers, health and emergency operation; each independent exchange remains governed by core and its selected transport profile |
 | [guide--browser-integration.md](guide--browser-integration.md) | Evaluating the browser-integration proposal: examples, rationale and limitations |
-| [design--data-format--example.md](design--data-format--example.md) | One-item baseline exchange with values |
+| [design--data-format--example.md](design--data-format--example.md) | Worked HTML exchanges with illustrative values |

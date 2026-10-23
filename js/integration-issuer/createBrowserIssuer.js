@@ -9,6 +9,7 @@
 
 import { BrowserUnlockHttp } from "../adapter-issuer/BrowserUnlockHttp.js";
 import { dcaError } from "../core-shared/errors.js";
+import { signableOrigin } from "../core-shared/publisherOrigin.js";
 import { admitBrowserRequest } from "./admitBrowserRequest.js";
 
 /**
@@ -62,7 +63,8 @@ export function createBrowserIssuer({
     authorization,
     errorBody: (code) => core.endpoint.admissionRefusalBody(code),
     originAdmission: {
-      preflight,
+      preflight: (origin) =>
+        signableOrigin(origin, developmentHttpOrigin) === origin && preflight(origin),
       async admit(origin, body, hostContext, bearer) {
         const admitted = await admitBrowserRequest({
           processor: core.processor,

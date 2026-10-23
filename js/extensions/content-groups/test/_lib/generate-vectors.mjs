@@ -35,9 +35,10 @@ await write(new URL("seed-aad.json", fixtures), {
   expectedAadHex: Buffer.from(aad, "utf8").toString("hex"),
 });
 
-// Seed envelope: fixed issuer and ephemeral P-256 scalars and a fixed nonce. The
-// AES-256-GCM key is the raw 32-byte ECDH x-coordinate; the envelope is the
-// 65-byte ephemeral point, the 12-byte nonce and the 48-byte ciphertext and tag.
+// Seed envelope: fixed issuer and ephemeral P-256 scalars. The AES-256-GCM key is
+// the raw 32-byte ECDH x-coordinate and the nonce is twelve zero bytes, written
+// here as a literal and never carried; the envelope is the 65-byte ephemeral
+// point and the 48-byte ciphertext and tag, 113 bytes.
 const fromHex = (/** @type {string} */ h) => Buffer.from(h, "hex");
 const issuer = createECDH("prime256v1");
 issuer.setPrivateKey(fromHex("0102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f20"));
@@ -45,7 +46,7 @@ const ephemeral = createECDH("prime256v1");
 ephemeral.setPrivateKey(
   fromHex("2122232425262728292a2b2c2d2e2f303132333435363738393a3b3c3d3e3f40"),
 );
-const nonce = fromHex("c0c1c2c3c4c5c6c7c8c9cacb");
+const nonce = fromHex("000000000000000000000000");
 const seedHex = "d9b1274900e75c2ddcf90b8015ffc87d4bd60eb8b84298d5ec9d57e26223a8f3";
 const cipher = createCipheriv("aes-256-gcm", ephemeral.computeSecret(issuer.getPublicKey()), nonce);
 cipher.setAAD(Buffer.from(aad, "utf8"));
@@ -64,8 +65,9 @@ await write(new URL("seed-envelope.json", fixtures), {
     y: issuerPoint.subarray(33, 65).toString("base64url"),
   },
   ephemeralPublicHex: ephemeral.getPublicKey().toString("hex"),
-  nonceHex: nonce.toString("hex"),
+  implicitNonceHex: nonce.toString("hex"),
   aadUtf8: aad,
   seedHex,
-  envelope: Buffer.concat([ephemeral.getPublicKey(), nonce, sealed]).toString("base64url"),
+  ciphertextAndTagHex: sealed.toString("hex"),
+  envelope: Buffer.concat([ephemeral.getPublicKey(), sealed]).toString("base64url"),
 });

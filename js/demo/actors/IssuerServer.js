@@ -653,7 +653,8 @@ export class IssuerServer {
    * Admit one browser-profile request before the reusable HTTP adapter calls
    * the issuer operation. It admits only a request whose resourceJWT verifies
    * under the selected registration's key and whose signed origin equals the
-   * observed one, so every refusal here goes out without CORS permission. The
+   * observed one. Later transport refusals retain that verified admission and
+   * carry exact-origin CORS permission. The
    * returned context is the one request-scoped view: admitted request,
    * publisher registration, verified claims, origin, principal, time and
    * business snapshot. The composition does not repeat the registration
@@ -663,7 +664,7 @@ export class IssuerServer {
    * @param {string} origin
    * @param {string} document
    * @param {{ credential?: any }} [hostContext]
-   * @returns {Promise<{ kind: 'admitted', context: any }|{ kind: 'refused', response: any }>}
+   * @returns {Promise<{ kind: 'admitted', context: any }|{ kind: 'refused', response: any, cors?: boolean }>}
    */
   async #admitBrowser(origin, document, hostContext = {}) {
     this.#requests++;
@@ -719,7 +720,7 @@ export class IssuerServer {
       // refusal would report a misconfiguration as traffic this
       // deployment declined to serve.
       this.#faults++;
-      return { kind: "refused", response: this.#refuse(500, requestFaultCode(cause)) };
+      return { kind: "refused", response: this.#refuse(500, requestFaultCode(cause)), cors: true };
     }
 
     // The transport is agreed after both origin checks, because a
@@ -740,10 +741,10 @@ export class IssuerServer {
       // selection above makes.
       if (code === "client_key_required" || code === "bad_client_key") {
         this.#refusals++;
-        return { kind: "refused", response: this.#refuse(400, code) };
+        return { kind: "refused", response: this.#refuse(400, code), cors: true };
       }
       this.#faults++;
-      return { kind: "refused", response: this.#refuse(500, requestFaultCode(cause)) };
+      return { kind: "refused", response: this.#refuse(500, requestFaultCode(cause)), cors: true };
     }
 
     return {
@@ -815,8 +816,8 @@ export class IssuerServer {
 
     if (answer.status === 401) this.#denials++;
     if (answer.status === 200) {
-      const responseBody = /** @type {{ errors?: Record<string, unknown> }} */ (answer.body);
-      if (responseBody.errors) this.#unsealFailures += Object.keys(responseBody.errors).length;
+      const responseBody = /** @type {{ errors?: unknown[] }} */ (answer.body);
+      if (Array.isArray(responseBody.errors)) this.#unsealFailures += responseBody.errors.length;
 
       const trimmed = this.#failoverGate
         ? trimToCurrentPeriod(answer.body, requestAt)

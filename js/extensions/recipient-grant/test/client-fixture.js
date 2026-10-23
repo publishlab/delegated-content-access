@@ -95,9 +95,11 @@ export async function world() {
     });
     // An unselected extension carrier must never be projected into this
     // recipient attempt, even when delivery carries it for another flow.
-    output.dcaData.issuerData.selected_issuer.sealed.chainKeys = {
-      premium: { "260929T1200": "unselected-chain-envelope" },
-    };
+    output.dcaData.issuerData.find(
+      (/** @type {any} */ record) => record.issuerName === "selected_issuer",
+    ).sealed.chainKeys = [
+      { accessGroup: "premium", cutoff: "260929T1200", key: "unselected-chain-envelope" },
+    ];
     return { output, root: domOver(writeMarkupDelivery(output), { publisherOrigin: ORIGIN }) };
   }
   const calls = [];

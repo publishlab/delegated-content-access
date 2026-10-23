@@ -98,7 +98,7 @@ const html = writeMappedDelivery({
 });
 ```
 
-`render.dcaData.contentData.bodytext.contentType` is `text/html`; the map has no type
+The `bodytext` record in `render.dcaData.contentData` has `contentType` `text/html`; the map has no type
 table. `writeMappedDelivery` embeds it in the existing `dca-data` JSON and returns the
 page after checking the rules, targets and author-time placement. Its `items` argument
 contains author-time text, never a second plaintext delivery carrier. Only the public

@@ -29,6 +29,13 @@ import { utf8Decode } from "../../core-shared/codec.js";
 import { domOver } from "../../test-lib/helpers/domOver.js";
 import { ARTICLES, ISSUER_NAME, KEY_ID } from "../../demo/scenarios/fixtures.js";
 import { BODYTEXT, PUB, T_NOW, world } from "../../test-lib/fixtures/wire-policy-world.js";
+import {
+  contentRecordOf,
+  issuerBlockOf,
+  wrapGroupsOn,
+  wrapsOf,
+} from "../../test-lib/helpers/inspect.js";
+import { contentKeyMap, errorMap, keyAt, periodKeyMap, setKeyAt } from "../support/namedRecords.js";
 
 /** The item as a content-key-only render receives it: no groups named at all. */
 const UNGROUPED = { ...BODYTEXT, accessGroups: undefined };
@@ -59,8 +66,12 @@ const SIDE_ITEMS = [
  * @param {string} contentName
  */
 function carriesNoCachedPath(page, contentName) {
-  const record = page.contentData[contentName];
-  assert.deepEqual(Object.keys(record), ["contentType"], "the record the format requires");
+  const record = contentRecordOf(page, contentName);
+  assert.deepEqual(
+    Object.keys(record),
+    ["contentName", "contentType"],
+    "the record the format requires",
+  );
   assert.equal(Object.hasOwn(record, "keys"), false, "and no wrapped contentKey beside it");
 
   const wire = JSON.stringify(page);
@@ -112,8 +123,8 @@ describe("A publisher with no periodKeySupply seals a genuine content-key-only i
         true,
         "the issuer's registered publisher key verifies this render",
       );
-      assert.equal(page.issuerData[ISSUER_NAME].keyId, KEY_ID);
-      assert.ok(page.issuerData[ISSUER_NAME].sealed.contentKeys.bodytext);
+      assert.equal(issuerBlockOf(page, ISSUER_NAME).keyId, KEY_ID);
+      assert.ok(contentKeyMap(issuerBlockOf(page, ISSUER_NAME).sealed.contentKeys).bodytext);
 
       const delivery = new MarkupDeliveryReader(
         domOver(writeMarkupDelivery({ dcaData, sealedContent }), { publisherOrigin: PUB }),
@@ -164,7 +175,10 @@ describe("A publisher with no periodKeySupply seals a genuine content-key-only i
         items: [UNGROUPED, SECOND_UNGROUPED],
       });
       const names = ["bodytext", "premiumtext"];
-      assert.deepEqual(Object.keys(page.issuerData[ISSUER_NAME].sealed.contentKeys), names);
+      assert.deepEqual(
+        Object.keys(contentKeyMap(issuerBlockOf(page, ISSUER_NAME).sealed.contentKeys)),
+        names,
+      );
 
       const { processor, endpoint, publisherRegistration } = w.endpointWith();
       const { status, body } = await unlockThroughAdmission(
@@ -174,7 +188,7 @@ describe("A publisher with no periodKeySupply seals a genuine content-key-only i
         publisherRegistration,
       );
       assert.equal(status, 200);
-      assert.deepEqual(Object.keys(body.keys.contentKeys), names);
+      assert.deepEqual(Object.keys(contentKeyMap(body.keys.contentKeys)), names);
 
       const client = new Client({ cache: new PeriodKeyCache(), publisherOrigin: PUB });
       const parsed = client.parse(page);
@@ -213,7 +227,10 @@ describe("A publisher with no periodKeySupply seals a genuine content-key-only i
       });
       const names = ["bodytext", "failed", "denied"];
       for (const name of names) carriesNoCachedPath(page, name);
-      assert.deepEqual(Object.keys(page.issuerData[ISSUER_NAME].sealed.contentKeys), names);
+      assert.deepEqual(
+        Object.keys(contentKeyMap(issuerBlockOf(page, ISSUER_NAME).sealed.contentKeys)),
+        names,
+      );
 
       const delivery = new MarkupDeliveryReader(
         domOver(writeMarkupDelivery({ dcaData, sealedContent }), { publisherOrigin: PUB }),
@@ -224,7 +241,11 @@ describe("A publisher with no periodKeySupply seals a genuine content-key-only i
       const request = client.buildRequest(parsed, ISSUER_NAME, names);
       // A genuine publisher envelope carried under another name cannot open
       // at that coordinate, although its granted sibling remains usable.
-      request.sealed.contentKeys.failed = request.sealed.contentKeys.bodytext;
+      setKeyAt(
+        request.sealed.contentKeys,
+        { contentName: "failed" },
+        keyAt(request.sealed.contentKeys, { contentName: "bodytext" }),
+      );
       let decisions = 0;
       const { processor, endpoint, publisherRegistration } = w.endpointWith({
         accessPolicy: {
@@ -245,11 +266,11 @@ describe("A publisher with no periodKeySupply seals a genuine content-key-only i
       assert.equal(status, 200);
       assert.equal(body.transport, undefined);
       assert.deepEqual(Object.keys(body.keys), ["contentKeys"]);
-      assert.deepEqual(Object.keys(body.keys.contentKeys), ["bodytext"]);
-      assert.deepEqual(body.errors, {
+      assert.deepEqual(Object.keys(contentKeyMap(body.keys.contentKeys)), ["bodytext"]);
+      assert.deepEqual(errorMap(body.errors), {
         failed: { error: "unseal_failed", message: "sealed value could not be opened" },
       });
-      assert.equal(Object.hasOwn(body.errors, "denied"), false);
+      assert.equal(Object.hasOwn(errorMap(body.errors), "denied"), false);
       const applied = await client.applyResponse(parsed, ISSUER_NAME, body);
       assert.equal(applied.accepted, 1);
       assert.equal(applied.errors.length, 1);
@@ -290,16 +311,20 @@ describe("A publisher holding a periodKeySupply mixes grouped and ungrouped item
       const w = await world();
       const { page } = await w.render({ items: [BODYTEXT, side] });
 
-      assert.deepEqual(Object.keys(page.contentData.bodytext.keys), BODYTEXT.accessGroups, label);
-      const record = page.contentData.sidetext;
-      assert.deepEqual(Object.keys(record), ["contentType"], label);
+      assert.deepEqual(wrapGroupsOn(page, "bodytext"), BODYTEXT.accessGroups, label);
+      const record = contentRecordOf(page, "sidetext");
+      assert.deepEqual(Object.keys(record), ["contentName", "contentType"], label);
       assert.equal(Object.hasOwn(record, "keys"), false, `${label}: never an empty keys map`);
 
       // The whole-render plan selects both item keys and only the group the
       // grouped item names; nothing is supplied for the ungrouped item's sake.
-      const sealed = page.issuerData[ISSUER_NAME].sealed;
-      assert.deepEqual(Object.keys(sealed.contentKeys), ["bodytext", "sidetext"], label);
-      assert.deepEqual(Object.keys(sealed.periodKeys), BODYTEXT.accessGroups, label);
+      const sealed = issuerBlockOf(page, ISSUER_NAME).sealed;
+      assert.deepEqual(
+        Object.keys(contentKeyMap(sealed.contentKeys)),
+        ["bodytext", "sidetext"],
+        label,
+      );
+      assert.deepEqual(Object.keys(periodKeyMap(sealed.periodKeys)), BODYTEXT.accessGroups, label);
     }
   });
 
@@ -335,7 +360,7 @@ describe("A publisher holding a periodKeySupply mixes grouped and ungrouped item
 
     // The ungrouped item opens with the item key its issuer route supplies.
     const request = client.buildRequest(parsed, ISSUER_NAME, ["sidetext"]);
-    assert.deepEqual(Object.keys(request.sealed.contentKeys), ["sidetext"]);
+    assert.deepEqual(Object.keys(contentKeyMap(request.sealed.contentKeys)), ["sidetext"]);
     const { processor, endpoint, publisherRegistration } = w.endpointWith();
     const { status, body } = await unlockThroughAdmission(
       processor,
@@ -345,7 +370,7 @@ describe("A publisher holding a periodKeySupply mixes grouped and ungrouped item
     );
     assert.equal(status, 200);
     assert.deepEqual(Object.keys(body.keys), ["contentKeys"]);
-    assert.deepEqual(Object.keys(body.keys.contentKeys), ["sidetext"]);
+    assert.deepEqual(Object.keys(contentKeyMap(body.keys.contentKeys)), ["sidetext"]);
     await client.applyResponse(parsed, ISSUER_NAME, body);
 
     for (const [name, expected] of [
@@ -364,8 +389,11 @@ describe("A publisher holding a periodKeySupply mixes grouped and ungrouped item
     const w = await world();
     const { page } = await w.render();
 
-    assert.deepEqual(Object.keys(page.contentData.bodytext.keys), BODYTEXT.accessGroups);
-    assert.ok(page.issuerData[ISSUER_NAME].sealed.periodKeys, "and the issuer holds the family");
+    assert.deepEqual(wrapGroupsOn(page, "bodytext"), BODYTEXT.accessGroups);
+    assert.ok(
+      issuerBlockOf(page, ISSUER_NAME).sealed.periodKeys,
+      "and the issuer holds the family",
+    );
   });
 });
 
@@ -376,7 +404,7 @@ test("period-only deliveries omit geometry and open with granted and retained pe
   assert.equal(Object.hasOwn(first.dcaData, "periodGeometry"), false);
   assert.equal(Object.hasOwn(second.dcaData, "periodGeometry"), false);
   assert.deepEqual(
-    first.dcaData.contentData.bodytext.keys[BODYTEXT.accessGroups[0]].map(({ t }) => t),
+    wrapsOf(first.dcaData, "bodytext", BODYTEXT.accessGroups[0]).map(({ period }) => period),
     [T_NOW, "251023T1500"],
   );
   const { processor, endpoint, publisherRegistration } = w.endpointWith();

@@ -14,6 +14,7 @@ import { utf8Decode } from "../../core-shared/codec.js";
 import { world, PUB, BODYTEXT, T_NOW } from "../../test-lib/fixtures/wire-policy-world.js";
 import { domOver } from "../../test-lib/helpers/domOver.js";
 import { unlockThroughAdmission } from "../../test-lib/harnesses/unlockThroughAdmission.js";
+import { issuerBlockOf } from "../../test-lib/helpers/inspect.js";
 import { connectSessionSource } from "./support/session-source-connection.js";
 
 function deferred() {
@@ -30,7 +31,7 @@ async function fixture(kind) {
   if (kind === "period") {
     // This delivered alternative supplies only period-key envelopes to the
     // issuer. The issuer's genuine response therefore cannot supply item keys.
-    rendered.dcaData.issuerData[ISSUER_NAME].sealed.contentKeys = {};
+    issuerBlockOf(rendered.dcaData, ISSUER_NAME).sealed.contentKeys = [];
   }
   const markup = writeMarkupDelivery({
     dcaData: rendered.dcaData,
@@ -130,7 +131,7 @@ for (const kind of ["item", "period"]) {
     assert.equal(alice.view.text, BODYTEXT.value);
     assert.equal(bob.view.text, null);
     if (kind === "period") {
-      assert.deepEqual(result.body.keys.contentKeys, {});
+      assert.deepEqual(result.body.keys.contentKeys, []);
       assert.ok(
         (await a.cache.candidatesAt(BODYTEXT.accessGroups[0], T_NOW, { publisher: PUB })).length,
       );

@@ -44,8 +44,9 @@ bytes with the records. Randomized ECDSA signature bytes are not required to
 match. No fixture is regenerated during this replay. The derived content AAD
 first re-recorded these records on 2026-10-15. The current fixed-nonce
 transcript also omits item `nonce` members and changes ciphertext bytes and
-tags and shifts later seeded draws; replay evidence follows the current
-generated records. From the repository root, regenerate all eight through
+tags and shifts later seeded draws. The derived period-wrap nonce drops each
+wrap entry's `nonce` member and shifts the seeded envelope draws that followed
+the removed wrap draws. Replay evidence follows the current generated records. From the repository root, regenerate all eight through
 `node js/test-lib/fixtures/record-publisher-composition.js`, or append
 `--check` to verify the recorded bytes without writing.
 
@@ -74,7 +75,7 @@ secrets and the transcript octets; a test that replaced an assertion of the
 retired root `contentGroups` array says which. The second puts ordinary item
 routes beside content-group routes on one page. Its retired-opening-key case runs over direct transport and
 over client-bound ECDH-P256: the answer carries the base `key_retired` entry beside the scoped
-`contentGroups.errors` record, the error leaves unwrapped, and the client reports both and files no key.
+`contentGroupKeys.errors` record, the error leaves unwrapped, and the client reports both and files no key.
 The owned `../extensions/content-groups/test/_lib/world.js`
 builds the roles both use; shared composition tests reuse that fixture. The extension README retains explicitly historical measurements from the retired generator.
 

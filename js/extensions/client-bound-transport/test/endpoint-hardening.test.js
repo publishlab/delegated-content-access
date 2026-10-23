@@ -20,6 +20,22 @@ import {
 } from "../../../test-lib/fixtures/endpoint-hardening-world.js";
 import * as clientBoundEcdh from "../ecdhP256.js";
 
+/**
+ * Add fifty period records to the article group, each at a fresh period and
+ * carrying the group's first sealed key, so the request runs far past the caps.
+ *
+ * @param {any} request
+ */
+function padGroup(request) {
+  const first = request.sealed.periodKeys.find(
+    (/** @type {any} */ record) => record.accessGroup === ARTICLE_GROUP,
+  );
+  for (let index = 0; index < 50; index++) {
+    const period = `991023T${String(Math.floor(index / 60)).padStart(2, "0")}${String(index % 60).padStart(2, "0")}`;
+    request.sealed.periodKeys.push({ accessGroup: ARTICLE_GROUP, period, key: first.key });
+  }
+}
+
 describe("The auth gate, ahead of client-bound agreement", () => {
   test("the gate is ahead of the transport agreement, not merely ahead of the port", async () => {
     const { render, network, random, serverWith } = await world();
@@ -99,12 +115,7 @@ describe("The entry caps, ahead of client-bound agreement", () => {
 
     const request = requestFor(page, ISSUER_NAME, [BODYTEXT, PREMIUM]);
     const padded = structuredClone(request);
-    const [firstPeriod] = Object.keys(padded.sealed.periodKeys[ARTICLE_GROUP]);
-    for (let index = 0; index < 50; index++) {
-      padded.sealed.periodKeys[ARTICLE_GROUP][
-        `991023T${String(Math.floor(index / 60)).padStart(2, "0")}${String(index % 60).padStart(2, "0")}`
-      ] = padded.sealed.periodKeys[ARTICLE_GROUP][firstPeriod];
-    }
+    padGroup(padded);
     padded.clientPublicKey = await clientPublicKey();
 
     const meter = cryptoMeter();
@@ -151,12 +162,7 @@ describe("The entry caps, ahead of client-bound agreement", () => {
     });
 
     const gatedRequest = structuredClone(requestFor(gatedPage, ISSUER_NAME, [BODYTEXT, PREMIUM]));
-    const [gatedFirstPeriod] = Object.keys(gatedRequest.sealed.periodKeys[ARTICLE_GROUP]);
-    for (let index = 0; index < 50; index++) {
-      gatedRequest.sealed.periodKeys[ARTICLE_GROUP][
-        `991023T${String(Math.floor(index / 60)).padStart(2, "0")}${String(index % 60).padStart(2, "0")}`
-      ] = gatedRequest.sealed.periodKeys[ARTICLE_GROUP][gatedFirstPeriod];
-    }
+    padGroup(gatedRequest);
     gatedRequest.clientPublicKey = await clientPublicKey();
 
     const gated = cryptoMeter();

@@ -29,7 +29,17 @@ import { ordinaryContentKeyWrap } from "../../core-publisher/contentKeyWrap.js";
 import { seal as sealKey } from "../../core-shared--publisher-issuer/keySealing.js";
 import { issuerKeypair, signingKeypair } from "../support/keys.js";
 import { contentAadOctets } from "../support/contentAadOctets.js";
+import { wrapNonceOf } from "../support/contentKeyWrapNonceOctets.js";
 import { refuses } from "../../test-lib/helpers/refuses.js";
+import {
+  contentNamesOn,
+  contentRecordOf,
+  issuerBlockOf,
+  issuerPeriodsOn,
+  wrapGroupsOn,
+  wrapsOf,
+} from "../../test-lib/helpers/inspect.js";
+import { contentKeyMap, periodKeyMap } from "../support/namedRecords.js";
 
 const V1 = new URL("../../", import.meta.url);
 
@@ -245,7 +255,7 @@ describe("What createPublisher takes", () => {
     const { config } = await hostInputs();
     const issuer = { ...config.issuers[0], keyId: "2025-11", displayName: "Subscriptions" };
     const { dcaData } = await createPublisher({ ...config, issuers: [issuer] }).publish(article());
-    const block = /** @type {any} */ (dcaData.issuerData[ISSUER_NAME]);
+    const block = /** @type {any} */ (issuerBlockOf(dcaData, ISSUER_NAME));
     assert.equal(Object.hasOwn(block, "unlockUrl"), false);
     assert.equal(block.keyId, "2025-11");
   });
@@ -385,10 +395,7 @@ describe("Host inputs reach the Sealer", () => {
     };
     const { dcaData } = await createPublisher({ ...config, keySealing }).publish(article());
     assert.equal(calls.length, 2, "each period-key envelope uses the selected key sealer");
-    assert.deepEqual(Object.keys(dcaData.issuerData[ISSUER_NAME].sealed.periodKeys[GROUP]), [
-      T_NOW,
-      T_NEXT,
-    ]);
+    assert.deepEqual(issuerPeriodsOn(dcaData, ISSUER_NAME, GROUP), [T_NOW, T_NEXT]);
   });
 
   test("clock, random, supply, period, plan and origin each reach the render", async () => {
@@ -398,7 +405,7 @@ describe("Host inputs reach the Sealer", () => {
     assert.equal(calls.now, 1, "the render instant is read once, from the host's clock");
     assert.ok(
       calls.bytes > 0,
-      "every nonce, content key and renderId comes from the host's random",
+      "every envelope nonce, content key and renderId comes from the host's random",
     );
     assert.equal(calls.plans, 1, "the plan is asked once for the one issuer");
     assert.deepEqual(
@@ -412,10 +419,7 @@ describe("Host inputs reach the Sealer", () => {
     );
     assert.equal(dcaData.resource.origin, ORIGIN);
     assert.equal(dcaData.resource.issuedAt, new Date(AT).toISOString());
-    assert.deepEqual(
-      Object.keys(/** @type {any} */ (dcaData.issuerData[ISSUER_NAME].sealed.periodKeys)[GROUP]),
-      [T_NOW, T_NEXT, T_LATER],
-    );
+    assert.deepEqual(issuerPeriodsOn(dcaData, ISSUER_NAME, GROUP), [T_NOW, T_NEXT, T_LATER]);
   });
 
   test("the host's signingKid selects which held key signs", async () => {
@@ -513,10 +517,10 @@ describe("Host inputs reach the Sealer", () => {
       ],
     });
 
-    assert.deepEqual(Object.keys(second.dcaData.contentData), ["summary"]);
+    assert.deepEqual(contentNamesOn(second.dcaData), ["summary"]);
     assert.deepEqual(Object.keys(second.sealedContent), ["summary"]);
     assert.notEqual(second.dcaData.resource.renderId, first.dcaData.resource.renderId);
-    assert.equal(Object.hasOwn(second.dcaData.issuerData[ISSUER_NAME], "unlockUrl"), false);
+    assert.equal(Object.hasOwn(issuerBlockOf(second.dcaData, ISSUER_NAME), "unlockUrl"), false);
   });
 
   for (const [label, contributions] of /** @type {const} */ ([
@@ -547,7 +551,7 @@ describe("Host inputs reach the Sealer", () => {
         article(),
       );
       assert.deepEqual(
-        Object.keys(/** @type {any} */ (dcaData.issuerData[ISSUER_NAME].sealed.periodKeys)[GROUP]),
+        issuerPeriodsOn(dcaData, ISSUER_NAME, GROUP),
         [T_NOW, T_NEXT, T_LATER],
         "admission checked three slots, so the render seals three period keys",
       );
@@ -566,10 +570,7 @@ describe("Host inputs reach the Sealer", () => {
 
       const { dcaData } = await publisher.publish(article());
       assert.equal(decodeHeader(dcaData.resourceJWT).kid, SIGNING_KID);
-      assert.deepEqual(
-        Object.keys(/** @type {any} */ (dcaData.issuerData[ISSUER_NAME].sealed.periodKeys)[GROUP]),
-        [T_NOW, T_NEXT],
-      );
+      assert.deepEqual(issuerPeriodsOn(dcaData, ISSUER_NAME, GROUP), [T_NOW, T_NEXT]);
     });
   }
 
@@ -652,8 +653,8 @@ describe("Host inputs reach the Sealer", () => {
     assert.deepEqual(first.dcaData.resource.data, { section: "politics" });
     assert.equal(second.dcaData.resource.resourceId, "654321");
     assert.deepEqual(second.dcaData.resource.data, { section: "sport" });
-    assert.deepEqual(Object.keys(first.dcaData.contentData), ["first"]);
-    assert.deepEqual(Object.keys(second.dcaData.contentData), ["second"]);
+    assert.deepEqual(contentNamesOn(first.dcaData), ["first"]);
+    assert.deepEqual(contentNamesOn(second.dcaData), ["second"]);
     assert.deepEqual(plannedRenders, [
       { accessGroups: [GROUP], contentNames: ["first"] },
       { accessGroups: ["free"], contentNames: ["second"] },
@@ -663,16 +664,17 @@ describe("Host inputs reach the Sealer", () => {
       [first, "first", GROUP, "First snapshot"],
       [second, "second", "free", "Second snapshot"],
     ]) {
-      const record = /** @type {any} */ (render.dcaData.contentData[contentName]);
-      assert.deepEqual(Object.keys(record.keys), [group]);
-      const wrap = record.keys[group][0];
+      const record = /** @type {any} */ (contentRecordOf(render.dcaData, contentName));
+      assert.deepEqual(wrapGroupsOn(render.dcaData, contentName), [group]);
+      assert.equal(Object.hasOwn(record, "keys"), true);
+      const wrap = wrapsOf(render.dcaData, contentName, group)[0];
       const periodKey = Uint8Array.from(
-        PERIOD_KEYS[/** @type {keyof PERIOD_KEYS} */ (wrap.t)],
+        PERIOD_KEYS[/** @type {keyof PERIOD_KEYS} */ (wrap.period)],
         (byte) => byte ^ group.charCodeAt(0),
       );
       const contentKey = await decrypt(
         periodKey,
-        base64urlDecode(wrap.nonce),
+        wrapNonceOf(render.dcaData, contentName, group, wrap.period),
         base64urlDecode(wrap.key),
       );
       const plaintext = await decrypt(
@@ -697,7 +699,7 @@ describe("Host inputs reach the Sealer", () => {
         },
       ],
     });
-    assert.equal(dcaData.contentData[CONTENT_NAME].contentType, "text/html");
+    assert.equal(contentRecordOf(dcaData, CONTENT_NAME).contentType, "text/html");
   });
 });
 
@@ -706,20 +708,18 @@ describe("One period-key render through the entry", () => {
     const { config } = await hostInputs();
     const render = await createPublisher(config).publish(article());
     const { dcaData, sealedContent } = render;
-    const record = /** @type {any} */ (dcaData.contentData[CONTENT_NAME]);
-
     // The item wrap: one entry per period-key label, each opened by the key the
     // host's supply holds at that label, all to the same content key.
     assert.deepEqual(
-      record.keys[GROUP].map((/** @type {any} */ entry) => entry.t),
+      wrapsOf(dcaData, CONTENT_NAME, GROUP).map((/** @type {any} */ entry) => entry.period),
       [T_NOW, T_NEXT],
     );
     const contentKeys = [];
-    for (const entry of record.keys[GROUP]) {
+    for (const entry of wrapsOf(dcaData, CONTENT_NAME, GROUP)) {
       contentKeys.push(
         await decrypt(
-          PERIOD_KEYS[/** @type {keyof PERIOD_KEYS} */ (entry.t)],
-          base64urlDecode(entry.nonce),
+          PERIOD_KEYS[/** @type {keyof PERIOD_KEYS} */ (entry.period)],
+          wrapNonceOf(dcaData, CONTENT_NAME, GROUP, entry.period),
           base64urlDecode(entry.key),
         ),
       );
@@ -735,9 +735,9 @@ describe("One period-key render through the entry", () => {
 
     // The issuer block carries the period keys sealed for it and, under this
     // plan, no item content key.
-    const sealed = /** @type {any} */ (dcaData.issuerData[ISSUER_NAME].sealed);
+    const sealed = /** @type {any} */ (issuerBlockOf(dcaData, ISSUER_NAME).sealed);
     assert.equal(Object.hasOwn(sealed, "contentKeys"), false);
-    assert.deepEqual(Object.keys(sealed.periodKeys[GROUP]), [T_NOW, T_NEXT]);
+    assert.deepEqual(issuerPeriodsOn(dcaData, ISSUER_NAME, GROUP), [T_NOW, T_NEXT]);
     assert.equal(Object.hasOwn(dcaData, "periodGeometry"), false);
 
     // Markup stays a separate host call over the same render.
@@ -799,27 +799,28 @@ describe("One mixed render through the entry", () => {
         ),
       );
 
-    const grouped = dcaData.contentData[CONTENT_NAME];
-    assert.deepEqual(Object.keys(grouped.keys), [GROUP]);
-    for (const entry of grouped.keys[GROUP]) {
+    const grouped = contentRecordOf(dcaData, CONTENT_NAME);
+    assert.ok(grouped);
+    assert.deepEqual(wrapGroupsOn(dcaData, CONTENT_NAME), [GROUP]);
+    for (const entry of wrapsOf(dcaData, CONTENT_NAME, GROUP)) {
       const contentKey = await decrypt(
-        PERIOD_KEYS[/** @type {keyof PERIOD_KEYS} */ (entry.t)],
-        base64urlDecode(entry.nonce),
+        PERIOD_KEYS[/** @type {keyof PERIOD_KEYS} */ (entry.period)],
+        wrapNonceOf(dcaData, CONTENT_NAME, GROUP, entry.period),
         base64urlDecode(entry.key),
       );
-      assert.equal(await opened(CONTENT_NAME, contentKey), ARTICLE, entry.t);
+      assert.equal(await opened(CONTENT_NAME, contentKey), ARTICLE, entry.period);
     }
     for (const name of ["sidebar", "footer"]) {
-      assert.deepEqual(Object.keys(dcaData.contentData[name]), ["contentType"]);
+      assert.deepEqual(Object.keys(contentRecordOf(dcaData, name)), ["contentName", "contentType"]);
       assert.equal(await opened(name, sealedItemKeys[name]), texts[name], name);
     }
 
     // Each issuer member is exactly what the plan selected: item keys for the
     // two ungrouped items, and period keys only for the group one item names.
-    const sealed = dcaData.issuerData[ISSUER_NAME].sealed;
+    const sealed = issuerBlockOf(dcaData, ISSUER_NAME).sealed;
     assert.deepEqual(Object.keys(sealedItemKeys), ["sidebar", "footer"]);
-    assert.deepEqual(Object.keys(sealed.contentKeys), ["sidebar", "footer"]);
-    assert.deepEqual(Object.keys(sealed.periodKeys), [GROUP]);
+    assert.deepEqual(Object.keys(contentKeyMap(sealed.contentKeys)), ["sidebar", "footer"]);
+    assert.deepEqual(Object.keys(periodKeyMap(sealed.periodKeys)), [GROUP]);
     assert.deepEqual(calls.derive, [
       [GROUP, T_NOW],
       [GROUP, T_NEXT],
@@ -852,7 +853,7 @@ describe("One mixed render through the entry", () => {
       ...article(),
       items: [{ name: CONTENT_NAME, value: ARTICLE, contentType: "text/html" }],
     });
-    assert.equal(Object.hasOwn(dcaData.contentData[CONTENT_NAME], "keys"), false);
+    assert.equal(Object.hasOwn(contentRecordOf(dcaData, CONTENT_NAME), "keys"), false);
   });
 });
 
@@ -918,7 +919,7 @@ describe("A clean copy of the publisher manifest", () => {
       );
       const { config } = await hostInputs();
       const render = await copiedEntry(config).publish(article());
-      assert.deepEqual(Object.keys(render.dcaData.contentData), [CONTENT_NAME]);
+      assert.deepEqual(contentNamesOn(render.dcaData), [CONTENT_NAME]);
       assert.ok(copiedMarkup(render).includes(render.dcaData.resourceJWT));
     } finally {
       rmSync(root, { recursive: true, force: true });

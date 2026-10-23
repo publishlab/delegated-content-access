@@ -12,9 +12,12 @@
 // `resealOldFormat` takes an authentic current render and the item keys a real
 // issuer grant delivered for it. It opens each item under the adopted
 // transcript, then seals the same plaintext under the old carried string with
-// the same key and a fresh nonce, and writes `aad`. The resourceJWT, issuer
-// envelopes and key wraps stay the publisher's, so the real issuer still grants
-// the same keys for the page. Only the content sealing is old-format.
+// the same key and zero nonce, and writes `aad`. This local resealing comparison
+// deliberately holds the nonce constant to isolate AAD, and is not a production
+// sealing recipe. The resourceJWT, issuer
+// envelopes stay the publisher's, so the real issuer still grants the same keys.
+// Most controls retain current wraps. The explicit whole-record controls also
+// supply real granted period keys to build historical carried-nonce wraps.
 
 import { adoptedContentAad } from "../implementation/tokenRepresentationAad.js";
 import { decrypt, encrypt, NONCE_BYTES } from "../../../core-shared/aead.js";
@@ -37,23 +40,38 @@ export function oldCarriedAad(resourceId, contentName) {
  * @param {any} page - an authentic current render, in object delivery form
  * @param {Record<string, Uint8Array|CryptoKey>} contentKeys - every item's key
  * @param {string} resourceId - the resourceId the publisher signed
+ * @param {{accessGroup: string, period: string, key: string}[]} [periodKeys] - real issuer grant for historical wrap controls
  * @returns {Promise<any>} a copy; the caller's page is unchanged
  */
-export async function resealOldFormat(page, contentKeys, resourceId) {
+export async function resealOldFormat(page, contentKeys, resourceId, periodKeys) {
   const old = structuredClone(page);
-  for (const contentName of Object.keys(page.contentData)) {
-    const record = old.contentData[contentName];
+  for (const record of old.contentData) {
+    const { contentName } = record;
     const key = contentKeys[contentName];
     if (key === undefined) throw new TypeError(`no key for "${contentName}"`);
+    // Only the explicit whole-record controls select historical wraps. Other
+    // controls retain current key delivery to isolate content AAD alone.
+    if (periodKeys) {
+      for (const entry of record.keys ?? []) {
+        const periodKey = periodKeys.find(
+          (candidate) =>
+            candidate.accessGroup === entry.accessGroup && candidate.period === entry.period,
+        )?.key;
+        if (!periodKey)
+          throw new TypeError(`no granted period key for ${entry.accessGroup}/${entry.period}`);
+        const wrapNonce = crypto.getRandomValues(new Uint8Array(NONCE_BYTES));
+        entry.nonce = base64urlEncode(wrapNonce);
+        entry.key = base64urlEncode(await encrypt(base64urlDecode(periodKey), wrapNonce, key));
+      }
+    }
     const plaintext = await decrypt(
       key,
       new Uint8Array(NONCE_BYTES),
       base64urlDecode(page.sealedContent[contentName]),
       adoptedContentAad(page, contentName),
     );
-    // A fresh nonce: the key already sealed this plaintext once under the
-    // adopted transcript.
-    const nonce = crypto.getRandomValues(new Uint8Array(NONCE_BYTES));
+    // Hold the content nonce fixed so a format mismatch tests AAD alone.
+    const nonce = new Uint8Array(NONCE_BYTES);
     const aad = oldCarriedAad(resourceId, contentName);
     record.nonce = base64urlEncode(nonce);
     record.aad = aad;
@@ -62,4 +80,37 @@ export async function resealOldFormat(page, contentKeys, resourceId) {
     );
   }
   return old;
+}
+
+/**
+ * Historical AEAD control using actual issuer-granted period bytes. This is
+ * deliberately not a current client: current clients never read carried wrap
+ * nonces. The test names the granted coordinate rather than inventing access.
+ * @param {any} page
+ * @param {string} contentName
+ * @param {{accessGroup: string, period: string, key: string}[]} periodKeys
+ * @returns {Promise<{key: Uint8Array, plaintext: Uint8Array}>}
+ */
+export async function openOldPeriodRecord(page, contentName, periodKeys) {
+  const record = page.contentData.findLast((candidate) => candidate.contentName === contentName);
+  for (const entry of record.keys ?? []) {
+    const periodKey = periodKeys.find(
+      (candidate) =>
+        candidate.accessGroup === entry.accessGroup && candidate.period === entry.period,
+    )?.key;
+    if (!periodKey) continue;
+    const key = await decrypt(
+      base64urlDecode(periodKey),
+      base64urlDecode(entry.nonce),
+      base64urlDecode(entry.key),
+    );
+    const plaintext = await decrypt(
+      key,
+      base64urlDecode(record.nonce),
+      base64urlDecode(page.sealedContent[contentName]),
+      utf8Encode(record.aad),
+    );
+    return { key, plaintext };
+  }
+  throw new TypeError("the historical control needs a granted period coordinate");
 }

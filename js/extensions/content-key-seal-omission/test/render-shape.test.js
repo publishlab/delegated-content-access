@@ -12,6 +12,7 @@ import assert from "node:assert/strict";
 import { Sealer } from "../../../core-publisher/Sealer.js";
 import { decrypt } from "../../../core-shared/aead.js";
 import { base64urlDecode } from "../../../core-shared/codec.js";
+import { recordsByName } from "../../../core-shared--client-publisher/deliveryRecords.js";
 import { keyMaterialInPlay, leaks } from "../../../test-lib/helpers/keyMaterialLeaks.js";
 import { OmittingSealer } from "../core-publisher/OmittingSealer.js";
 import {
@@ -28,6 +29,7 @@ import {
   render,
   world,
 } from "../test-lib/world.js";
+import { contentKeyWrapNonceOctets } from "../../../test-reference/support/contentKeyWrapNonceOctets.js";
 
 /**
  * Count every operation an issuer-supply refusal must precede.
@@ -96,6 +98,29 @@ test("an unlisted issuer renders byte-identically to the base sealer", async () 
   assert.equal(payloadOf(composedJwt), payloadOf(baseJwt));
 });
 
+/**
+ * One named record of a page collection, looked up the way a reader does.
+ *
+ * @param {unknown} collection
+ * @param {string} member - the identity field, such as `issuerName`
+ * @param {string} name
+ * @returns {any}
+ */
+function recordOf(collection, member, name) {
+  return recordsByName(collection, member, () => true)?.get(name);
+}
+
+/**
+ * The distinct values of one field across records, in first-seen order.
+ *
+ * @param {any[]} records
+ * @param {string} member
+ * @returns {unknown[]}
+ */
+function distinct(records, member) {
+  return [...new Set(records.map((record) => record[member]))];
+}
+
 /** @param {string} token @returns {string} the compact JWT's header and payload */
 function payloadOf(token) {
   return token.split(".").slice(0, 2).join(".");
@@ -112,12 +137,22 @@ test("a listed issuer has the marker and no contentKeys map; an unlisted one in 
     { items: ["bodytext", "note"] },
   );
 
-  assert.deepEqual(page.issuerData[ISSUER_A].extensions, [EXTENSION_NAME]);
-  assert.equal(Object.hasOwn(page.issuerData[ISSUER_A].sealed, "contentKeys"), false);
-  assert.deepEqual(Object.keys(page.issuerData[ISSUER_A].sealed.periodKeys.premium), PERIODS);
+  const listed = recordOf(page.issuerData, "issuerName", ISSUER_A);
+  const unlisted = recordOf(page.issuerData, "issuerName", ISSUER_B);
+  assert.deepEqual(listed.extensions, [EXTENSION_NAME]);
+  assert.equal(Object.hasOwn(listed.sealed, "contentKeys"), false);
+  assert.deepEqual(
+    listed.sealed.periodKeys
+      .filter((/** @type {any} */ record) => record.accessGroup === "premium")
+      .map((/** @type {any} */ record) => record.period),
+    PERIODS,
+  );
 
-  assert.equal(Object.hasOwn(page.issuerData[ISSUER_B], "extensions"), false);
-  assert.deepEqual(Object.keys(page.issuerData[ISSUER_B].sealed.contentKeys), ["bodytext", "note"]);
+  assert.equal(Object.hasOwn(unlisted, "extensions"), false);
+  assert.deepEqual(
+    unlisted.sealed.contentKeys.map((/** @type {any} */ record) => record.contentName),
+    ["bodytext", "note"],
+  );
 });
 
 test("a serialized bound render carries none of its period-key or content-key material", async () => {
@@ -136,7 +171,7 @@ test("a serialized bound render carries none of its period-key or content-key ma
         renderId: page.resource.renderId,
         contentName,
         accessGroup,
-        t: value.t,
+        t: value.period,
       }),
   });
   assert.deepEqual(
@@ -181,31 +216,38 @@ test("a bound entry names the binding it was wrapped under and opens only with t
     ),
   );
 
-  const entries = page.contentData.bodytext.keys.premium;
+  const entries = recordOf(page.contentData, "contentName", "bodytext").keys.filter(
+    (/** @type {any} */ entry) => entry.accessGroup === "premium",
+  );
   assert.deepEqual(
     entries.map((/** @type {any} */ entry) => entry.bind),
     [OMISSION_BIND_IDENTIFIER, OMISSION_BIND_IDENTIFIER],
   );
 
   const entry = entries[0];
-  const periodKey = await periodKeySupply.derive("premium", entry.t);
-  const nonce = base64urlDecode(entry.nonce);
+  const periodKey = await periodKeySupply.derive("premium", entry.period);
+  const coordinate = {
+    renderId: page.resource.renderId,
+    contentName: "bodytext",
+    accessGroup: "premium",
+    t: entry.period,
+  };
+  const aad = omissionBindAad(coordinate);
   const wrapped = base64urlDecode(entry.key);
 
   await assert.rejects(
-    decrypt(periodKey, nonce, wrapped),
-    "an unbound open of a bound entry fails",
+    decrypt(periodKey, contentKeyWrapNonceOctets({ ...coordinate, aad }), wrapped),
+    "the bound nonce with missing GCM AAD fails",
+  );
+  await assert.rejects(
+    decrypt(periodKey, contentKeyWrapNonceOctets(coordinate), wrapped, aad),
+    "the ordinary nonce with correct GCM AAD fails",
   );
   const contentKey = await decrypt(
     periodKey,
-    nonce,
+    contentKeyWrapNonceOctets({ ...coordinate, aad }),
     wrapped,
-    omissionBindAad({
-      renderId: page.resource.renderId,
-      contentName: "bodytext",
-      accessGroup: "premium",
-      t: entry.t,
-    }),
+    aad,
   );
   assert.equal(contentKey.length, 16);
 });
@@ -248,11 +290,14 @@ test("a listed issuer whose period material covers no group of a grantable item 
     ),
     { items: ["bodytext", "sidebar"] },
   );
-  assert.deepEqual(Object.keys(page.issuerData[ISSUER_A].sealed.periodKeys), ["premium"]);
-  assert.deepEqual(Object.keys(page.issuerData[ISSUER_B].sealed.contentKeys), [
-    "bodytext",
-    "sidebar",
-  ]);
+  assert.deepEqual(
+    distinct(recordOf(page.issuerData, "issuerName", ISSUER_A).sealed.periodKeys, "accessGroup"),
+    ["premium"],
+  );
+  assert.deepEqual(
+    distinct(recordOf(page.issuerData, "issuerName", ISSUER_B).sealed.contentKeys, "contentName"),
+    ["bodytext", "sidebar"],
+  );
 });
 
 test("an active omission issuer without period supply refuses before base render work", async () => {
@@ -287,7 +332,9 @@ test("a render at a stated instant carries the two periods its bound entries are
   );
 
   assert.deepEqual(
-    page.contentData.bodytext.keys.premium.map((/** @type {any} */ entry) => entry.t),
+    recordOf(page.contentData, "contentName", "bodytext")
+      .keys.filter((/** @type {any} */ entry) => entry.accessGroup === "premium")
+      .map((/** @type {any} */ entry) => entry.period),
     PERIODS,
   );
 });

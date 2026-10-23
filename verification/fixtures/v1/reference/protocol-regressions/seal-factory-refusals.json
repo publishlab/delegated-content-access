@@ -19,7 +19,7 @@
       },
       "randomStream": {
         "$type": "Uint8Array",
-        "base64url": "jh_hn_zoThuHc0mC1e_4orCEc0om_kLDe5oB9MilIytJhE1tzcWQC73GD0o"
+        "base64url": "jh_hn_zoThuHc0mC1e_4orCEc0om_kLDe5oB9MilIys"
       },
       "testKeyDocuments": {
         "signingKeys": {
@@ -573,7 +573,7 @@
       "set": {
         "randomStream": {
           "$type": "Uint8Array",
-          "base64url": "Vi-x-1r7zHFG5LszBQPs5akAZX8PGQVM4PwxNWMbQBH8aJI5ovs"
+          "base64url": "Vi-x-1r7zHFG5LszBQPs5akAZX8PGQVM4PwxNWMbQA"
         }
       },
       "calls": [
@@ -622,7 +622,7 @@
       "set": {
         "randomStream": {
           "$type": "Uint8Array",
-          "base64url": "2r-SVliDhRAUnIq6khgyOxaz_7v48qaDHJYVKpx20UFK5_GO0IPaZaIicHJat0JTW1mKB6qBY3Qr7_wc0PZKV6D9Hn16YhWIE2gROu4aIkMUdOGRIT2vRgrWHfI"
+          "base64url": "2r-SVliDhRAUnIq6khgyOxaz_7v48qaDHJYVKpx20UE"
         },
         "fixedPeriodKeys": {
           "premium": {
@@ -780,7 +780,7 @@
       "set": {
         "randomStream": {
           "$type": "Uint8Array",
-          "base64url": "2r-SVliDhRAUnIq6khgyOxaz_7v48qaDHJYVKpx20UFK5_GO0IPaZaIicHJat0JTW1mKB6qBY3Qr7_wc0PZKV6D9Hn16YhWIE2gROu4aIkMUdOGRIT2vRgrWHfI"
+          "base64url": "2r-SVliDhRAUnIq6khgyOxaz_7v48qaDHJYVKpx20UE"
         },
         "fixedPeriodKeys": {
           "premium": {

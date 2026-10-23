@@ -28,7 +28,7 @@ test("processor construction requires an engine and an object of limits", () => 
   assert.throws(
     () =>
       new IssuerProcessor(
-        { checkOperatingIssuerName() {}, unlock: async () => ({ contentKeys: {}, errors: {} }) },
+        { checkOperatingIssuerName() {}, unlock: async () => ({ contentKeys: [], errors: [] }) },
         { limits: /** @type {any} */ ("unbounded") },
       ),
     (/** @type {any} */ error) => error.code === "bad_config",
@@ -104,7 +104,7 @@ test("period-key request input is inactive until trusted issuer configuration se
     checkOperatingIssuerName() {},
     async unlock(request) {
       seen.push(request);
-      return { contentKeys: {}, errors: {} };
+      return { contentKeys: [], errors: [] };
     },
   };
   const mixed = new DcaRequest({
@@ -112,8 +112,8 @@ test("period-key request input is inactive until trusted issuer configuration se
     issuerName: "paywall",
     keyId: "2025-10",
     sealed: {
-      contentKeys: { bodytext: "direct" },
-      periodKeys: { premium: { malformed: "period-key" } },
+      contentKeys: [{ contentName: "bodytext", key: "direct" }],
+      periodKeys: [{ accessGroup: "premium", period: "malformed", key: "period-key" }],
     },
   });
 
@@ -133,7 +133,7 @@ test("period-key request input is inactive until trusted issuer configuration se
     version: "1",
     issuerName: "paywall",
     keyId: "2025-10",
-    sealed: { periodKeys: { premium: { "251023T1400": "period-key" } } },
+    sealed: { periodKeys: [{ accessGroup: "premium", period: "251023T1400", key: "period-key" }] },
   });
   assert.deepEqual(baseline.admit(periodKeysOnly), { kind: "failure", code: "binding_failed" });
 
@@ -145,7 +145,7 @@ test("period-key request input is inactive until trusted issuer configuration se
   );
   const completePeriodRequest = new DcaRequest({
     ...periodKeysOnly.toObject(),
-    sealed: { ...periodKeysOnly.sealed, contentKeys: {} },
+    sealed: { ...periodKeysOnly.sealed, contentKeys: [] },
   });
   assert.equal(
     selected.admit(completePeriodRequest).kind,
@@ -162,9 +162,9 @@ test("admission parses the raw document once and does not reach the engine", asy
     async unlock(request, registration, policyInput, at) {
       calls.push({ request, registration, policyInput, at });
       return {
-        contentKeys: { bodytext: "content-key" },
-        periodKeys: {},
-        errors: {},
+        contentKeys: [{ contentName: "bodytext", key: "content-key" }],
+        periodKeys: [],
+        errors: [],
         policyData: { delivery: "host-owned" },
       };
     },
@@ -184,7 +184,7 @@ test("admission parses the raw document once and does not reach the engine", asy
     // none and this test is about the parse rather than about the ask.
     admission = processor.admit(
       '{"version":"first","version":"1","issuerName":"paywall","keyId":"2025-10",' +
-        '"sealed":{"contentKeys":{"bodytext":"blob"}}}',
+        '"sealed":{"contentKeys":[{"contentName":"bodytext","key":"blob"}]}}',
     );
     // Admission is the first operation: it structurally admits and returns
     // the request, and the engine has not been reached.
@@ -216,12 +216,12 @@ test("admission parses the raw document once and does not reach the engine", asy
   );
   assert.deepEqual(result, {
     kind: "success",
-    document: { keys: { contentKeys: { bodytext: "content-key" } } },
+    document: { keys: { contentKeys: [{ contentName: "bodytext", key: "content-key" }] } },
     policyData: { delivery: "host-owned" },
   });
   assert.equal(
     JSON.stringify(result.document),
-    '{"keys":{"contentKeys":{"bodytext":"content-key"}}}',
+    '{"keys":{"contentKeys":[{"contentName":"bodytext","key":"content-key"}]}}',
     "a miss without the chain-key extension keeps its wire document byte-for-byte unchanged without an instant",
   );
   assert.equal(Object.hasOwn(result, "status"), false);
@@ -234,7 +234,7 @@ test("a canonical invocation carries the host registration, default policy input
     checkOperatingIssuerName() {},
     async unlock(request, registration, policyInput, invocation) {
       calls.push({ request, registration, policyInput, invocation });
-      return { contentKeys: {}, errors: {} };
+      return { contentKeys: [], errors: [] };
     },
   });
   const request = new DcaRequest({ version: "1", sealed: {} });
@@ -272,7 +272,7 @@ test("a configured typed encoder preserves period keys beside its known capabili
   const capability = Object.freeze({
     kind: "chain-keys",
     accessGroup: "premium",
-    entries: { t: "chain-key" },
+    entries: [{ t: "t", key: "chain-key" }],
     interpretation,
   });
   const processor = new IssuerProcessor(
@@ -280,10 +280,10 @@ test("a configured typed encoder preserves period keys beside its known capabili
       checkOperatingIssuerName() {},
       async unlock() {
         return {
-          contentKeys: {},
-          periodKeys: { archive: { "251023T1400": PERIOD_KEY } },
+          contentKeys: [],
+          periodKeys: [{ accessGroup: "archive", period: "251023T1400", key: PERIOD_KEY }],
           capabilities: [capability],
-          errors: {},
+          errors: [],
           policyData: { unchanged: true },
         };
       },
@@ -313,9 +313,9 @@ test("a configured typed encoder preserves period keys beside its known capabili
     kind: "success",
     document: {
       keys: {
-        contentKeys: {},
-        periodKeys: { archive: { "251023T1400": PERIOD_KEY } },
-        chainKeys: { premium: { t: "chain-key" } },
+        contentKeys: [],
+        periodKeys: [{ accessGroup: "archive", period: "251023T1400", key: PERIOD_KEY }],
+        chainKeys: [{ accessGroup: "premium", cutoff: "t", key: "chain-key" }],
       },
     },
     policyData: { unchanged: true },
@@ -328,14 +328,14 @@ test("a represented capability without its configured encoder fails closed inste
     checkOperatingIssuerName() {},
     async unlock() {
       return {
-        contentKeys: { bodytext: "content-key" },
-        periodKeys: { archive: { old: "period-key" } },
-        errors: {},
+        contentKeys: [{ contentName: "bodytext", key: "content-key" }],
+        periodKeys: [{ accessGroup: "archive", period: "old", key: "period-key" }],
+        errors: [],
         capabilities: [
           {
             kind: "chain-keys",
             accessGroup: "premium",
-            entries: { t: "chain-key" },
+            entries: [{ t: "t", key: "chain-key" }],
             interpretation: {},
           },
         ],
@@ -363,22 +363,28 @@ test("a represented capability without its configured encoder fails closed inste
 test("malformed typed records and legacy result fields cannot become a partial success", async () => {
   const request = new DcaRequest({ version: "1", sealed: {} });
   const plainResult = {
-    contentKeys: { bodytext: "content-key" },
-    periodKeys: { archive: { t: "period-key" } },
-    errors: {},
+    contentKeys: [{ contentName: "bodytext", key: "content-key" }],
+    periodKeys: [{ accessGroup: "archive", period: "t", key: "period-key" }],
+    errors: [],
   };
   const valid = {
     kind: "chain-keys",
     accessGroup: "premium",
-    entries: { t: "chain-key" },
+    entries: [{ t: "t", key: "chain-key" }],
     interpretation: {},
   };
   const malformed = [
     { ...valid, kind: "" },
     { ...valid, accessGroup: "" },
-    { ...valid, entries: {} },
-    { ...valid, entries: { t: 7 } },
-    { ...valid, entries: { t: "chain-key", u: 7 } },
+    { ...valid, entries: [] },
+    { ...valid, entries: [{ t: "t", key: 7 }] },
+    {
+      ...valid,
+      entries: [
+        { t: "t", key: "chain-key" },
+        { t: "u", key: 7 },
+      ],
+    },
     { ...valid, entries: "chain-key" },
     { ...valid, interpretation: null },
     { ...valid, interpretation: [] },
@@ -399,7 +405,7 @@ test("malformed typed records and legacy result fields cannot become a partial s
           "chain-keys": () => ({
             section: "chainKeys",
             accessGroup: "premium",
-            entries: { t: "chain-key" },
+            entries: [{ t: "t", key: "chain-key" }],
             periodGeometry: { chainsPerDay: 2, periodMinutes: 15 },
           }),
         },
@@ -433,14 +439,14 @@ test("a throwing or malformed encoder contribution cannot become a partial succe
     checkOperatingIssuerName() {},
     async unlock() {
       return {
-        contentKeys: { bodytext: "content-key" },
-        periodKeys: { archive: { t: "period-key" } },
-        errors: {},
+        contentKeys: [{ contentName: "bodytext", key: "content-key" }],
+        periodKeys: [{ accessGroup: "archive", period: "t", key: "period-key" }],
+        errors: [],
         capabilities: [
           {
             kind: "chain-keys",
             accessGroup: "premium",
-            entries: { t: "chain-key" },
+            entries: [{ t: "t", key: "chain-key" }],
             interpretation: {},
           },
         ],
@@ -451,7 +457,7 @@ test("a throwing or malformed encoder contribution cannot become a partial succe
   const contribution = {
     section: "chainKeys",
     accessGroup: "premium",
-    entries: { t: "chain-key" },
+    entries: [{ t: "t", key: "chain-key" }],
     periodGeometry: { chainsPerDay: 2, periodMinutes: 15 },
   };
   for (const encoder of [
@@ -461,7 +467,7 @@ test("a throwing or malformed encoder contribution cannot become a partial succe
     () => ({ ...contribution, section: "unknown-section" }),
     () => ({ ...contribution, accessGroup: "" }),
     () => ({ ...contribution, accessGroup: 7 }),
-    () => ({ ...contribution, entries: {} }),
+    () => ({ ...contribution, entries: [] }),
   ]) {
     const processor = new IssuerProcessor(engine, {
       capabilityEncoders: { "chain-keys": encoder },
@@ -479,8 +485,8 @@ test("a capability composition fault maps to the endpoint internal-error refusal
       checkOperatingIssuerName() {},
       async unlock() {
         return {
-          contentKeys: { bodytext: "content-key" },
-          errors: {},
+          contentKeys: [{ contentName: "bodytext", key: "content-key" }],
+          errors: [],
           periodCapabilities: { premium: { t: "legacy-key" } },
         };
       },
@@ -505,19 +511,19 @@ test("colliding typed capability contributions fail closed rather than overwrite
       checkOperatingIssuerName() {},
       async unlock() {
         return {
-          contentKeys: {},
-          errors: {},
+          contentKeys: [],
+          errors: [],
           capabilities: [
             {
               kind: "chain-keys",
               accessGroup: "premium",
-              entries: { t1: "first" },
+              entries: [{ t: "t1", key: "first" }],
               interpretation: {},
             },
             {
               kind: "chain-keys",
               accessGroup: "premium",
-              entries: { t2: "second" },
+              entries: [{ t: "t2", key: "second" }],
               interpretation: {},
             },
           ],
@@ -555,10 +561,10 @@ test("absent and empty typed capabilities preserve ordinary partial success", as
         checkOperatingIssuerName() {},
         async unlock() {
           return {
-            contentKeys: { bodytext: "content-key" },
-            periodKeys: { archive: { "251023T1400": PERIOD_KEY } },
+            contentKeys: [{ contentName: "bodytext", key: "content-key" }],
+            periodKeys: [{ accessGroup: "archive", period: "251023T1400", key: PERIOD_KEY }],
             ...(capabilities === undefined ? {} : { capabilities }),
-            errors: {},
+            errors: [],
           };
         },
       },
@@ -572,8 +578,8 @@ test("absent and empty typed capabilities preserve ordinary partial success", as
       kind: "success",
       document: {
         keys: {
-          contentKeys: { bodytext: "content-key" },
-          periodKeys: { archive: { "251023T1400": PERIOD_KEY } },
+          contentKeys: [{ contentName: "bodytext", key: "content-key" }],
+          periodKeys: [{ accessGroup: "archive", period: "251023T1400", key: PERIOD_KEY }],
         },
       },
       policyData: undefined,
@@ -594,13 +600,13 @@ test("chain geometry of zero or below from an encoder is refused", async () => {
         checkOperatingIssuerName() {},
         async unlock() {
           return {
-            contentKeys: {},
-            errors: {},
+            contentKeys: [],
+            errors: [],
             capabilities: [
               {
                 kind: "chain-keys",
                 accessGroup: "premium",
-                entries: { t: "chain-key" },
+                entries: [{ t: "t", key: "chain-key" }],
                 interpretation: {},
               },
             ],
@@ -631,7 +637,11 @@ test("an empty legacy capability map leaves the answer a success", async () => {
     const processor = new IssuerProcessor({
       checkOperatingIssuerName() {},
       async unlock() {
-        return { contentKeys: { bodytext: "content-key" }, errors: {}, ...legacy };
+        return {
+          contentKeys: [{ contentName: "bodytext", key: "content-key" }],
+          errors: [],
+          ...legacy,
+        };
       },
     });
     assert.deepEqual(
@@ -641,7 +651,7 @@ test("an empty legacy capability map leaves the answer a success", async () => {
       }),
       {
         kind: "success",
-        document: { keys: { contentKeys: { bodytext: "content-key" } } },
+        document: { keys: { contentKeys: [{ contentName: "bodytext", key: "content-key" }] } },
         policyData: undefined,
       },
       Object.keys(legacy)[0],
@@ -654,9 +664,9 @@ test("an engine cannot bypass capability composition with a direct chainKeys res
     checkOperatingIssuerName() {},
     async unlock() {
       return {
-        contentKeys: {},
-        errors: {},
-        chainKeys: { premium: { "251023T1400": "uncomposed-chain-key" } },
+        contentKeys: [],
+        errors: [],
+        chainKeys: [{ accessGroup: "premium", cutoff: "251023T1400", key: "uncomposed-chain-key" }],
       };
     },
   });
@@ -675,7 +685,11 @@ test("a legacy capability member that is not a map is refused", async () => {
       const processor = new IssuerProcessor({
         checkOperatingIssuerName() {},
         async unlock() {
-          return { contentKeys: { bodytext: "content-key" }, errors: {}, [field]: value };
+          return {
+            contentKeys: [{ contentName: "bodytext", key: "content-key" }],
+            errors: [],
+            [field]: value,
+          };
         },
       });
       assert.deepEqual(
@@ -726,7 +740,7 @@ test("a canonical invocation rejects malformed captured instants before engine w
     checkOperatingIssuerName() {},
     async unlock() {
       calls++;
-      return { contentKeys: {}, errors: {} };
+      return { contentKeys: [], errors: [] };
     },
   });
   const request = new DcaRequest({ version: "1", sealed: {} });
@@ -746,7 +760,7 @@ test("the raw-document compatibility entry admits once into the same canonical i
     checkOperatingIssuerName() {},
     async unlock(request, registration, policyInput, invocation) {
       calls.push({ request, registration, policyInput, invocation });
-      return { contentKeys: {}, errors: {} };
+      return { contentKeys: [], errors: [] };
     },
   });
   const endpoint = new UnlockEndpoint(processor);
@@ -755,7 +769,7 @@ test("the raw-document compatibility entry admits once into the same canonical i
 
   const answer = await endpoint.handleDocument(
     '{"version":"1","issuerName":"paywall","keyId":"2025-10",' +
-      '"sealed":{"contentKeys":{"bodytext":"blob"}}}',
+      '"sealed":{"contentKeys":[{"contentName":"bodytext","key":"blob"}]}}',
     registration,
     undefined,
     capturedAtMs,
@@ -769,25 +783,29 @@ test("the raw-document compatibility entry admits once into the same canonical i
   assert.deepEqual(calls[0].invocation, { capturedAtMs });
 });
 
-test("the entry cap counts a malformed group the engine would skip, at admission", async () => {
+test("the entry cap counts raw records the engine would dedupe or refuse, at admission", async () => {
   let reached = 0;
   const processor = new IssuerProcessor(
     {
       checkOperatingIssuerName() {},
       async unlock() {
         reached++;
-        return { contentKeys: {}, periodKeys: {}, errors: {} };
+        return { contentKeys: [], periodKeys: [], errors: [] };
       },
     },
     { limits: { maxEntriesPerGroup: 2 } },
   );
 
-  // An array is not the map the format says a group is, so the engine walks
-  // none of it and would answer with nothing. Admission counts its indices and
-  // refuses first. Both answers are safe; the cheap one runs.
+  // Three records for one group, two of them the same candidate and one with
+  // a label outside the grammar. Admission counts every raw record before any
+  // dedupe or label check and refuses first. Both answers are safe; the cheap
+  // one runs.
   const admission = processor.admit(
     '{"version":"1","issuerName":"paywall","keyId":"2025-10",' +
-      '"sealed":{"periodKeys":{"premium":["a","b","c"]}}}',
+      '"sealed":{"contentKeys":[],"periodKeys":[' +
+      '{"accessGroup":"premium","period":"251023T1400","key":"a"},' +
+      '{"accessGroup":"premium","period":"251023T1400","key":"a"},' +
+      '{"accessGroup":"premium","period":"bad","key":"b"}]}}',
   );
 
   assert.deepEqual(admission, { kind: "failure", code: "too_many_entries" });
@@ -811,8 +829,11 @@ test("the per-group cap cannot be bypassed by splitting entries across period-ke
       issuerName: "paywall",
       keyId: "2025-10",
       sealed: {
-        periodKeys: { premium: { a: "x" } },
-        chainKeys: { premium: { b: "y", c: "z" } },
+        periodKeys: [{ accessGroup: "premium", period: "a", key: "x" }],
+        chainKeys: [
+          { accessGroup: "premium", cutoff: "b", key: "y" },
+          { accessGroup: "premium", cutoff: "c", key: "z" },
+        ],
       },
     }),
   );
@@ -827,7 +848,7 @@ test("miss processing does not re-admit: the caps are not checked again", async 
       checkOperatingIssuerName() {},
       async unlock() {
         reached++;
-        return { contentKeys: {}, periodKeys: {}, errors: {} };
+        return { contentKeys: [], periodKeys: [], errors: [] };
       },
     },
     { limits: { maxEntriesPerGroup: 2 } },
@@ -839,7 +860,13 @@ test("miss processing does not re-admit: the caps are not checked again", async 
   // application admits once, ahead of the cache lookup, and never again.
   const overCap = new DcaRequest({
     version: "1",
-    sealed: { periodKeys: { premium: { a: "x", b: "y", c: "z" } } },
+    sealed: {
+      periodKeys: [
+        { accessGroup: "premium", period: "a", key: "x" },
+        { accessGroup: "premium", period: "b", key: "y" },
+        { accessGroup: "premium", period: "c", key: "z" },
+      ],
+    },
   });
 
   const result = await processor.processMiss({ request: overCap, registration: {} });
@@ -852,11 +879,14 @@ test("miss processing refuses an engine answer that is not an UnlockResult, rath
   // Missing errors, no result, or a null content-key map are engine faults.
   // They return internal_error instead of throwing during response assembly
   // or passing malformed key material to the port as a success.
-  const request = new DcaRequest({ version: "1", sealed: { contentKeys: { bodytext: "blob" } } });
+  const request = new DcaRequest({
+    version: "1",
+    sealed: { contentKeys: [{ contentName: "bodytext", key: "blob" }] },
+  });
   for (const malformed of [
-    { contentKeys: { bodytext: "k" } },
+    { contentKeys: [{ contentName: "bodytext", key: "k" }] },
     null,
-    { contentKeys: null, errors: {} },
+    { contentKeys: null, errors: [] },
   ]) {
     const processor = new IssuerProcessor({
       checkOperatingIssuerName() {},
@@ -874,23 +904,24 @@ test("miss processing refuses an engine answer that is not an UnlockResult, rath
 test("a period-key-enabled processor refuses malformed engine period-key output", async () => {
   const request = new DcaRequest({
     version: "1",
-    sealed: { contentKeys: { bodytext: "blob" } },
+    sealed: { contentKeys: [{ contentName: "bodytext", key: "blob" }] },
   });
   for (const periodKeys of [
     null,
     "leak",
-    [],
-    { premium: {} },
-    { "bad group": { "251023T1400": "key" } },
-    { premium: { bad: "key" } },
-    { premium: { "251023T1400": 7 } },
-    { premium: { "251023T1400": "key" } },
+    { premium: { "251023T1400": PERIOD_KEY } },
+    [null],
+    [{ accessGroup: "bad group", period: "251023T1400", key: PERIOD_KEY }],
+    [{ accessGroup: "premium", period: "bad", key: PERIOD_KEY }],
+    [{ accessGroup: "premium", period: "251023T1400", key: 7 }],
+    [{ accessGroup: "premium", period: "251023T1400", key: "key" }],
+    [{ period: "251023T1400", key: PERIOD_KEY }],
   ]) {
     const processor = new IssuerProcessor(
       {
         checkOperatingIssuerName() {},
         async unlock() {
-          return { contentKeys: {}, periodKeys, errors: {} };
+          return { contentKeys: [], periodKeys, errors: [] };
         },
       },
       { periodKeyInput: true },
@@ -963,7 +994,10 @@ test("a plain document is not a request, and the seams say so", async () => {
   // Every fixed field would read off a plain object, so a caller that skipped
   // construction would pass the version and envelope checks and then present
   // no coordinates at all. Each seam refuses instead.
-  const document = { version: "1", sealed: { contentKeys: { bodytext: "blob" } } };
+  const document = {
+    version: "1",
+    sealed: { contentKeys: [{ contentName: "bodytext", key: "blob" }] },
+  };
 
   assert.throws(
     () => checkVersion(/** @type {any} */ (document), ["1"]),
@@ -981,7 +1015,7 @@ test("a plain document is not a request, and the seams say so", async () => {
     () =>
       new IssuerProcessor({
         checkOperatingIssuerName() {},
-        unlock: async () => ({ contentKeys: {}, errors: {} }),
+        unlock: async () => ({ contentKeys: [], errors: [] }),
       }).processMiss({
         request: /** @type {any} */ (document),
         registration: {},
@@ -1012,63 +1046,114 @@ test("coordinate admission rejects unsafe names and period-key labels before eng
       checkOperatingIssuerName() {},
       async unlock() {
         reached++;
-        return { contentKeys: {}, errors: {} };
+        return { contentKeys: [], errors: [] };
       },
     },
     { periodKeyInput: true },
   );
   const overLength = "a".repeat(65);
   const cases = [
-    { sealed: { contentKeys: { "body|text": "blob" } } },
-    { sealed: { periodKeys: { "premium|sport": { "251023T1400": "blob" } } } },
-    { sealed: { periodKeys: { premium: { "251023T1400|junk": "blob" } } } },
-    { sealed: { periodKeys: { premium: { notadate: "blob" } } } },
-    { sealed: { periodKeys: { premium: { "251023T14": "blob", "251023T1400": "blob" } } } },
+    { sealed: { contentKeys: [{ contentName: "body|text", key: "blob" }] } },
+    {
+      sealed: {
+        periodKeys: [{ accessGroup: "premium|sport", period: "251023T1400", key: "blob" }],
+      },
+    },
+    {
+      sealed: { periodKeys: [{ accessGroup: "premium", period: "251023T1400|junk", key: "blob" }] },
+    },
+    { sealed: { periodKeys: [{ accessGroup: "premium", period: "notadate", key: "blob" }] } },
+    {
+      sealed: {
+        periodKeys: [
+          { accessGroup: "premium", period: "251023T14", key: "blob" },
+          { accessGroup: "premium", period: "251023T1400", key: "blob" },
+        ],
+      },
+    },
 
     // The grammar itself, not only the delimiter the four rows above
     // carry. A name that is empty, digit-initial, over the cap or spelled
     // with a character the identifier rules exclude is refused here, where
     // the request is all that has to be read, rather than travelling into
     // a policy decision as a coordinate nothing can be sealed at.
-    { sealed: { contentKeys: { "": "blob" } } },
-    { sealed: { contentKeys: { 1: "blob" } } },
-    { sealed: { contentKeys: { "1body": "blob" } } },
-    { sealed: { contentKeys: { "body text": "blob" } } },
-    { sealed: { contentKeys: { "body.text": "blob" } } },
-    { sealed: { contentKeys: { [overLength]: "blob" } } },
-    { sealed: { periodKeys: { "": { "251023T1400": "blob" } } } },
-    { sealed: { periodKeys: { "2025-10": { "251023T1400": "blob" } } } },
-    { sealed: { periodKeys: { "premium sport": { "251023T1400": "blob" } } } },
-    { sealed: { periodKeys: { [overLength]: { "251023T1400": "blob" } } } },
-    { sealed: { periodKeys: { premium: null } } },
-    { sealed: { periodKeys: { premium: "AAAA" } } },
-    { sealed: { periodKeys: { premium: ["AAAA"] } } },
-    { sealed: { periodKeys: { premium: 5 } } },
-    { sealed: { periodKeys: { premium: true } } },
-    { sealed: { contentKeys: { bodytext: "blob" }, periodKeys: {} } },
-    { sealed: { contentKeys: { bodytext: "blob" }, periodKeys: { premium: {} } } },
-    { sealed: { periodKeys: { premium: { "251023T1400": "blob", notadate: "blob" } } } },
+    { sealed: { contentKeys: [{ contentName: "", key: "blob" }] } },
+    { sealed: { contentKeys: [{ contentName: "1", key: "blob" }] } },
+    { sealed: { contentKeys: [{ contentName: "1body", key: "blob" }] } },
+    { sealed: { contentKeys: [{ contentName: "body text", key: "blob" }] } },
+    { sealed: { contentKeys: [{ contentName: "body.text", key: "blob" }] } },
+    { sealed: { contentKeys: [{ contentName: overLength, key: "blob" }] } },
+    { sealed: { periodKeys: [{ accessGroup: "", period: "251023T1400", key: "blob" }] } },
+    { sealed: { periodKeys: [{ accessGroup: "2025-10", period: "251023T1400", key: "blob" }] } },
+    {
+      sealed: {
+        periodKeys: [{ accessGroup: "premium sport", period: "251023T1400", key: "blob" }],
+      },
+    },
+    { sealed: { periodKeys: [{ accessGroup: overLength, period: "251023T1400", key: "blob" }] } },
+    // Every period-key element names a coordinate, so an element that is
+    // not a record, or a record without its identity, refuses the request.
+    { sealed: { periodKeys: [null] } },
+    { sealed: { periodKeys: ["AAAA"] } },
+    { sealed: { periodKeys: [["AAAA"]] } },
+    { sealed: { periodKeys: [5] } },
+    { sealed: { periodKeys: [true] } },
+    { sealed: { periodKeys: [{ period: "251023T1400", key: "blob" }] } },
+    { sealed: { periodKeys: [{ accessGroup: "premium", key: "blob" }] } },
+    { sealed: { contentKeys: [{ contentName: "bodytext", key: "blob" }], periodKeys: [] } },
+    // The old family map is no collection.
+    {
+      sealed: {
+        contentKeys: [{ contentName: "bodytext", key: "blob" }],
+        periodKeys: { premium: { "251023T1400": "blob" } },
+      },
+    },
+    // A content-key record without its name, or with a name of another type.
+    { sealed: { contentKeys: [{ key: "blob" }] } },
+    { sealed: { contentKeys: [{ contentName: 7, key: "blob" }] } },
+    { sealed: { contentKeys: { bodytext: "blob" } } },
+    {
+      sealed: {
+        periodKeys: [
+          { accessGroup: "premium", period: "251023T1400", key: "blob" },
+          { accessGroup: "premium", period: "notadate", key: "blob" },
+        ],
+      },
+    },
 
-    // A present section that is not a map refuses the whole request, even
+    // A present section that is not an array refuses the whole request, even
     // when a well-formed sibling section could carry it.
-    { sealed: { contentKeys: null, periodKeys: { premium: { "251023T1400": "blob" } } } },
-    { sealed: { contentKeys: "AAAA", periodKeys: { premium: { "251023T1400": "blob" } } } },
-    { sealed: { contentKeys: ["AAAA"], periodKeys: { premium: { "251023T1400": "blob" } } } },
-    { sealed: { contentKeys: { bodytext: "blob" }, periodKeys: null } },
-    { sealed: { contentKeys: { bodytext: "blob" }, periodKeys: "AAAA" } },
-    { sealed: { contentKeys: { bodytext: "blob" }, periodKeys: ["AAAA"] } },
+    {
+      sealed: {
+        contentKeys: null,
+        periodKeys: [{ accessGroup: "premium", period: "251023T1400", key: "blob" }],
+      },
+    },
+    {
+      sealed: {
+        contentKeys: "AAAA",
+        periodKeys: [{ accessGroup: "premium", period: "251023T1400", key: "blob" }],
+      },
+    },
+    { sealed: { contentKeys: [{ contentName: "bodytext", key: "blob" }], periodKeys: null } },
+    { sealed: { contentKeys: [{ contentName: "bodytext", key: "blob" }], periodKeys: "AAAA" } },
+    { sealed: { contentKeys: [{ contentName: "bodytext", key: "blob" }], periodKeys: ["AAAA"] } },
 
     // The two request-path identifiers beside the coordinates. An
     // `issuerName` that is not an identifier and a `keyId` that is empty
     // address no opening key, and the engine's own typeof check was the
     // only gate on either one. A keyId is opaque, so a non-empty string is
     // the whole of its rule and the test below records what that admits.
-    { issuerName: "1paywall", sealed: { contentKeys: { bodytext: "blob" } } },
-    { issuerName: "pay|wall", sealed: { contentKeys: { bodytext: "blob" } } },
-    { issuerName: overLength, sealed: { contentKeys: { bodytext: "blob" } } },
-    { issuerName: "paywall", keyId: "", sealed: { contentKeys: { bodytext: "blob" } } },
-    { issuerName: undefined, sealed: { contentKeys: { bodytext: "blob" } } },
-    { keyId: undefined, sealed: { contentKeys: { bodytext: "blob" } } },
+    { issuerName: "1paywall", sealed: { contentKeys: [{ contentName: "bodytext", key: "blob" }] } },
+    { issuerName: "pay|wall", sealed: { contentKeys: [{ contentName: "bodytext", key: "blob" }] } },
+    { issuerName: overLength, sealed: { contentKeys: [{ contentName: "bodytext", key: "blob" }] } },
+    {
+      issuerName: "paywall",
+      keyId: "",
+      sealed: { contentKeys: [{ contentName: "bodytext", key: "blob" }] },
+    },
+    { issuerName: undefined, sealed: { contentKeys: [{ contentName: "bodytext", key: "blob" }] } },
+    { keyId: undefined, sealed: { contentKeys: [{ contentName: "bodytext", key: "blob" }] } },
 
     // And the request that presents nothing at all. At least one base or
     // selected-extension coordinate has to be there, so an empty ask is
@@ -1076,9 +1161,17 @@ test("coordinate admission rejects unsafe names and period-key labels before eng
     // an empty map.
     {},
     { sealed: {} },
-    { sealed: { contentKeys: {} } },
-    { sealed: { contentKeys: {}, periodKeys: {}, chainKeys: {} } },
-    { sealed: { contentKeys: {}, chainKeys: { premium: { "251023T1400": "AAAA" } } } },
+    { sealed: { contentKeys: [] } },
+    // A content-key element that is not a record is skipped, so a
+    // collection of nothing else presents no coordinate either.
+    { sealed: { contentKeys: [null, "AAAA", ["AAAA"], 5] } },
+    { sealed: { contentKeys: [], periodKeys: [], chainKeys: [] } },
+    {
+      sealed: {
+        contentKeys: [],
+        chainKeys: [{ accessGroup: "premium", cutoff: "251023T1400", key: "AAAA" }],
+      },
+    },
   ];
 
   for (const request of cases) {
@@ -1097,17 +1190,40 @@ test("coordinate admission rejects unsafe names and period-key labels before eng
   assert.equal(reached, 0, "structural coordinate refusals never reach policy or opening work");
 });
 
+test("a content-key element that is not a record is skipped, and its siblings keep admission", () => {
+  const processor = new IssuerProcessor(unreachableEngine(), { periodKeyInput: true });
+  const admit = (/** @type {any} */ sealed) =>
+    processor.admit(
+      JSON.stringify({ version: "1", issuerName: "paywall", keyId: "2025-10", sealed }),
+    ).kind;
+  const period = { accessGroup: "premium", period: "251023T1400", key: "blob" };
+
+  assert.equal(
+    admit({ contentKeys: [null, { contentName: "bodytext", key: "blob" }, 7, ["x"]] }),
+    "admitted",
+  );
+  assert.equal(admit({ contentKeys: ["AAAA"], periodKeys: [period] }), "admitted");
+  // A record with its identity and a bad key names its coordinate; the
+  // engine refuses that coordinate alone, so admission lets it through.
+  assert.equal(admit({ contentKeys: [{ contentName: "bodytext", key: 7 }] }), "admitted");
+  assert.equal(admit({ contentKeys: [{ contentName: "bodytext" }] }), "admitted");
+  assert.equal(admit({ contentKeys: [], periodKeys: [{ ...period, key: null }] }), "admitted");
+});
+
 test("the chain section counts as an ask when the issuer selected the extension", () => {
   const chainOnly = JSON.stringify({
     version: "1",
     issuerName: "paywall",
     keyId: "2025-10",
-    sealed: { contentKeys: {}, chainKeys: { premium: { "251023T1400": "AAAA" } } },
+    sealed: {
+      contentKeys: [],
+      chainKeys: [{ accessGroup: "premium", cutoff: "251023T1400", key: "AAAA" }],
+    },
   });
   const engine = {
     checkOperatingIssuerName() {},
     async unlock() {
-      return { contentKeys: {}, errors: {} };
+      return { contentKeys: [], errors: [] };
     },
   };
 
@@ -1131,11 +1247,40 @@ test("the chain section counts as an ask when the issuer selected the extension"
   assert.deepEqual(noExtension.admit(chainOnly), { kind: "failure", code: "binding_failed" });
 });
 
+test("skipped chain elements present no coordinate, while named siblings retain admission", () => {
+  const engine = unreachableEngine();
+  const chain = { accessGroup: "premium", cutoff: "251023T1400", key: "AAAA" };
+  const skipped = [null, [], 0, "x"];
+  for (const encoded of [false, true]) {
+    const processor = new IssuerProcessor(engine, {
+      selectedExtensions: ["chain-keys"],
+      ...(encoded ? { capabilityEncoders: { "chain-keys": () => ({}) } } : {}),
+    });
+    const admit = (/** @type {any[]} */ chainKeys, contentKeys = /** @type {any[]} */ ([])) =>
+      processor.admit(
+        JSON.stringify({
+          version: "1",
+          issuerName: "paywall",
+          keyId: "2025-10",
+          sealed: { contentKeys, chainKeys },
+        }),
+      );
+
+    assert.deepEqual(admit([null]), { kind: "failure", code: "binding_failed" });
+    assert.deepEqual(admit(skipped), { kind: "failure", code: "binding_failed" });
+    assert.equal(admit([null, chain]).kind, "admitted");
+    assert.equal(admit(skipped, [{ contentName: "bodytext", key: "blob" }]).kind, "admitted");
+    // Coordinate presence does not validate source material. Selected chain
+    // admission and opening still own the cutoff/key checks for a named group.
+    assert.equal(admit([{ accessGroup: "premium", cutoff: 7, key: null }]).kind, "admitted");
+  }
+});
+
 test("an opaque keyId is admitted at any length the body cap leaves room for", () => {
   const processor = new IssuerProcessor({
     checkOperatingIssuerName() {},
     async unlock() {
-      return { contentKeys: {}, errors: {} };
+      return { contentKeys: [], errors: [] };
     },
   });
 
@@ -1150,7 +1295,7 @@ test("an opaque keyId is admitted at any length the body cap leaves room for", (
       version: "1",
       issuerName: "paywall",
       keyId: `${"k".repeat(64)}-2025-10`,
-      sealed: { contentKeys: { bodytext: "blob" } },
+      sealed: { contentKeys: [{ contentName: "bodytext", key: "blob" }] },
     }),
   );
 
@@ -1165,7 +1310,7 @@ test("admission of an already-constructed request applies the coordinate caps on
       checkOperatingIssuerName() {},
       async unlock() {
         reached++;
-        return { contentKeys: {}, periodKeys: {}, errors: {} };
+        return { contentKeys: [], periodKeys: [], errors: [] };
       },
     },
     { limits: { maxBodyBytes: 1, maxEntries: 4 } },
@@ -1179,7 +1324,12 @@ test("admission of an already-constructed request applies the coordinate caps on
       version: "1",
       issuerName: "paywall",
       keyId: "2025-10",
-      sealed: { contentKeys: { a: "x", b: "y" } },
+      sealed: {
+        contentKeys: [
+          { contentName: "a", key: "x" },
+          { contentName: "b", key: "y" },
+        ],
+      },
     }),
   );
 
@@ -1194,7 +1344,15 @@ test("admission of an already-constructed request applies the coordinate caps on
         version: "1",
         issuerName: "paywall",
         keyId: "2025-10",
-        sealed: { contentKeys: { a: "x", b: "y", c: "z", d: "w", e: "v" } },
+        sealed: {
+          contentKeys: [
+            { contentName: "a", key: "x" },
+            { contentName: "b", key: "y" },
+            { contentName: "c", key: "z" },
+            { contentName: "d", key: "w" },
+            { contentName: "e", key: "v" },
+          ],
+        },
       }),
     ),
     { kind: "failure", code: "too_many_entries" },
@@ -1221,9 +1379,9 @@ function unreachableEngine() {
  * @returns {string}
  */
 function documentWithContentKeys(count) {
-  /** @type {Record<string, string>} */
-  const contentKeys = {};
-  for (let index = 0; index < count; index++) contentKeys[`item${index}`] = "blob";
+  const contentKeys = [];
+  for (let index = 0; index < count; index++)
+    contentKeys.push({ contentName: `item${index}`, key: "blob" });
   return JSON.stringify({
     version: "1",
     issuerName: "paywall",
@@ -1237,15 +1395,18 @@ function documentWithContentKeys(count) {
  * @returns {string}
  */
 function documentWithGroupEntries(count) {
-  /** @type {Record<string, string>} */
-  const periods = {};
+  const periodKeys = [];
   for (let index = 0; index < count; index++)
-    periods[`251023T${String(index).padStart(2, "0")}00`] = "blob";
+    periodKeys.push({
+      accessGroup: "premium",
+      period: `251023T${String(index).padStart(2, "0")}00`,
+      key: "blob",
+    });
   return JSON.stringify({
     version: "1",
     issuerName: "paywall",
     keyId: "2025-10",
-    sealed: { contentKeys: {}, periodKeys: { premium: periods } },
+    sealed: { contentKeys: [], periodKeys },
   });
 }
 
@@ -1258,7 +1419,7 @@ function documentOfAtLeast(bytes) {
     version: "1",
     issuerName: "paywall",
     keyId: "2025-10",
-    sealed: { contentKeys: { bodytext: "b".repeat(bytes) } },
+    sealed: { contentKeys: [{ contentName: "bodytext", key: "b".repeat(bytes) }] },
   });
   assert.ok(document.length > bytes, "the padded document is longer than the padding alone");
   return document;
@@ -1287,7 +1448,7 @@ function documentOfExactly(bytes) {
     version: "1",
     issuerName: "paywall",
     keyId: "2025-10",
-    sealed: { contentKeys: { bodytext: padding } },
+    sealed: { contentKeys: [{ contentName: "bodytext", key: padding }] },
   });
   assert.equal(utf8Size(document), bytes, "the padded document measures what it was asked for");
   return document;
@@ -1299,8 +1460,8 @@ function answeringEngine() {
     checkOperatingIssuerName() {},
     async unlock() {
       return {
-        contentKeys: { bodytext: "content-key" },
-        errors: {},
+        contentKeys: [{ contentName: "bodytext", key: "content-key" }],
+        errors: [],
         policyData: { delivery: "host-owned" },
       };
     },
@@ -1356,7 +1517,9 @@ test("an omitted limits object still bounds the request body", () => {
     version: "1",
     issuerName: "paywall",
     keyId: "2025-10",
-    sealed: { contentKeys: { bodytext: "\u00e9".repeat(64 * 1024 - WRAPPER_BYTES) } },
+    sealed: {
+      contentKeys: [{ contentName: "bodytext", key: "\u00e9".repeat(64 * 1024 - WRAPPER_BYTES) }],
+    },
   });
   assert.equal(multiByte.length, 64 * 1024, "the code units are at the cap");
   assert.ok(utf8Size(multiByte) > 64 * 1024, "the bytes are past it");
@@ -1462,7 +1625,7 @@ test("a deliberately larger finite override admits its request with the same res
   const result = await processor.processMiss({ request: admission.request, registration: {} });
   assert.equal(
     JSON.stringify(result.document),
-    '{"keys":{"contentKeys":{"bodytext":"content-key"}}}',
+    '{"keys":{"contentKeys":[{"contentName":"bodytext","key":"content-key"}]}}',
     "an override changes admission and nothing about the answer",
   );
 });
@@ -1472,29 +1635,47 @@ test("a not-delivered report crosses into the document beside keys and errors", 
   for (const [answer, document] of [
     [
       {
-        contentKeys: { bodytext: "content-key" },
-        errors: {
-          summary: { error: "unseal_failed", message: "sealed value could not be opened" },
-        },
-        notDelivered: { premium: { reason: "denied" }, archive: { reason: "unavailable" } },
+        contentKeys: [{ contentName: "bodytext", key: "content-key" }],
+        errors: [
+          {
+            coordinate: "summary",
+            error: "unseal_failed",
+            message: "sealed value could not be opened",
+          },
+        ],
+        notDelivered: [
+          { accessGroup: "premium", reason: "denied" },
+          { accessGroup: "archive", reason: "unavailable" },
+        ],
       },
       {
-        keys: { contentKeys: { bodytext: "content-key" } },
-        errors: {
-          summary: { error: "unseal_failed", message: "sealed value could not be opened" },
-        },
-        notDelivered: { premium: { reason: "denied" }, archive: { reason: "unavailable" } },
+        keys: { contentKeys: [{ contentName: "bodytext", key: "content-key" }] },
+        errors: [
+          {
+            coordinate: "summary",
+            error: "unseal_failed",
+            message: "sealed value could not be opened",
+          },
+        ],
+        notDelivered: [
+          { accessGroup: "premium", reason: "denied" },
+          { accessGroup: "archive", reason: "unavailable" },
+        ],
       },
     ],
     // The no-key result of core Section 6.2: no key and no error, one family.
     [
-      { contentKeys: {}, errors: {}, notDelivered: { premium: { reason: "denied" } } },
-      { keys: { contentKeys: {} }, notDelivered: { premium: { reason: "denied" } } },
+      { contentKeys: [], errors: [], notDelivered: [{ accessGroup: "premium", reason: "denied" }] },
+      { keys: { contentKeys: [] }, notDelivered: [{ accessGroup: "premium", reason: "denied" }] },
     ],
     // An empty report is no member: the document stays today's shape.
     [
-      { contentKeys: { bodytext: "content-key" }, errors: {}, notDelivered: {} },
-      { keys: { contentKeys: { bodytext: "content-key" } } },
+      {
+        contentKeys: [{ contentName: "bodytext", key: "content-key" }],
+        errors: [],
+        notDelivered: [],
+      },
+      { keys: { contentKeys: [{ contentName: "bodytext", key: "content-key" }] } },
     ],
   ]) {
     const processor = new IssuerProcessor({
@@ -1512,23 +1693,41 @@ test("a not-delivered report crosses into the document beside keys and errors", 
 test("a not-delivered report the engine got wrong fails closed", async () => {
   const request = new DcaRequest({ version: "1", sealed: {} });
   for (const answer of [
-    { contentKeys: {}, errors: {}, notDelivered: [] },
-    { contentKeys: {}, errors: {}, notDelivered: { premium: "denied" } },
-    { contentKeys: {}, errors: {}, notDelivered: { premium: { reason: "withheld" } } },
-    { contentKeys: {}, errors: {}, notDelivered: { premium: { reason: "no_current_period" } } },
-    { contentKeys: {}, errors: {}, notDelivered: { premium: { reason: "denied", message: 7 } } },
-    { contentKeys: {}, errors: {}, notDelivered: { "bad group": { reason: "denied" } } },
-    // A named family carries no period key, chain key or period error.
+    { contentKeys: [], errors: [], notDelivered: { premium: { reason: "denied" } } },
+    { contentKeys: [], errors: [], notDelivered: ["denied"] },
+    { contentKeys: [], errors: [], notDelivered: [{ reason: "denied" }] },
+    // One report per family: the engine decides each family once.
     {
-      contentKeys: {},
-      periodKeys: { premium: { "251023T1400": PERIOD_KEY } },
-      errors: {},
-      notDelivered: { premium: { reason: "unavailable" } },
+      contentKeys: [],
+      errors: [],
+      notDelivered: [
+        { accessGroup: "premium", reason: "denied" },
+        { accessGroup: "premium", reason: "unavailable" },
+      ],
+    },
+    { contentKeys: [], errors: [], notDelivered: [{ accessGroup: "premium", reason: "withheld" }] },
+    {
+      contentKeys: [],
+      errors: [],
+      notDelivered: [{ accessGroup: "premium", reason: "no_current_period" }],
     },
     {
-      contentKeys: {},
-      errors: { "premium|251023T1400": { error: "unseal_failed", message: "no" } },
-      notDelivered: { premium: { reason: "denied" } },
+      contentKeys: [],
+      errors: [],
+      notDelivered: [{ accessGroup: "premium", reason: "denied", message: 7 }],
+    },
+    { contentKeys: [], errors: [], notDelivered: [{ accessGroup: "bad group", reason: "denied" }] },
+    // A named family carries no period key, chain key or period error.
+    {
+      contentKeys: [],
+      periodKeys: [{ accessGroup: "premium", period: "251023T1400", key: PERIOD_KEY }],
+      errors: [],
+      notDelivered: [{ accessGroup: "premium", reason: "unavailable" }],
+    },
+    {
+      contentKeys: [],
+      errors: [{ coordinate: "premium|251023T1400", error: "unseal_failed", message: "no" }],
+      notDelivered: [{ accessGroup: "premium", reason: "denied" }],
     },
   ]) {
     const processor = new IssuerProcessor(
@@ -1576,7 +1775,7 @@ test("admission applies the engine's captured version set before member grammar"
     version: "2",
     issuerName: "paywall",
     keyId: "2025-10",
-    sealed: { contentKeys: { bodytext: "blob" } },
+    sealed: { contentKeys: [{ contentName: "bodytext", key: "blob" }] },
   };
   assert.equal(processor.admit(JSON.stringify(input)).kind, "admitted");
   assert.deepEqual(
@@ -1609,7 +1808,7 @@ test("a version guard fault is not masked as an unsupported version", () => {
     checkVersion() {
       throw fault;
     },
-    unlock: async () => ({ contentKeys: {}, errors: {} }),
+    unlock: async () => ({ contentKeys: [], errors: [] }),
   });
   assert.throws(
     () => processor.admit('{"version":"1"}'),
@@ -1624,14 +1823,14 @@ test("a custom engine guard cannot waive the common string version-selector shap
     checkVersion() {
       checks++;
     },
-    unlock: async () => ({ contentKeys: {}, errors: {} }),
+    unlock: async () => ({ contentKeys: [], errors: [] }),
   });
   for (const version of [undefined, null, 1, {}]) {
     const request = new DcaRequest({
       version,
       issuerName: "paywall",
       keyId: "2025-10",
-      sealed: { contentKeys: { bodytext: "blob" } },
+      sealed: { contentKeys: [{ contentName: "bodytext", key: "blob" }] },
     });
     assert.deepEqual(processor.admit(request), { kind: "failure", code: "bad_version" });
   }
@@ -1649,12 +1848,12 @@ test("distinct encoded chain families share one geometry or refuse the whole res
         checkOperatingIssuerName() {},
         async unlock() {
           return {
-            contentKeys: { bodytext: "content-key" },
-            errors: {},
+            contentKeys: [{ contentName: "bodytext", key: "content-key" }],
+            errors: [],
             capabilities: ["premium", "archive"].map((accessGroup) => ({
               kind: "chain-keys",
               accessGroup,
-              entries: { t: `${accessGroup}-key` },
+              entries: [{ t: "t", key: `${accessGroup}-key` }],
               interpretation: {},
             })),
           };
@@ -1685,11 +1884,11 @@ test("distinct encoded chain families share one geometry or refuse the whole res
         kind: "success",
         document: {
           keys: {
-            contentKeys: { bodytext: "content-key" },
-            chainKeys: {
-              premium: { t: "premium-key" },
-              archive: { t: "archive-key" },
-            },
+            contentKeys: [{ contentName: "bodytext", key: "content-key" }],
+            chainKeys: [
+              { accessGroup: "premium", cutoff: "t", key: "premium-key" },
+              { accessGroup: "archive", cutoff: "t", key: "archive-key" },
+            ],
           },
         },
         policyData: undefined,

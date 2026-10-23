@@ -14,6 +14,7 @@ import { Random } from "../../demo/actors/Random.js";
 import { Client } from "../../test-lib/harnesses/client.js";
 import { unlockThroughAdmission } from "../../test-lib/harnesses/unlockThroughAdmission.js";
 import { issuerKeypair, signingKeypair } from "../support/keys.js";
+import { contentKeyMap, errorMap } from "../support/namedRecords.js";
 
 const ORIGIN = "https://publisher.example";
 const NAME = "issuer";
@@ -94,7 +95,7 @@ for (const [i, algorithm] of ALGORITHMS.entries()) {
       const { client, page, request, ciphertext } = renders[i];
       const { status, body } = await unlock(request);
       assert.equal(status, 200);
-      assert.equal(body.errors, undefined);
+      assert.equal(errorMap(body.errors), undefined);
       assert.deepEqual(lookups, [[NAME, String(i)]], "only the selected registered generation");
       await client.applyResponse(page, NAME, body);
       assert.equal(new TextDecoder().decode(await client.decrypt(page, BODY, ciphertext)), TEXT);
@@ -109,8 +110,8 @@ for (const [i, algorithm] of ALGORITHMS.entries()) {
     request.keyId = String(i);
     const { status, body } = await unlock(request);
     assert.equal(status, 200);
-    assert.equal(body.keys?.contentKeys?.[BODY], undefined);
-    assert.ok(body.errors?.[BODY], "opening failed rather than trying the other key");
+    assert.equal(contentKeyMap(body.keys?.contentKeys)?.[BODY], undefined);
+    assert.ok(errorMap(body.errors)?.[BODY], "opening failed rather than trying the other key");
     assert.deepEqual(lookups, [[NAME, String(i)]]);
   });
 }

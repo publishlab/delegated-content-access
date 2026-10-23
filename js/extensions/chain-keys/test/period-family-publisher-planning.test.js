@@ -6,11 +6,48 @@ import assert from "node:assert/strict";
 import { Sealer } from "../../../core-publisher/Sealer.js";
 import { decrypt } from "../../../core-shared/aead.js";
 import { contentAadOctets } from "../../../test-reference/support/contentAadOctets.js";
+import { wrapNonceOf } from "../../../test-reference/support/contentKeyWrapNonceOctets.js";
 import { base64urlDecode, utf8Decode } from "../../../core-shared/codec.js";
 import { periodFamilyGeneration } from "../core-shared--publisher-issuer/periodFamilyGeneration.js";
 import { periodFamilySupply } from "../core-publisher/periodFamilySupply.js";
 import { periodKeysFromChainKey } from "../core-shared/chainKeyConstruction.js";
 import { wholeRenderIssuerSupplyPlan } from "../../../core-publisher/issuerSupplyPlan.js";
+import {
+  issuerBlockOf,
+  periodsOn,
+  wrapGroupsOn,
+  wrapsOf,
+} from "../../../test-lib/helpers/inspect.js";
+import {
+  contentKeyMap,
+  keyAt,
+  periodKeyMap,
+} from "../../../test-reference/support/namedRecords.js";
+import { cutoffsOf } from "./world.js";
+
+/**
+ * The access groups a sealed record collection names, each once, in wire
+ * order; none for an absent collection.
+ *
+ * @param {unknown} records
+ * @returns {string[]}
+ */
+function groupsOf(records) {
+  return Array.isArray(records) ? [...new Set(records.map((record) => record.accessGroup))] : [];
+}
+
+/**
+ * The periods one group's `sealed.periodKeys` records name, in wire order.
+ *
+ * @param {unknown} records
+ * @param {string} accessGroup
+ * @returns {string[]}
+ */
+function sealedPeriodsOf(records, accessGroup) {
+  return Array.isArray(records)
+    ? records.filter((record) => record.accessGroup === accessGroup).map((record) => record.period)
+    : [];
+}
 
 const { subtle } = globalThis.crypto;
 const AT = new Date("2025-10-23T14:20:00Z");
@@ -133,28 +170,22 @@ test("one render plans each family once and supplies period keys, chain keys, or
   const render = await addContent(new Sealer(config)).seal();
   const { dcaData } = render;
 
-  assert.deepEqual(
-    dcaData.contentData.bodytext.keys.premium.map(({ t }) => t),
-    ["251023T1415", "251023T1430"],
-  );
-  assert.deepEqual(
-    dcaData.contentData["locked-data"].keys.locked.map(({ t }) => t),
-    ["251023T1415", "251023T1430"],
-  );
+  assert.deepEqual(periodsOn(dcaData, "bodytext", "premium"), ["251023T1415", "251023T1430"]);
+  assert.deepEqual(periodsOn(dcaData, "locked-data", "locked"), ["251023T1415", "251023T1430"]);
   assert.deepEqual(dcaData.periodGeometry, { chainsPerDay: 2, periodMinutes: 15 });
 
-  assert.deepEqual(Object.keys(dcaData.issuerData["issuer-a"].sealed.periodKeys), ["premium"]);
-  assert.deepEqual(Object.keys(dcaData.issuerData["issuer-a"].sealed.chainKeys), ["locked"]);
-  assert.deepEqual(Object.keys(dcaData.issuerData["issuer-b"].sealed.periodKeys), [
+  assert.deepEqual(groupsOf(issuerBlockOf(dcaData, "issuer-a").sealed.periodKeys), ["premium"]);
+  assert.deepEqual(groupsOf(issuerBlockOf(dcaData, "issuer-a").sealed.chainKeys), ["locked"]);
+  assert.deepEqual(groupsOf(issuerBlockOf(dcaData, "issuer-b").sealed.periodKeys), [
     "premium",
     "locked",
   ]);
-  assert.deepEqual(Object.keys(dcaData.issuerData["issuer-b"].sealed.chainKeys), ["premium"]);
-  assert.deepEqual(Object.keys(dcaData.issuerData["issuer-b"].sealed.chainKeys.premium), [
+  assert.deepEqual(groupsOf(issuerBlockOf(dcaData, "issuer-b").sealed.chainKeys), ["premium"]);
+  assert.deepEqual(cutoffsOf(issuerBlockOf(dcaData, "issuer-b").sealed.chainKeys, "premium"), [
     "251023T2345",
     "251024T1145",
   ]);
-  assert.deepEqual(Object.keys(dcaData.issuerData["issuer-a"].sealed.chainKeys.locked), [
+  assert.deepEqual(cutoffsOf(issuerBlockOf(dcaData, "issuer-a").sealed.chainKeys, "locked"), [
     "251023T2345",
     "251024T1145",
   ]);
@@ -211,10 +242,10 @@ test("one render plans each family once and supplies period keys, chain keys, or
     "the period-key envelope carries the canonical period key the chain envelope reaches",
   );
 
-  const wrap = dcaData.contentData.bodytext.keys.premium[0];
+  const wrap = wrapsOf(dcaData, "bodytext", "premium")[0];
   const contentKey = await decrypt(
     periodKeySeal.key,
-    base64urlDecode(wrap.nonce),
+    wrapNonceOf(dcaData, "bodytext", "premium", wrap.period),
     base64urlDecode(wrap.key),
   );
   const plaintext = await decrypt(
@@ -260,16 +291,16 @@ test("a chain-bearing render takes every wrap and both issuer routes of one fami
   const sealOf = (/** @type {string} */ sealed) =>
     seals[Number(sealed.slice("sealed-".length)) - 1];
 
-  const periodKeyIssuer = dcaData.issuerData["issuer-a"].sealed;
-  const chainIssuer = dcaData.issuerData["issuer-b"].sealed;
-  assert.deepEqual(Object.keys(periodKeyIssuer.periodKeys), ["premium"]);
+  const periodKeyIssuer = issuerBlockOf(dcaData, "issuer-a").sealed;
+  const chainIssuer = issuerBlockOf(dcaData, "issuer-b").sealed;
+  assert.deepEqual(groupsOf(periodKeyIssuer.periodKeys), ["premium"]);
   assert.equal(Object.hasOwn(periodKeyIssuer, "chainKeys"), false);
-  assert.deepEqual(Object.keys(chainIssuer.chainKeys), ["premium"]);
-  assert.equal(Object.hasOwn(chainIssuer.periodKeys ?? {}, "premium"), false);
+  assert.deepEqual(groupsOf(chainIssuer.chainKeys), ["premium"]);
+  assert.equal(groupsOf(chainIssuer.periodKeys).includes("premium"), false);
 
   /** @type {Map<string, Uint8Array>} */
   const periodKeyAt = new Map();
-  for (const [t, sealed] of Object.entries(periodKeyIssuer.periodKeys.premium)) {
+  for (const [t, sealed] of Object.entries(periodKeyMap(periodKeyIssuer.periodKeys).premium)) {
     const { publicKey, binding, key } = sealOf(sealed);
     assert.equal(publicKey.id, "A");
     assert.equal(binding.accessGroup, "premium");
@@ -280,7 +311,9 @@ test("a chain-bearing render takes every wrap and both issuer routes of one fami
   /** @type {Map<string, Uint8Array>} */
   const derivedPeriodKeyAt = new Map();
   const geometry = dcaData.periodGeometry;
-  for (const [suppliedT, sealed] of Object.entries(chainIssuer.chainKeys.premium)) {
+  for (const [suppliedT, sealed] of Object.entries(
+    periodKeyMap(chainIssuer.chainKeys, "cutoff").premium,
+  )) {
     const { publicKey, binding, key } = sealOf(sealed);
     assert.equal(publicKey.id, "B");
     assert.equal(binding.suppliedT, suppliedT);
@@ -308,18 +341,17 @@ test("a chain-bearing render takes every wrap and both issuer routes of one fami
   }
 
   for (const [name, text] of Object.entries(plaintexts)) {
-    const record = dcaData.contentData[name];
-    assert.deepEqual(Object.keys(record.keys), ["premium"]);
+    assert.deepEqual(wrapGroupsOn(dcaData, name), ["premium"]);
     /** @type {Uint8Array[]} */
     const contentKeys = [];
-    for (const [index, wrap] of record.keys.premium.entries()) {
-      const where = `${name} premium wrap ${index} at ${wrap.t}`;
-      const periodKey = periodKeyAt.get(wrap.t) ?? derivedPeriodKeyAt.get(wrap.t);
+    for (const [index, wrap] of wrapsOf(dcaData, name, "premium").entries()) {
+      const where = `${name} premium wrap ${index} at ${wrap.period}`;
+      const periodKey = periodKeyAt.get(wrap.period) ?? derivedPeriodKeyAt.get(wrap.period);
       assert.ok(periodKey, `${where}: the render's own issuer routes supply a period key there`);
       // A wrap under another generation's period key fails authentication here.
       const contentKey = await decrypt(
         periodKey,
-        base64urlDecode(wrap.nonce),
+        wrapNonceOf(dcaData, name, "premium", wrap.period),
         base64urlDecode(wrap.key),
       ).catch(() => null);
       assert.ok(contentKey, `${where}: opens under the render's own generation`);
@@ -357,16 +389,13 @@ test("a period-key-only family crosses a chain-window edge without supplying a c
 
   const { dcaData } = await sealer.seal();
   const periods = ["251023T2330", "251023T2345", "251024T0000"];
-  assert.deepEqual(
-    dcaData.contentData.bodytext.keys.premium.map(({ t }) => t),
-    periods,
-  );
+  assert.deepEqual(periodsOn(dcaData, "bodytext", "premium"), periods);
   for (const issuerName of ["issuer-a", "issuer-b"]) {
     assert.deepEqual(
-      Object.keys(dcaData.issuerData[issuerName].sealed.periodKeys.premium),
+      sealedPeriodsOf(issuerBlockOf(dcaData, issuerName).sealed.periodKeys, "premium"),
       periods,
     );
-    assert.equal(Object.hasOwn(dcaData.issuerData[issuerName].sealed, "chainKeys"), false);
+    assert.equal(Object.hasOwn(issuerBlockOf(dcaData, issuerName).sealed, "chainKeys"), false);
   }
   assert.deepEqual(dcaData.periodGeometry, { chainsPerDay: 2, periodMinutes: 15 });
   assert.equal(events.filter((event) => event.startsWith("chain-key:")).length, 0);
@@ -418,22 +447,23 @@ test("dual supply uses one current-window chain and only the selected next-windo
   sealer.content("bodytext", "<p>Body</p>", "text/html", { accessGroups: ["premium"] });
   const { dcaData } = await sealer.seal();
   assert.equal(dcaData.resource.issuedAt, NEAR_WINDOW_END.toISOString());
-  assert.deepEqual(
-    dcaData.contentData.bodytext.keys.premium.map(({ t }) => t),
-    ["251023T2330", "251023T2345", "251024T0000"],
-  );
-  assert.deepEqual(Object.keys(dcaData.issuerData["issuer-a"].sealed.periodKeys.premium), [
-    "251024T0000",
-  ]);
-  assert.deepEqual(Object.keys(dcaData.issuerData["issuer-a"].sealed.chainKeys.premium), [
-    "251023T2345",
-  ]);
-  assert.deepEqual(Object.keys(dcaData.issuerData["issuer-b"].sealed.periodKeys.premium), [
+  assert.deepEqual(periodsOn(dcaData, "bodytext", "premium"), [
     "251023T2330",
     "251023T2345",
     "251024T0000",
   ]);
-  assert.equal(Object.hasOwn(dcaData.issuerData["issuer-b"].sealed, "chainKeys"), false);
+  assert.deepEqual(
+    sealedPeriodsOf(issuerBlockOf(dcaData, "issuer-a").sealed.periodKeys, "premium"),
+    ["251024T0000"],
+  );
+  assert.deepEqual(cutoffsOf(issuerBlockOf(dcaData, "issuer-a").sealed.chainKeys, "premium"), [
+    "251023T2345",
+  ]);
+  assert.deepEqual(
+    sealedPeriodsOf(issuerBlockOf(dcaData, "issuer-b").sealed.periodKeys, "premium"),
+    ["251023T2330", "251023T2345", "251024T0000"],
+  );
+  assert.equal(Object.hasOwn(issuerBlockOf(dcaData, "issuer-b").sealed, "chainKeys"), false);
   assert.equal(events.filter((event) => event.startsWith("chain-key:")).length, 1);
   assert.deepEqual(
     seenModes,
@@ -494,13 +524,10 @@ test("the ordinary T1 key remains identical when current at noon or midnight, wi
     firstSealer.resource("before-edge", {});
     firstSealer.content("bodytext", "before", "text/html", { accessGroups: ["premium"] });
     const before = await firstSealer.seal();
-    const firstSealed = before.dcaData.issuerData["issuer-a"].sealed;
-    assert.deepEqual(Object.keys(firstSealed.periodKeys.premium), [t1]);
-    assert.deepEqual(Object.keys(firstSealed.chainKeys.premium), [terminal]);
-    assert.deepEqual(
-      before.dcaData.contentData.bodytext.keys.premium.map(({ t }) => t),
-      [current, terminal, t1],
-    );
+    const firstSealed = issuerBlockOf(before.dcaData, "issuer-a").sealed;
+    assert.deepEqual(sealedPeriodsOf(firstSealed.periodKeys, "premium"), [t1]);
+    assert.deepEqual(cutoffsOf(firstSealed.chainKeys, "premium"), [terminal]);
+    assert.deepEqual(periodsOn(before.dcaData, "bodytext", "premium"), [current, terminal, t1]);
 
     const second = await publisherConfig({
       supply: periodFamilySupply({ families: { premium: generation }, chainWindows: 1 }),
@@ -516,19 +543,19 @@ test("the ordinary T1 key remains identical when current at noon or midnight, wi
     secondSealer.resource("after-edge", {});
     secondSealer.content("bodytext", "after", "text/html", { accessGroups: ["premium"] });
     const after = await secondSealer.seal();
-    assert.equal(Object.hasOwn(after.dcaData.issuerData["issuer-a"].sealed, "periodKeys"), false);
-    assert.deepEqual(
-      after.dcaData.contentData.bodytext.keys.premium.map(({ t }) => t),
-      [t1],
+    assert.equal(
+      Object.hasOwn(issuerBlockOf(after.dcaData, "issuer-a").sealed, "periodKeys"),
+      false,
     );
+    assert.deepEqual(periodsOn(after.dcaData, "bodytext", "premium"), [t1]);
     const key = first.seals.find(
       ({ publicKey, binding }) => publicKey.id === "A" && binding.t === t1,
     ).key;
     assert.deepEqual(key, await generation.periodKey("premium", t1));
     const opened = await decrypt(
       key,
-      base64urlDecode(after.dcaData.contentData.bodytext.keys.premium[0].nonce),
-      base64urlDecode(after.dcaData.contentData.bodytext.keys.premium[0].key),
+      wrapNonceOf(after.dcaData, "bodytext", "premium", t1),
+      base64urlDecode(wrapsOf(after.dcaData, "bodytext", "premium")[0].key),
     );
     const plaintext = await decrypt(
       opened,
@@ -546,8 +573,8 @@ test("the ordinary T1 key remains identical when current at noon or midnight, wi
       () =>
         decrypt(
           unrelatedKey,
-          base64urlDecode(after.dcaData.contentData.bodytext.keys.premium[0].nonce),
-          base64urlDecode(after.dcaData.contentData.bodytext.keys.premium[0].key),
+          wrapNonceOf(after.dcaData, "bodytext", "premium", t1),
+          base64urlDecode(wrapsOf(after.dcaData, "bodytext", "premium")[0].key),
         ),
       `${t1}: another group cannot open this wrap`,
     );
@@ -665,11 +692,11 @@ test("an empty ordinary-source selection does not emit a source-free issuer bloc
   sealer.content("bodytext", "<p>Body</p>", "text/html", { accessGroups: ["premium"] });
 
   const { dcaData } = await sealer.seal();
-  assert.equal(Object.hasOwn(dcaData.issuerData, "issuer-a"), false);
-  assert.deepEqual(Object.keys(dcaData.issuerData["issuer-b"].sealed.periodKeys.premium), [
-    "251023T1415",
-    "251023T1430",
-  ]);
+  assert.equal(issuerBlockOf(dcaData, "issuer-a"), undefined);
+  assert.deepEqual(
+    sealedPeriodsOf(issuerBlockOf(dcaData, "issuer-b").sealed.periodKeys, "premium"),
+    ["251023T1415", "251023T1430"],
+  );
 });
 
 test("invalid delivery, missing chain route, and bad supplier output all refuse before entropy or sealing", async () => {
@@ -796,10 +823,7 @@ test("the render instant is copied before asynchronous supplier work", async () 
 
   const render = await addContent(new Sealer(config)).seal();
   assert.equal(render.dcaData.resource.issuedAt, AT.toISOString());
-  assert.deepEqual(
-    render.dcaData.contentData.bodytext.keys.premium.map(({ t }) => t),
-    ["251023T1415"],
-  );
+  assert.deepEqual(periodsOn(render.dcaData, "bodytext", "premium"), ["251023T1415"]);
 });
 
 test("a chain-only source may leave T1 cached-only when a content-key route completes the item", async () => {
@@ -836,14 +860,16 @@ test("a chain-only source may leave T1 cached-only when a content-key route comp
   sealer.content("bodytext", "<p>Body</p>", "text/html", { accessGroups: ["premium"] });
 
   const render = await sealer.seal();
-  assert.deepEqual(
-    render.dcaData.contentData.bodytext.keys.premium.map(({ t }) => t),
-    ["251023T2330", "251023T2345", "251024T0000", "251024T0015"],
-  );
+  assert.deepEqual(periodsOn(render.dcaData, "bodytext", "premium"), [
+    "251023T2330",
+    "251023T2345",
+    "251024T0000",
+    "251024T0015",
+  ]);
   for (const issuerName of ["issuer-a", "issuer-b"]) {
-    const sealed = render.dcaData.issuerData[issuerName].sealed;
-    assert.deepEqual(Object.keys(sealed.chainKeys.premium), ["251023T2345"]);
-    assert.deepEqual(Object.keys(sealed.contentKeys), ["bodytext"]);
+    const sealed = issuerBlockOf(render.dcaData, issuerName).sealed;
+    assert.deepEqual(cutoffsOf(sealed.chainKeys, "premium"), ["251023T2345"]);
+    assert.deepEqual(Object.keys(contentKeyMap(sealed.contentKeys)), ["bodytext"]);
     assert.equal(Object.hasOwn(sealed, "periodKeys"), false);
   }
   assert.deepEqual(seenModes, [[true]]);
@@ -958,7 +984,12 @@ test("publisher chain reach requires the wrap's window and a supplied position a
     sealer.content("bodytext", "reachable", "text/plain", { accessGroups: ["premium"] });
     if (reachable) {
       const rendered = await sealer.seal();
-      assert.ok(rendered.dcaData.issuerData["issuer-a"].sealed.chainKeys.premium[source]);
+      assert.ok(
+        keyAt(issuerBlockOf(rendered.dcaData, "issuer-a").sealed.chainKeys, {
+          accessGroup: "premium",
+          cutoff: source,
+        }),
+      );
       assert.ok(events.includes("period"));
     } else {
       await assert.rejects(

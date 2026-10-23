@@ -48,6 +48,8 @@ import { ReaderContext } from "./ReaderContext.js";
 // use `own` for the same reason.
 
 import { binaryStringBytes } from "../core-shared/binaryStrings.js";
+import { base64urlEncode } from "../core-shared/codec.js";
+import { contentKeyWrapNonce } from "../core-shared/contentKeyWrapNonce.js";
 import { DcaError, dcaError } from "../core-shared/errors.js";
 import { own } from "../core-shared/wire.js";
 import { isAccessGroup, isContentName } from "../core-shared/names.js";
@@ -60,6 +62,17 @@ import { ResponseAssociation } from "./ResponseAssociation.js";
 
 /** A delivered contentKey is this wide under every profile. */
 const CONTENT_KEY_BYTES = 16;
+
+/** @param {Uint8Array|CryptoKey} left @param {Uint8Array|CryptoKey} right */
+function sameContentKey(left, right) {
+  if (left === right) return true;
+  return (
+    left instanceof Uint8Array &&
+    right instanceof Uint8Array &&
+    left.length === right.length &&
+    left.every((byte, index) => byte === right[index])
+  );
+}
 
 /** The two reasons period keys Section 5.6 gives a not-delivered family entry. */
 const NOT_DELIVERED_REASONS = Object.freeze(["denied", "unavailable"]);
@@ -85,9 +98,43 @@ function isErrorObject(entry) {
   );
 }
 
-/** @param {unknown} map @param {string} name */
-function hasMember(map, name) {
-  return map !== null && typeof map === "object" && Object.hasOwn(map, name);
+/**
+ * Whether a collection is an array holding a record whose own `accessGroup`
+ * is `accessGroup`. A request presents a family this way, and a response
+ * section carries a key entry for it this way, before any label or key in the
+ * record is judged.
+ *
+ * @param {unknown} collection @param {string} accessGroup
+ */
+function namesFamily(collection, accessGroup) {
+  return (
+    Array.isArray(collection) &&
+    collection.some((record) => isRecord(record) && own(record, "accessGroup") === accessGroup)
+  );
+}
+
+/**
+ * Descriptor and status records by identity (data format Section 2.3): the
+ * last whole record for each string `member` value, in first-appearance
+ * order. `stray` counts the elements that name no identity: a non-record, or
+ * a record whose `member` is not an own string.
+ *
+ * @param {unknown[]} collection @param {string} member
+ * @returns {{ records: Map<string, Record<string, unknown>>, stray: number }}
+ */
+function lastWholeRecords(collection, member) {
+  /** @type {Map<string, Record<string, unknown>>} */
+  const records = new Map();
+  let stray = 0;
+  for (const record of collection) {
+    const name = own(record, member);
+    if (!isRecord(record) || typeof name !== "string") {
+      stray++;
+      continue;
+    }
+    records.set(name, record);
+  }
+  return { records, stray };
 }
 
 /**
@@ -133,10 +180,11 @@ const ORDINARY_ENTRY_INTERPRETATION = ({ entry }) =>
  * keeps the delivery and re-opens it on a read, so no handle or key bytes are
  * ever held. Either way the opened `key` argument is unchanged.
  *
+ * Synchronous collaborators are supported: these results are awaited.
  * @typedef {object} Cache
- * @property {(accessGroup: string, t: string, key: any, context?: object) => Promise<void>} put
- * @property {(accessGroup: string, t: string, context?: object) => Promise<any[]>} candidatesAt
- * @property {(context: { lease: object }) => Promise<void>} attempted
+ * @property {(accessGroup: string, t: string, key: Uint8Array|CryptoKey, context?: object) => void|Promise<void>} put
+ * @property {(accessGroup: string, t: string, context?: object) => (Uint8Array|CryptoKey)[]|Promise<(Uint8Array|CryptoKey)[]>} candidatesAt
+ * @property {(context: { lease: object }) => void|Promise<void>} attempted
  */
 
 /**
@@ -145,11 +193,11 @@ const ORDINARY_ENTRY_INTERPRETATION = ({ entry }) =>
  * content keys and period keys, a chain key must be usable by Step and Leaf.
  *
  * @typedef {object} ChainCache
- * @property {(accessGroup: string, cutoffT: string, key: Uint8Array, context?: object) => Promise<void>} put
- * @property {(accessGroup: string, t: string, context?: object) => Promise<(Uint8Array|CryptoKey)[]>} candidates
- * @property {(accessGroup: string, t: string, context?: object) => Promise<Uint8Array[]>} [periodCandidates] - ordinary derived-period view
- * @property {(context: { lease: object }) => Promise<void>} [promote] - joinable promotion without releasing private material
- * @property {(context: { lease: object }) => Promise<void>} [attempted]
+ * @property {(accessGroup: string, cutoffT: string, key: Uint8Array, context?: object) => void|Promise<void>} put
+ * @property {(accessGroup: string, t: string, context?: object) => (Uint8Array|CryptoKey)[]|Promise<(Uint8Array|CryptoKey)[]>} candidates
+ * @property {(accessGroup: string, t: string, context?: object) => Uint8Array[]|Promise<Uint8Array[]>} [periodCandidates] - ordinary derived-period view
+ * @property {(context: { lease: object }) => void|Promise<void>} [promote] - joinable promotion without releasing private material
+ * @property {(context: { lease: object }) => void|Promise<void>} [attempted]
  */
 
 /**
@@ -162,7 +210,7 @@ const ORDINARY_ENTRY_INTERPRETATION = ({ entry }) =>
  * sealed material and gets back usable, non-extractable handles.
  *
  * @typedef {object} ClientBoundKeyCapability
- * @property {(transport: unknown) => Promise<DeliveredKeyOpener|null>} openDeliveredKeys
+ * @property {(transport: unknown) => DeliveredKeyOpener|null|Promise<DeliveredKeyOpener|null>} openDeliveredKeys
  * @property {() => void} [assertCanOpenChainKeys] - synchronous profile-owned
  *   admission for chain-capable clients; required when chainCache is selected
  */
@@ -173,7 +221,7 @@ const ORDINARY_ENTRY_INTERPRETATION = ({ entry }) =>
  * the way an unreadable entry always did.
  *
  * @typedef {object} DeliveredKeyOpener
- * @property {(value: any, usages: KeyUsage[], keyKind: 'contentKey'|'periodKey'|'chainKey') => Promise<CryptoKey|Uint8Array|null>} open
+ * @property {(value: any, usages: KeyUsage[], keyKind: 'contentKey'|'periodKey'|'chainKey') => CryptoKey|Uint8Array|null|Promise<CryptoKey|Uint8Array|null>} open
  */
 
 /**
@@ -254,7 +302,7 @@ const ORDINARY_ENTRY_INTERPRETATION = ({ entry }) =>
  * @property {number} maxTrialsPerItem
  * @property {(context: { lease: object }) => Promise<void>} [promote]
  * @property {(context: { lease: object }) => Promise<void>} [attempted]
- * @property {() => Promise<void>} [clearReaderContext]
+ * @property {() => void|Promise<void>} [clearReaderContext]
  */
 
 /**
@@ -306,7 +354,7 @@ const ORDINARY_ENTRY_INTERPRETATION = ({ entry }) =>
  *   => Promise<{ accepted: number, issues: { code: ResponseIssue['code'] }[], errors?: ConsumerErrorRecord[] }>} admit
  * @property {(context: { lease: object }) => Promise<void>} [promote]
  * @property {(context: { lease: object }) => Promise<void>} [attempted]
- * @property {() => Promise<void>} [clearReaderContext]
+ * @property {() => void|Promise<void>} [clearReaderContext]
  */
 
 /** Response members base reads itself; no consumer may own one. */
@@ -339,6 +387,11 @@ const RESPONSE_SECTION_MEMBERS = Object.freeze([
 ]);
 
 /** Members a recovery source may carry. */
+// The predicate learns each candidate's origin. An opener reports a failed
+// delivered, unwrapped or held key as a wrong key, and a current recovered
+// guess as a miss. Held material may itself have been recovered earlier.
+const HELD_ORIGIN = Object.freeze({ kind: /** @type {const} */ ("held-content-key") });
+
 const RECOVERY_SOURCE_MEMBERS = Object.freeze([
   "candidates",
   "maxTrialsPerItem",
@@ -354,7 +407,9 @@ export class ContentKeyResolver {
    * or recovered during resolution, so one publisher's render cannot open
    * another publisher's render even when identifiers collide.
    *
-   * @type {Map<string|undefined, Map<string, Map<string, Uint8Array|CryptoKey>>>}
+   * Each item holds its distinct candidates, oldest first.
+   *
+   * @type {Map<string|undefined, Map<string, Map<string, (Uint8Array|CryptoKey)[]>>>}
    */
   #contentKeys = new Map();
 
@@ -797,7 +852,23 @@ export class ContentKeyResolver {
       held = new Map();
       renders.set(renderId, held);
     }
-    held.set(contentName, key);
+    // Several response records for one item are rival candidates (core
+    // Section 7). Each distinct one is kept, and one held again moves to the
+    // newest place. The response's raw record count bounds what one
+    // application adds, so no cap here can push a working candidate out.
+    const candidates = (held.get(contentName) ?? []).filter(
+      (candidate) => !sameContentKey(candidate, key),
+    );
+    candidates.push(key);
+    held.set(contentName, candidates);
+  }
+
+  /** The held candidates of one item, newest first.
+   * @param {string|undefined} publisher @param {string} renderId @param {string} contentName
+   * @returns {(Uint8Array|CryptoKey)[]}
+   */
+  #heldContentKeys(publisher, renderId, contentName) {
+    return [...(this.#contentKeys.get(publisher)?.get(renderId)?.get(contentName) ?? [])].reverse();
   }
 
   /**
@@ -841,7 +912,7 @@ export class ContentKeyResolver {
    *
    * @param {DcaData} dcaData
    * @param {string} contentName
-   * @param {(candidate: Uint8Array|CryptoKey) => Promise<boolean>} authenticate
+   * @param {(candidate: Uint8Array|CryptoKey, origin?: { kind: string }) => Promise<boolean>} authenticate
    * @returns {Promise<Uint8Array|CryptoKey|null>}
    */
   async contentKeyForAuthenticatedItem(dcaData, contentName, authenticate) {
@@ -862,7 +933,7 @@ export class ContentKeyResolver {
   /** Authenticate all obtaining items under one response-private lifetime.
    * @param {DcaData} dcaData
    * @param {string[]} contentNames
-   * @param {(contentName: string, candidate: Uint8Array|CryptoKey) => Promise<boolean>} authenticate
+   * @param {(contentName: string, candidate: Uint8Array|CryptoKey, origin?: { kind: string }) => Promise<boolean>} authenticate
    * @param {object} [application]
    * @returns {Promise<{covered: string[], missing: string[], origins: {contentName: string, origin: KeyOrigin}[]}>}
    */
@@ -889,7 +960,7 @@ export class ContentKeyResolver {
             await this.#authenticatedItem(
               dcaData,
               contentName,
-              (candidate) => authenticate(contentName, candidate),
+              (candidate, origin) => authenticate(contentName, candidate, origin),
               lease,
             ),
             readerRevision,
@@ -904,7 +975,7 @@ export class ContentKeyResolver {
   }
 
   /** @param {DcaData} dcaData @param {string} contentName
-   * @param {(candidate: Uint8Array|CryptoKey) => Promise<boolean>} authenticate
+   * @param {(candidate: Uint8Array|CryptoKey, origin?: { kind: string }) => Promise<boolean>} authenticate
    * @param {object|undefined} lease
    * @returns {Promise<{key: Uint8Array|CryptoKey|null, origin: KeyOrigin}>}
    */
@@ -914,14 +985,22 @@ export class ContentKeyResolver {
     const publisher = this.#publisherOf(dcaData, false);
     const renderId = dcaData.renderId;
     if (typeof renderId !== "string") throw dcaError("bad_page", "dca-data carries no renderId");
-    const held = this.#contentKeys.get(publisher)?.get(renderId)?.get(contentName);
-    if (
-      held &&
-      this.#reader.accept(await this.#authenticatedCandidate(authenticate, held), readerRevision)
-    )
-      return { key: held, origin: { kind: "held-content-key" } };
-    /** @param {Uint8Array|CryptoKey} candidate */
-    const authenticated = (candidate) => this.#authenticatedCandidate(authenticate, candidate);
+    for (const held of this.#heldContentKeys(publisher, renderId, contentName)) {
+      if (
+        this.#reader.accept(
+          await this.#authenticatedCandidate(authenticate, held, HELD_ORIGIN),
+          readerRevision,
+        )
+      ) {
+        // The candidate that opened moves to the newest place, so a plain
+        // lookup after this one answers with the key that opens the item.
+        this.#holdContentKey(publisher, renderId, contentName, held);
+        return { key: held, origin: { kind: "held-content-key" } };
+      }
+    }
+    /** @param {Uint8Array|CryptoKey} candidate @param {{ kind: string }} [origin] */
+    const authenticated = (candidate, origin) =>
+      this.#authenticatedCandidate(authenticate, candidate, origin);
     /** @type {{ key: Uint8Array|CryptoKey|null, origin: KeyOrigin }} */
     let found = this.#reader.accept(
       await this.#fromCache(dcaData, contentName, lease, authenticated),
@@ -945,7 +1024,7 @@ export class ContentKeyResolver {
    * @param {DcaData} dcaData
    * @param {string} contentName
    * @param {object|undefined} lease
-   * @param {(candidate: Uint8Array|CryptoKey) => Promise<boolean>} authenticate
+   * @param {(candidate: Uint8Array|CryptoKey, origin?: { kind: string }) => Promise<boolean>} authenticate
    * @returns {Promise<{ key: Uint8Array|null, origin: KeyOrigin }>}
    */
   async #recovered(dcaData, contentName, lease, authenticate) {
@@ -974,17 +1053,26 @@ export class ContentKeyResolver {
         }
         if (++trials > source.maxTrialsPerItem) break;
         const key = Uint8Array.from(contentKey);
-        if (this.#reader.accept(await authenticate(key), readerRevision))
+        if (
+          this.#reader.accept(
+            await authenticate(key, { kind: "recovered-content-key" }),
+            readerRevision,
+          )
+        )
           return { key, origin: { ...origin, kind: "recovered-content-key" } };
       }
     }
     return { key: null, origin: { kind: "missing" } };
   }
 
-  /** @param {(candidate: Uint8Array|CryptoKey) => Promise<boolean>} authenticate @param {Uint8Array|CryptoKey} candidate */
-  async #authenticatedCandidate(authenticate, candidate) {
+  /**
+   * @param {(candidate: Uint8Array|CryptoKey, origin?: { kind: string }) => Promise<boolean>} authenticate
+   * @param {Uint8Array|CryptoKey} candidate
+   * @param {{ kind: string }} [origin] - where the candidate came from
+   */
+  async #authenticatedCandidate(authenticate, candidate, origin) {
     const readerRevision = this.#reader.capture();
-    const accepted = this.#reader.accept(await authenticate(candidate), readerRevision);
+    const accepted = this.#reader.accept(await authenticate(candidate, origin), readerRevision);
     if (typeof accepted !== "boolean") {
       throw dcaError("bad_config", "an authenticated item-key predicate answers boolean");
     }
@@ -1011,7 +1099,9 @@ export class ContentKeyResolver {
     if (typeof renderId !== "string") {
       throw dcaError("bad_page", "dca-data carries no renderId");
     }
-    const held = this.#contentKeys.get(publisher)?.get(renderId)?.get(contentName);
+    // Without a predicate to try candidates with, the newest one answers, as
+    // a single held key did.
+    const [held] = this.#heldContentKeys(publisher, renderId, contentName);
     if (held) return { key: held, origin: { kind: "held-content-key" } };
 
     return this.#reader.accept(await this.#fromCache(dcaData, contentName, lease), readerRevision);
@@ -1302,6 +1392,13 @@ export class ContentKeyResolver {
       periodKeys: responseSectionEntries(keys, "periodKeys"),
       chainKeys: responseSectionEntries(keys, "chainKeys"),
     };
+    // A key/error collision belongs to the response as received. Later
+    // report, support or coordinate filtering must not unmask that error.
+    const errorSections = {
+      contentKeys: { ...sections.contentKeys },
+      periodKeys: { ...sections.periodKeys },
+      chainKeys: { ...sections.chainKeys },
+    };
     /** @type {ResponseIssue[]} */
     const issues =
       familyReport === null
@@ -1436,7 +1533,7 @@ export class ContentKeyResolver {
       this.#application(
         0,
         issues,
-        this.#admittedErrors(response, sections, association, issues),
+        this.#admittedErrors(response, errorSections, association, issues),
         notDelivered,
       );
     /** @type {DeliveredKeyOpener|null} */
@@ -1540,7 +1637,7 @@ export class ContentKeyResolver {
     }
     accepted += extensionAccepted;
     const errors = [
-      ...this.#admittedErrors(response, sections, association, issues),
+      ...this.#admittedErrors(response, errorSections, association, issues),
       ...consumerErrors,
     ];
     const application = this.#application(accepted, issues, errors, notDelivered);
@@ -1695,37 +1792,36 @@ export class ContentKeyResolver {
   #admittedNotDelivered(response, keys, association) {
     const report = own(response, "notDelivered");
     if (report === undefined) return [];
-    if (!isRecord(report) || Object.keys(report).length === 0) return null;
+    if (!Array.isArray(report) || report.length === 0) return null;
 
+    const { records, stray } = lastWholeRecords(report, "accessGroup");
+    if (stray > 0) return null;
     const sealed = own(association.request, "sealed");
-    const erroredFamilies = this.#admittedErrorFamilies(response, association);
-    const admitted = [];
-    for (const accessGroup of Object.keys(report)) {
-      const entry = own(report, accessGroup);
-      if (!isRecord(entry)) return null;
-      const reason = own(entry, "reason");
-      const message = own(entry, "message");
-      if (!NOT_DELIVERED_REASONS.includes(/** @type {any} */ (reason))) return null;
-      if (message !== undefined && typeof message !== "string") return null;
+    // Every entry's family is admitted, the replaced ones too; only the last
+    // whole entry per family supplies its reason and message.
+    for (const accessGroup of records.keys()) {
       if (
         !isAccessGroup(accessGroup) ||
         !(
-          hasMember(own(sealed, "periodKeys"), accessGroup) ||
-          hasMember(own(sealed, "chainKeys"), accessGroup)
+          namesFamily(own(sealed, "periodKeys"), accessGroup) ||
+          namesFamily(own(sealed, "chainKeys"), accessGroup)
         )
       ) {
         return null;
       }
-      // A family carries a key entry only as an own member of a non-array
-      // section map, itself a non-array map with an own member. Nonempty
-      // membership conflicts before any label or leaf is admitted.
+    }
+    const erroredFamilies = this.#admittedErrorFamilies(response, association);
+    const admitted = [];
+    for (const [accessGroup, entry] of records) {
+      const reason = own(entry, "reason");
+      const message = own(entry, "message");
+      if (!NOT_DELIVERED_REASONS.includes(/** @type {any} */ (reason))) return null;
+      if (message !== undefined && typeof message !== "string") return null;
+      // A record naming the family conflicts before any label or key in it
+      // is admitted.
       if (
-        ["periodKeys", "chainKeys"].some((section) => {
-          const sectionMap = own(keys, section);
-          if (!isRecord(sectionMap)) return false;
-          const family = own(sectionMap, accessGroup);
-          return isRecord(family) && Object.keys(family).length > 0;
-        }) ||
+        namesFamily(own(keys, "periodKeys"), accessGroup) ||
+        namesFamily(own(keys, "chainKeys"), accessGroup) ||
         erroredFamilies.has(accessGroup)
       ) {
         return null;
@@ -1742,11 +1838,12 @@ export class ContentKeyResolver {
   }
 
   /**
-   * The families named by admitted period-coordinate errors. A malformed or
-   * unsolicited error key, or an entry without the error-object shape, is
-   * ignored here as everywhere: it never decides a family conflict. Key
-   * occupancy is not checked: an occupied period coordinate means a nonempty
-   * key family, which conflicts on its own.
+   * The families named by admitted period-coordinate errors, read from the
+   * last whole record per coordinate. A malformed or unsolicited coordinate,
+   * or a record without the error-object shape, is ignored here as
+   * everywhere: it never decides a family conflict. Key occupancy is not
+   * checked: an occupied period coordinate means a key record naming the
+   * family, which conflicts on its own.
    *
    * @param {any} response
    * @param {ResponseAssociation} association
@@ -1756,12 +1853,12 @@ export class ContentKeyResolver {
     const source = own(response, "errors");
     /** @type {Set<string>} */
     const families = new Set();
-    if (!isRecord(source)) return families;
-    for (const coordinate of Object.keys(source)) {
+    if (!Array.isArray(source)) return families;
+    for (const [coordinate, record] of lastWholeRecords(source, "coordinate").records) {
       const separator = coordinate.indexOf("|");
       if (separator === -1) continue;
       if (this.#errorAdmission(coordinate, association) !== null) continue;
-      if (!isErrorObject(own(source, coordinate))) continue;
+      if (!isErrorObject(record)) continue;
       families.add(coordinate.slice(0, separator));
     }
     return families;
@@ -1806,27 +1903,26 @@ export class ContentKeyResolver {
   #admittedErrors(response, sections, association, issues) {
     const source = own(response, "errors");
     if (source === undefined) return [];
-    if (source === null || typeof source !== "object" || Array.isArray(source)) {
+    if (!Array.isArray(source) || source.length === 0) {
       issues.push({ code: "malformed_error" });
       return [];
     }
-    if (Object.keys(source).length === 0) {
-      issues.push({ code: "malformed_error" });
-      return [];
-    }
+    const { records, stray } = lastWholeRecords(source, "coordinate");
+    // An element without a coordinate is one malformed record; its siblings
+    // keep their own admission.
+    for (let i = 0; i < stray; i++) issues.push({ section: "errors", code: "malformed_error" });
     /** @type {ApplicationError[]} */
     const admitted = [];
-    for (const coordinate of Object.keys(source)) {
+    for (const [coordinate, record] of records) {
       const coordinateIssue = this.#errorAdmission(coordinate, association);
       if (coordinateIssue !== null) {
         issues.push({ section: "errors", code: coordinateIssue });
         continue;
       }
-      const entry = own(source, coordinate);
-      const error = own(entry, "error");
-      const message = own(entry, "message");
+      const error = own(record, "error");
+      const message = own(record, "message");
       if (
-        !isErrorObject(entry) ||
+        !isErrorObject(record) ||
         this.#responseOccupiesErrorCoordinate(coordinate, sections, association)
       ) {
         issues.push({ section: "errors", code: "malformed_error" });
@@ -2164,7 +2260,7 @@ export class ContentKeyResolver {
    * @param {DcaData} dcaData
    * @param {string} contentName
    * @param {object|undefined} lease
-   * @param {(candidate: Uint8Array|CryptoKey) => Promise<boolean>} [authenticate]
+   * @param {(candidate: Uint8Array|CryptoKey, origin?: { kind: string }) => Promise<boolean>} [authenticate]
    * @returns {Promise<{
    *   key: Uint8Array|CryptoKey|null,
    *   origin: { kind: 'cached-period-key'|'cached-chain-key'|'missing', accessGroup?: string, t?: string },
@@ -2175,10 +2271,21 @@ export class ContentKeyResolver {
     if (this.#candidateSources.length === 0) return { key: null, origin: { kind: "missing" } };
 
     const publisher = this.#publisherOf(dcaData, false);
-    const renderId = /** @type {string} */ (dcaData.renderId);
+    // Every wrap nonce frames the render ID's 16 decoded octets. Read it once
+    // here, before the first await, so a later edit of the delivery cannot move
+    // the attempts below to another render. A delivery whose ID is not 16
+    // canonical octets has no wrap any nonce opens.
+    const renderId = dcaData.renderId;
+    if (typeof renderId !== "string" || binaryStringBytes(renderId)?.length !== 16) {
+      return { key: null, origin: { kind: "missing" } };
+    }
     for (const accessGroup of dcaData.accessGroupsFor(contentName)) {
       const entries = dcaData.sealedEntriesFor(contentName, accessGroup);
       if (entries.length === 0) continue;
+      // Rival period keys for one entry share its nonce. This map lives for
+      // this group of this call only, so no derived value outlives a reset.
+      /** @type {Map<string, Uint8Array|null>} */
+      const nonces = new Map();
 
       const chainIssuerNames = dcaData.chainIssuerNamesFor(accessGroup);
       // Selected chain suppliers may project an ordinary period response.
@@ -2211,15 +2318,31 @@ export class ContentKeyResolver {
       for (const source of this.#candidateSources) {
         for await (const { entry, periodKey, origin } of source.attempts(context)) {
           this.#reader.check(readerRevision);
+          // The nonce uses the coordinate the wrap was authored at: this
+          // group's own name and the entry's own `t`. `origin` says where a
+          // source found the key and is never part of the transcript.
+          const t = own(entry, "t");
           const interpretation = this.#interpret(entry, renderId, contentName, accessGroup);
-          if (interpretation === null) continue;
+          if (interpretation === null || typeof t !== "string") continue;
+          // One copy serves the nonce transcript and GCM, so both see the same bytes.
+          const aad = interpretation.aad && Uint8Array.from(interpretation.aad);
+          const memo = `${t}|${aad ? base64urlEncode(aad) : ""}`;
+          let nonce = nonces.get(memo);
+          if (nonce === undefined) {
+            nonce = this.#reader.accept(
+              await contentKeyWrapNonce({ renderId, contentName, accessGroup, t, aad }),
+              readerRevision,
+            );
+            nonces.set(memo, nonce);
+          }
+          if (nonce === null) continue;
           const key = this.#reader.accept(
-            await attemptContentKeyWrap(entry, periodKey, interpretation.aad),
+            await attemptContentKeyWrap(entry, periodKey, nonce, aad),
             readerRevision,
           );
           if (
             key !== null &&
-            (!authenticate || this.#reader.accept(await authenticate(key), readerRevision))
+            (!authenticate || this.#reader.accept(await authenticate(key, origin), readerRevision))
           )
             return { key, origin };
         }

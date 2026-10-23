@@ -22,6 +22,7 @@ import { composePublisherConfig } from "../../core-publisher/publisherCompositio
 import { Clock } from "../../demo/actors/Clock.js";
 import { Random } from "../../demo/actors/Random.js";
 import { issuerKeypair, signingKeypair } from "../support/keys.js";
+import { issuerBlockOf } from "../../test-lib/helpers/inspect.js";
 
 const ORIGIN = "https://publisher.example";
 const PROCEDURE = "invented-procedure";
@@ -75,9 +76,9 @@ test("a selected procedure reaches the key sealing and the issuer block", async 
     issuers: [issuer("compact", { envelope: PROCEDURE }), issuer("ordinary")],
   });
   const data = await render(sealer);
-  assert.equal(data.issuerData.compact.envelope, PROCEDURE);
-  assert.equal(data.issuerData.compact.keyId, "compact-key");
-  assert.equal(Object.hasOwn(data.issuerData.ordinary, "envelope"), false);
+  assert.equal(issuerBlockOf(data, "compact").envelope, PROCEDURE);
+  assert.equal(issuerBlockOf(data, "compact").keyId, "compact-key");
+  assert.equal(Object.hasOwn(issuerBlockOf(data, "ordinary"), "envelope"), false);
   const byIssuer = calls.map((call) => call.options.envelope);
   assert.deepEqual(byIssuer, [PROCEDURE, undefined]);
   assert.equal(Object.hasOwn(calls[1].options, "envelope"), false, "no member for the default");
@@ -144,17 +145,17 @@ test("an item preparation declares the procedure of every block it seals into", 
     undeclaredIn("prep"),
   );
   const declared = await render(sealer([sealingPreparation("prep", ["compact"], [PROCEDURE])]));
-  assert.equal(declared.issuerData.compact.envelope, PROCEDURE);
-  assert.equal(declared.issuerData.compact.sealed.prep, 1);
+  assert.equal(issuerBlockOf(declared, "compact").envelope, PROCEDURE);
+  assert.equal(issuerBlockOf(declared, "compact").sealed.prep, 1);
 
   // A preparation that seals nothing into the selecting block needs no
   // declaration, whether it seals into another block or into none.
   const beside = await render(sealer([sealingPreparation("prep", ["ordinary"])]));
-  assert.equal(beside.issuerData.ordinary.sealed.prep, 1);
-  assert.equal(Object.hasOwn(beside.issuerData.compact.sealed, "prep"), false);
-  assert.equal(beside.issuerData.compact.envelope, PROCEDURE);
+  assert.equal(issuerBlockOf(beside, "ordinary").sealed.prep, 1);
+  assert.equal(Object.hasOwn(issuerBlockOf(beside, "compact").sealed, "prep"), false);
+  assert.equal(issuerBlockOf(beside, "compact").envelope, PROCEDURE);
   const none = await render(sealer([sealingPreparation("prep", [])]));
-  assert.equal(none.issuerData.compact.envelope, PROCEDURE);
+  assert.equal(issuerBlockOf(none, "compact").envelope, PROCEDURE);
 });
 
 test("a compatible preparation in a block does not cover an incompatible one beside it", async () => {
@@ -181,9 +182,9 @@ test("a compatible preparation in a block does not cover an incompatible one bes
       itemPreparations: [compatible, sealingPreparation("incompatible", ["ordinary"])],
     }),
   );
-  assert.equal(apart.issuerData.compact.sealed.compatible, 1);
-  assert.equal(Object.hasOwn(apart.issuerData.compact.sealed, "incompatible"), false);
-  assert.equal(apart.issuerData.ordinary.sealed.incompatible, 1);
+  assert.equal(issuerBlockOf(apart, "compact").sealed.compatible, 1);
+  assert.equal(Object.hasOwn(issuerBlockOf(apart, "compact").sealed, "incompatible"), false);
+  assert.equal(issuerBlockOf(apart, "ordinary").sealed.incompatible, 1);
 });
 
 test("composition keeps a preparation's declared procedures", async () => {
@@ -195,7 +196,10 @@ test("composition keeps a preparation's declared procedures", async () => {
   const sealing = { name: "sealing", keySealing };
   const issuers = [issuer("compact", { envelope: PROCEDURE })];
   const composed = composePublisherConfig({ ...base, issuers }, sealing, contribution([PROCEDURE]));
-  assert.equal((await render(new Sealer(composed.config))).issuerData.compact.envelope, PROCEDURE);
+  assert.equal(
+    issuerBlockOf(await render(new Sealer(composed.config)), "compact").envelope,
+    PROCEDURE,
+  );
   const undeclared = composePublisherConfig({ ...base, issuers }, sealing, contribution(undefined));
   await assert.rejects(render(new Sealer(undeclared.config)), undeclaredIn("prep"));
   assert.throws(

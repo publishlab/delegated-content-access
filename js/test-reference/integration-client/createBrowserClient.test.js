@@ -31,6 +31,8 @@ import { Storage } from "../../demo/actors/Storage.js";
 import { PeriodKeyCache } from "../../adapter-client/PeriodKeyCache.js";
 import { ContentKeyResolver } from "../../core-client/ContentKeyResolver.js";
 import { writeMarkupDelivery } from "../../adapter-publisher/writeMarkupDelivery.js";
+import { writeJsonDelivery } from "../../adapter-publisher/writeJsonDelivery.js";
+import { JsonDeliveryReader } from "../../adapter-client/JsonDeliveryReader.js";
 import { Sealer } from "../../core-publisher/Sealer.js";
 import { IssuerEngine } from "../../core-issuer/IssuerEngine.js";
 import { IssuerProcessor } from "../../core-issuer/IssuerProcessor.js";
@@ -50,6 +52,13 @@ import { utf8Decode } from "../../core-shared/codec.js";
 import { dcaError } from "../../core-shared/errors.js";
 import { issuerKeypair, signingKeypair } from "../support/keys.js";
 import { contentAadOctets } from "../support/contentAadOctets.js";
+import { wrapNonceOf } from "../support/contentKeyWrapNonceOctets.js";
+import {
+  contentNamesOn,
+  contentRecordOf,
+  issuerNamesOn,
+  wrapsOf,
+} from "../../test-lib/helpers/inspect.js";
 
 const ISSUER_NAME = "paywall_subscription_service";
 const BACKUP_ISSUER = "backup_issuer";
@@ -79,25 +88,55 @@ const SIBLING_PERIOD_KEYS = Object.freeze({
   [T_NEXT]: Uint8Array.from({ length: 16 }, (_, i) => 0xa0 + i),
 });
 
+/**
+ * The item names a `contentKeys` record array addresses, in wire order.
+ *
+ * @param {any} records
+ * @returns {string[]}
+ */
+const contentNamesIn = (records) => (records ?? []).map((/** @type {any} */ r) => r.contentName);
+
+/**
+ * The accessGroups a `periodKeys` or `chainKeys` record array names, each once.
+ *
+ * @param {any} records
+ * @returns {string[]}
+ */
+const familiesIn = (records) => [
+  ...new Set((records ?? []).map((/** @type {any} */ r) => r.accessGroup)),
+];
+
+/**
+ * The periods a `periodKeys` record array carries for one accessGroup, in wire order.
+ *
+ * @param {any} records
+ * @param {string} accessGroup
+ * @returns {string[]}
+ */
+const periodsIn = (records, accessGroup) =>
+  (records ?? [])
+    .filter((/** @type {any} */ r) => r.accessGroup === accessGroup)
+    .map((/** @type {any} */ r) => r.period);
+
 /** @param {Uint8Array} bytes */
 const encoded = (bytes) => Buffer.from(bytes).toString("base64url");
 
 /**
  * The item's content key as the publisher wrapped it: the `contentData` entry
- * at `T_NOW`, opened with WebCrypto under that period key and no additional
- * data (docs/spec--content-protection.md, 4). No issuer and no client code
+ * at `T_NOW`, opened with WebCrypto under that period key, its derived nonce and
+ * no additional data (docs/spec--content-protection.md, 4). No issuer and no client code
  * takes part.
  *
  * @param {any} dcaData
  */
 async function wrappedContentKey(dcaData) {
-  const wrap = dcaData.contentData[CONTENT_NAME].keys[GROUP].find(
-    (/** @type {any} */ entry) => entry.t === T_NOW,
+  const wrap = wrapsOf(dcaData, CONTENT_NAME, GROUP).find(
+    (/** @type {any} */ entry) => entry.period === T_NOW,
   );
   const { subtle } = globalThis.crypto;
   const key = await subtle.importKey("raw", PERIOD_KEYS[T_NOW], "AES-GCM", false, ["decrypt"]);
   const opened = await subtle.decrypt(
-    { name: "AES-GCM", iv: Buffer.from(wrap.nonce, "base64url") },
+    { name: "AES-GCM", iv: wrapNonceOf(dcaData, CONTENT_NAME, GROUP, T_NOW) },
     key,
     Buffer.from(wrap.key, "base64url"),
   );
@@ -120,7 +159,12 @@ async function wrappedContentKey(dcaData) {
  * @param {string[]} [page.issuerNames] - issuers independently entrusted with the item
  * @param {(issuer: { issuerName: string }) => { contentKeyNames: string[], suppliedAccessGroups: string[] }} [page.issuerSupplyPlanFor]
  * @param {string[]} [page.contentEncodings] - descriptor layers carried by the item
- * @returns {Promise<{ markup: string, contentKey: string, unlock: (request: object) => Promise<{ status: number, body: any }>, calls: { count: number } }>}
+ * @param {string[]} [page.siblingNames] - further items sealed beside the article
+ *   under the same groups, each with the text `sibling:<name>`
+ * @param {boolean} [page.keyPairPerIssuer] - each issuer gets its own key pair,
+ *   so a block sealed for one issuer opens under no other; one shared pair
+ *   when left out
+ * @returns {Promise<{ markup: string, rendered: { dcaData: any, sealedContent: Record<string, string> }, contentKey: string, unlock: (request: object) => Promise<{ status: number, body: any }>, calls: { count: number } }>}
  */
 async function world({
   contentKeys = true,
@@ -131,8 +175,14 @@ async function world({
   issuerNames = [ISSUER_NAME],
   issuerSupplyPlanFor,
   contentEncodings,
+  siblingNames = [],
+  keyPairPerIssuer = false,
 } = {}) {
   const issuerKeys = await issuerKeypair();
+  /** @type {Map<string, CryptoKeyPair>} */
+  const keysByIssuer = new Map();
+  for (const issuerName of issuerNames)
+    keysByIssuer.set(issuerName, keyPairPerIssuer ? await issuerKeypair() : issuerKeys);
   const signingKeys = await signingKeypair();
 
   const sealer = new Sealer({
@@ -148,14 +198,14 @@ async function world({
     issuerSupplyPlanFor:
       issuerSupplyPlanFor ??
       (() => ({
-        contentKeyNames: contentKeys ? [CONTENT_NAME] : [],
+        contentKeyNames: contentKeys ? [CONTENT_NAME, ...siblingNames] : [],
         suppliedAccessGroups: accessGroups,
       })),
     issuers: issuerNames.map((issuerName) => ({
       issuerName,
       keyId: KEY_ID,
       algorithm: "ecdh-p256",
-      publicKey: issuerKeys.publicKey,
+      publicKey: keysByIssuer.get(issuerName)?.publicKey,
     })),
   });
   sealer.resource("123456", { section: "politics" });
@@ -172,6 +222,9 @@ async function world({
       { accessGroups },
     );
   }
+  for (const name of siblingNames) {
+    sealer.content(name, `sibling:${name}`, "text/plain", { accessGroups });
+  }
   const rendered = await sealer.seal();
   const markup = writeMarkupDelivery({
     dcaData: rendered.dcaData,
@@ -182,7 +235,7 @@ async function world({
     /** @param {string} issuerName @param {string} keyId */
     get(issuerName, keyId) {
       if (!issuerNames.includes(issuerName) || keyId !== KEY_ID) return undefined;
-      return { algorithm: "ecdh-p256", privateKey: issuerKeys.privateKey };
+      return { algorithm: "ecdh-p256", privateKey: keysByIssuer.get(issuerName)?.privateKey };
     },
   };
   const registration = new PublisherRegistrations([
@@ -210,6 +263,7 @@ async function world({
 
   return {
     markup,
+    rendered,
     contentKey: await wrappedContentKey(rendered.dcaData),
     calls,
     /** @param {object} request */
@@ -555,7 +609,7 @@ describe("One page, one issuer, one unlock attempt", () => {
       relayPeriodKeys: true,
     });
     const projected = client.builder.build(client.dcaData, ISSUER_NAME, [CONTENT_NAME]).toObject();
-    assert.ok(Object.keys(projected.sealed.periodKeys?.[GROUP] ?? {}).length > 0);
+    assert.ok(periodsIn(projected.sealed.periodKeys, GROUP).length > 0);
 
     await refuses(
       () =>
@@ -607,7 +661,9 @@ describe("One page, one issuer, one unlock attempt", () => {
     const originalBuild = chainOnly.builder.build.bind(chainOnly.builder);
     chainOnly.builder.build = /** @param {any[]} args */ (...args) => {
       const request = originalBuild(...args).toObject();
-      request.sealed.chainKeys = { [GROUP]: { [T_NOW]: encoded(Uint8Array.of(1)) } };
+      request.sealed.chainKeys = [
+        { accessGroup: GROUP, cutoff: T_NOW, key: encoded(Uint8Array.of(1)) },
+      ];
       request.periodGeometry = {
         accessGroups: { [GROUP]: { chainsPerDay: 2, periodMinutes: 15 } },
       };
@@ -617,7 +673,7 @@ describe("One page, one issuer, one unlock attempt", () => {
       .build(chainOnly.dcaData, ISSUER_NAME, [CONTENT_NAME])
       .toObject();
     assert.equal(chainProjection.sealed.periodKeys, undefined);
-    assert.ok(Object.keys(chainProjection.sealed.chainKeys?.[GROUP] ?? {}).length > 0);
+    assert.ok(familiesIn(chainProjection.sealed.chainKeys).includes(GROUP));
     await refuses(
       () =>
         chainOnly.unlockRoutes(
@@ -686,8 +742,10 @@ describe("One page, one issuer, one unlock attempt", () => {
       // alone, and the issuer answers that name with the key the publisher
       // wrapped, and nothing beside it.
       assert.deepEqual(Object.keys(request.sealed), ["contentKeys"]);
-      assert.deepEqual(Object.keys(request.sealed.contentKeys), [CONTENT_NAME]);
-      assert.deepEqual(body, { keys: { contentKeys: { [CONTENT_NAME]: contentKey } } });
+      assert.deepEqual(contentNamesIn(request.sealed.contentKeys), [CONTENT_NAME]);
+      assert.deepEqual(body, {
+        keys: { contentKeys: [{ contentName: CONTENT_NAME, key: contentKey }] },
+      });
 
       assert.equal(
         await openedText(client),
@@ -696,6 +754,66 @@ describe("One page, one issuer, one unlock attempt", () => {
       );
     },
   );
+
+  test("a published page whose item and issuer records cross JSON in another order opens alike", async () => {
+    // Array position carries no meaning on the named-record wire. The page
+    // crosses as the JSON document a publisher emits, and the reader's copy
+    // has its contentData, issuerData, wrap and sealedContent records
+    // reversed. The client finds its issuer block and each item by name.
+    // Each issuer has its own key pair, so a client that took the block at
+    // its old position would send the other issuer's envelopes, which this
+    // issuer cannot open.
+    const siblings = ["teaser", "factbox"];
+    const names = [CONTENT_NAME, ...siblings];
+    const issuerNames = [ISSUER_NAME, BACKUP_ISSUER];
+    const {
+      rendered,
+      unlock: answer,
+      calls,
+    } = await world({
+      issuerNames,
+      siblingNames: siblings,
+      accessGroups: [GROUP, SIBLING_GROUP],
+      keyPairPerIssuer: true,
+    });
+    const published = JSON.parse(utf8Decode(writeJsonDelivery(rendered)));
+    const permuted = structuredClone(published);
+    permuted.contentData.reverse();
+    for (const record of permuted.contentData) record.keys.reverse();
+    permuted.issuerData.reverse();
+    permuted.sealedContent.reverse();
+    assert.deepEqual(contentNamesOn(published), names);
+    assert.deepEqual(contentNamesOn(permuted), [...names].reverse());
+    assert.deepEqual(issuerNamesOn(permuted), [...issuerNames].reverse());
+    assert.notDeepEqual(
+      contentRecordOf(permuted, CONTENT_NAME).keys,
+      contentRecordOf(published, CONTENT_NAME).keys,
+    );
+
+    const reader = new JsonDeliveryReader(utf8Encode(JSON.stringify(permuted)), {
+      publisherOrigin: PUB,
+    });
+    const { transport, exchanges } = recordingExchange(answer);
+    const client = createDeliveryClient({
+      reader,
+      issuerName: ISSUER_NAME,
+      unlockUrl: UNLOCK_URL,
+      transport,
+    });
+    const result = await client.unlock(names);
+    assert.equal(result.status, 200);
+    assert.equal(calls.count, 1);
+    const [{ request, body }] = exchanges;
+    assert.deepEqual(
+      [...contentNamesIn(request.sealed.contentKeys)].sort(),
+      [...names].sort(),
+      "the request addresses every item through the named issuer's block",
+    );
+    assert.deepEqual([...contentNamesIn(body.keys.contentKeys)].sort(), [...names].sort());
+    assert.equal(utf8Decode((await client.openLocal(CONTENT_NAME)).bytes), ARTICLE);
+    for (const name of siblings)
+      assert.equal(utf8Decode((await client.openLocal(name)).bytes), `sibling:${name}`);
+  });
 
   test("a status other than 200 comes back as it arrived, after one call", async () => {
     const { markup } = await world();
@@ -808,6 +926,7 @@ describe("One page, one issuer, one unlock attempt", () => {
       resolve: () => undefined,
       contentKeyFor: () => undefined,
       contentKeyWithOriginFor: () => undefined,
+      resolveAuthenticated: () => undefined,
     };
 
     for (const method of Object.keys(resolver)) {
@@ -826,19 +945,13 @@ describe("One page, one issuer, one unlock attempt", () => {
       );
     }
 
-    const client = createBrowserClient({
+    createBrowserClient({
       unlockUrl: UNLOCK_URL,
       root,
       issuerName: ISSUER_NAME,
       transport,
       resolverFactory: () => resolver,
     });
-    await refuses(
-      () =>
-        client.unlockRoutes([CONTENT_NAME], [{ issuerName: ISSUER_NAME, unlockUrl: UNLOCK_URL }]),
-      { code: "bad_config", message: /authenticated item-key selection/ },
-      "only the optional route-walk helper requires authenticated candidate selection",
-    );
   });
 });
 
@@ -867,15 +980,16 @@ describe("One page, one issuer, one period key", () => {
     assert.equal(exchanges.length, 1);
     const [{ request, body }] = exchanges;
 
-    assert.deepEqual(request.sealed.contentKeys, {});
-    assert.deepEqual(Object.keys(request.sealed.periodKeys), [GROUP]);
-    assert.deepEqual(Object.keys(request.sealed.periodKeys[GROUP]).sort(), [T_NOW, T_NEXT]);
+    assert.deepEqual(request.sealed.contentKeys, []);
+    assert.deepEqual(familiesIn(request.sealed.periodKeys), [GROUP]);
+    assert.deepEqual(periodsIn(request.sealed.periodKeys, GROUP).sort(), [T_NOW, T_NEXT]);
     assert.deepEqual(body, {
       keys: {
-        contentKeys: {},
-        periodKeys: {
-          [GROUP]: { [T_NOW]: encoded(PERIOD_KEYS[T_NOW]), [T_NEXT]: encoded(PERIOD_KEYS[T_NEXT]) },
-        },
+        contentKeys: [],
+        periodKeys: [
+          { accessGroup: GROUP, period: T_NOW, key: encoded(PERIOD_KEYS[T_NOW]) },
+          { accessGroup: GROUP, period: T_NEXT, key: encoded(PERIOD_KEYS[T_NEXT]) },
+        ],
       },
     });
 
@@ -887,6 +1001,21 @@ describe("One page, one issuer, one period key", () => {
       );
     }
     assert.equal(await openedText(client), ARTICLE);
+    assert.equal(client.denialCache, null);
+    const later = createBrowserClient({
+      unlockUrl: UNLOCK_URL,
+      root: domOver(markup, { publisherOrigin: PUB }),
+      issuerName: ISSUER_NAME,
+      transport,
+      relayPeriodKeys: true,
+      cache,
+    });
+    assert.equal(utf8Decode((await later.open(CONTENT_NAME)).bytes), ARTICLE);
+    assert.equal(
+      exchanges.length,
+      1,
+      "retained period keys avoid another issuer request without denial caching",
+    );
   });
 
   test("a decision narrower than the access group returns the content key and no period key", async () => {
@@ -923,10 +1052,12 @@ describe("One page, one issuer, one period key", () => {
     const result = await client.unlock([CONTENT_NAME]);
     assert.equal(result.status, 200);
     const [{ request, body }] = exchanges;
-    assert.deepEqual(Object.keys(request.sealed.contentKeys), [CONTENT_NAME]);
-    assert.deepEqual(Object.keys(request.sealed.periodKeys[GROUP]).sort(), [T_NOW, T_NEXT]);
+    assert.deepEqual(contentNamesIn(request.sealed.contentKeys), [CONTENT_NAME]);
+    assert.deepEqual(periodsIn(request.sealed.periodKeys, GROUP).sort(), [T_NOW, T_NEXT]);
 
-    assert.deepEqual(body, { keys: { contentKeys: { [CONTENT_NAME]: contentKey } } });
+    assert.deepEqual(body, {
+      keys: { contentKeys: [{ contentName: CONTENT_NAME, key: contentKey }] },
+    });
     assert.deepEqual(await cache.entries(), [], "no period key is retained");
     assert.equal(await openedText(client), ARTICLE);
   });
@@ -956,7 +1087,7 @@ describe("One page, one issuer, one period key", () => {
             return {
               status: 200,
               contentType: "application/json",
-              body: { keys: { contentKeys: { [CONTENT_NAME]: wrongKey } } },
+              body: { keys: { contentKeys: [{ contentName: CONTENT_NAME, key: wrongKey }] } },
             };
           return { ...(await answer(request)), contentType: "application/json" };
         },
@@ -1002,7 +1133,11 @@ describe("One page, one issuer, one period key", () => {
               status: 200,
               contentType: "application/json",
               body: {
-                keys: { contentKeys: { [CONTENT_NAME]: encoded(new Uint8Array(16).fill(0xc1)) } },
+                keys: {
+                  contentKeys: [
+                    { contentName: CONTENT_NAME, key: encoded(new Uint8Array(16).fill(0xc1)) },
+                  ],
+                },
               },
             };
           return { ...(await answer(request)), contentType: "application/json" };
@@ -1020,8 +1155,8 @@ describe("One page, one issuer, one period key", () => {
       sent.map(({ issuerName }) => issuerName),
       [ISSUER_NAME, BACKUP_ISSUER],
     );
-    assert.deepEqual(Object.keys(sent[0].sealed.contentKeys), [CONTENT_NAME]);
-    assert.deepEqual(Object.keys(sent[1].sealed.periodKeys), [GROUP]);
+    assert.deepEqual(contentNamesIn(sent[0].sealed.contentKeys), [CONTENT_NAME]);
+    assert.deepEqual(familiesIn(sent[1].sealed.periodKeys), [GROUP]);
     assert.deepEqual(result.missing, []);
     assert.equal(utf8Decode((await client.openLocal(CONTENT_NAME)).bytes), ARTICLE);
     assert.ok((await cache.entries()).length > 0, "B's period-key alternative remains cached");
@@ -1074,8 +1209,12 @@ describe("One page, one issuer, one period key", () => {
             status: 200,
             contentType: "application/json",
             body: {
-              keys: { contentKeys: { [CONTENT_NAME]: encoded(new Uint8Array(16).fill(0x36)) } },
-              notDelivered: { [GROUP]: { reason: "unavailable" } },
+              keys: {
+                contentKeys: [
+                  { contentName: CONTENT_NAME, key: encoded(new Uint8Array(16).fill(0x36)) },
+                ],
+              },
+              notDelivered: [{ accessGroup: GROUP, reason: "unavailable" }],
             },
           };
         },
@@ -1108,7 +1247,11 @@ describe("One page, one issuer, one period key", () => {
               status: 200,
               contentType: "application/json",
               body: {
-                keys: { contentKeys: { [CONTENT_NAME]: encoded(new Uint8Array(16).fill(0x71)) } },
+                keys: {
+                  contentKeys: [
+                    { contentName: CONTENT_NAME, key: encoded(new Uint8Array(16).fill(0x71)) },
+                  ],
+                },
               },
             };
           if (request.issuerName === BACKUP_ISSUER)
@@ -1163,7 +1306,11 @@ describe("One page, one issuer, one period key", () => {
               status: 200,
               contentType: "application/json",
               body: {
-                keys: { contentKeys: { [CONTENT_NAME]: encoded(new Uint8Array(16).fill(0x84)) } },
+                keys: {
+                  contentKeys: [
+                    { contentName: CONTENT_NAME, key: encoded(new Uint8Array(16).fill(0x84)) },
+                  ],
+                },
               },
             };
           },
@@ -1260,8 +1407,8 @@ describe("One page, one issuer, one period key", () => {
     assert.equal(result.status, 200);
     const [{ body }] = exchanges;
     assert.deepEqual(body, {
-      keys: { contentKeys: { [CONTENT_NAME]: contentKey } },
-      notDelivered: { [GROUP]: { reason: "denied" } },
+      keys: { contentKeys: [{ contentName: CONTENT_NAME, key: contentKey }] },
+      notDelivered: [{ accessGroup: GROUP, reason: "denied" }],
     });
     assert.deepEqual(result.application, {
       accepted: 1,
@@ -1303,8 +1450,8 @@ describe("One page, one issuer, one period key", () => {
     assert.equal(result.status, 200);
     const [{ body }] = exchanges;
     assert.deepEqual(body, {
-      keys: { contentKeys: {} },
-      notDelivered: { [GROUP]: { reason: "denied" } },
+      keys: { contentKeys: [] },
+      notDelivered: [{ accessGroup: GROUP, reason: "denied" }],
     });
     assert.deepEqual(result.application, {
       accepted: 0,
@@ -1332,8 +1479,8 @@ describe("One page, one issuer, one period key", () => {
               status: 200,
               contentType: "application/json",
               body: {
-                keys: { contentKeys: {} },
-                notDelivered: { [GROUP]: { reason: "unavailable" } },
+                keys: { contentKeys: [] },
+                notDelivered: [{ accessGroup: GROUP, reason: "unavailable" }],
               },
             };
           return { ...(await answer(request)), contentType: "application/json" };
@@ -1350,11 +1497,11 @@ describe("One page, one issuer, one period key", () => {
     assert.equal(sent.length, 2);
     assert.deepEqual(result.missing, []);
     assert.deepEqual(
-      Object.keys(sent[1].sealed.contentKeys),
+      contentNamesIn(sent[1].sealed.contentKeys),
       [],
       "item route did not inherit family retry",
     );
-    assert.deepEqual(Object.keys(sent[1].sealed.periodKeys), [GROUP]);
+    assert.deepEqual(familiesIn(sent[1].sealed.periodKeys), [GROUP]);
     assert.equal(utf8Decode((await client.openLocal(CONTENT_NAME)).bytes), ARTICLE);
   });
 
@@ -1379,11 +1526,11 @@ describe("One page, one issuer, one period key", () => {
                 status: 200,
                 contentType: "application/json",
                 body: {
-                  keys: { contentKeys: {} },
-                  notDelivered: {
-                    [GROUP]: { reason: "unavailable" },
-                    [SIBLING_GROUP]: { reason: "denied" },
-                  },
+                  keys: { contentKeys: [] },
+                  notDelivered: [
+                    { accessGroup: GROUP, reason: "unavailable" },
+                    { accessGroup: SIBLING_GROUP, reason: "denied" },
+                  ],
                 },
               };
             if (sent.length === 2) {
@@ -1408,14 +1555,11 @@ describe("One page, one issuer, one period key", () => {
         sent.map((request) => request.issuerName),
         [ISSUER_NAME, BACKUP_ISSUER, THIRD_ISSUER],
       );
-      assert.deepEqual(
-        Object.keys(sent[0].sealed.periodKeys).sort(),
-        [GROUP, SIBLING_GROUP].sort(),
-      );
+      assert.deepEqual(familiesIn(sent[0].sealed.periodKeys).sort(), [GROUP, SIBLING_GROUP].sort());
       assert.deepEqual(result.missing, []);
       for (const request of sent.slice(1)) {
-        assert.deepEqual(Object.keys(request.sealed.contentKeys), []);
-        assert.deepEqual(Object.keys(request.sealed.periodKeys), [GROUP]);
+        assert.deepEqual(contentNamesIn(request.sealed.contentKeys), []);
+        assert.deepEqual(familiesIn(request.sealed.periodKeys), [GROUP]);
       }
       assert.equal(utf8Decode((await client.openLocal(CONTENT_NAME)).bytes), ARTICLE);
     }
@@ -1433,7 +1577,7 @@ describe("One page, one issuer, one period key", () => {
           async post(_url, request) {
             sent.push(request);
             if (sent.length === 1) throw Object.assign(new Error("offline"), { code: "offline" });
-            return { status, contentType: "application/json", body: { keys: { contentKeys: {} } } };
+            return { status, contentType: "application/json", body: { keys: { contentKeys: [] } } };
           },
         },
       });
@@ -1450,7 +1594,7 @@ describe("One page, one issuer, one period key", () => {
         [ISSUER_NAME, BACKUP_ISSUER],
       );
       assert.deepEqual(
-        sent.map((request) => Object.keys(request.sealed.contentKeys)),
+        sent.map((request) => contentNamesIn(request.sealed.contentKeys)),
         [[CONTENT_NAME], [CONTENT_NAME]],
       );
       assert.deepEqual(result.missing, [CONTENT_NAME]);
@@ -1525,7 +1669,11 @@ describe("One page, one issuer, one period key", () => {
                 status: 200,
                 contentType: "application/json",
                 body: {
-                  keys: { contentKeys: { item_b: encoded(new Uint8Array(16).fill(0x93)) } },
+                  keys: {
+                    contentKeys: [
+                      { contentName: "item_b", key: encoded(new Uint8Array(16).fill(0x93)) },
+                    ],
+                  },
                 },
               };
             return {
@@ -1549,7 +1697,7 @@ describe("One page, one issuer, one period key", () => {
         names,
       );
       assert.deepEqual(
-        sent.map(({ request }) => Object.keys(request.sealed.contentKeys)),
+        sent.map(({ request }) => contentNamesIn(request.sealed.contentKeys)),
         [["item_a"], ["item_b"], ["item_a"]],
       );
       for (const { url, request } of sent) {
@@ -1607,15 +1755,15 @@ describe("One page, one issuer, one period key", () => {
         sent.map((request) => request.issuerName),
         [ISSUER_NAME, BACKUP_ISSUER],
       );
-      assert.deepEqual(Object.keys(sent[0].sealed.contentKeys), []);
-      assert.deepEqual(Object.keys(sent[0].sealed.periodKeys), [GROUP]);
+      assert.deepEqual(contentNamesIn(sent[0].sealed.contentKeys), []);
+      assert.deepEqual(familiesIn(sent[0].sealed.periodKeys), [GROUP]);
       assert.deepEqual(
-        Object.keys(sent[1].sealed.contentKeys),
+        contentNamesIn(sent[1].sealed.contentKeys),
         [],
         "B's extra item route is excluded",
       );
       assert.deepEqual(
-        Object.keys(sent[1].sealed.periodKeys),
+        familiesIn(sent[1].sealed.periodKeys),
         [GROUP],
         "B's extra family is excluded",
       );
@@ -1659,7 +1807,7 @@ describe("One page, one issuer, one period key", () => {
       [ISSUER_NAME, THIRD_ISSUER],
       "indeterminate failure cannot activate the conditional second route",
     );
-    assert.deepEqual(Object.keys(sent[1].sealed.contentKeys), [CONTENT_NAME]);
+    assert.deepEqual(contentNamesIn(sent[1].sealed.contentKeys), [CONTENT_NAME]);
     assert.deepEqual(result.missing, [CONTENT_NAME]);
     assert.deepEqual(result.attempts, [
       { issuerName: ISSUER_NAME, outcome: "indeterminate" },
@@ -1676,7 +1824,7 @@ describe("One page, one issuer, one period key", () => {
         answer: {
           status: 200,
           contentType: "application/json",
-          body: { keys: { contentKeys: {} } },
+          body: { keys: { contentKeys: [] } },
         },
         resolverFailure: dcaError("bad_response", "test malformed protocol response"),
       },
@@ -1687,8 +1835,8 @@ describe("One page, one issuer, one period key", () => {
           status: 200,
           contentType: "application/json",
           body: {
-            keys: { contentKeys: {} },
-            notDelivered: { [GROUP]: { reason: "unknown" } },
+            keys: { contentKeys: [] },
+            notDelivered: [{ accessGroup: GROUP, reason: "unknown" }],
           },
         },
       },
@@ -1736,7 +1884,7 @@ describe("One page, one issuer, one period key", () => {
         [ISSUER_NAME, THIRD_ISSUER],
         `${malformed.label}: unusable response does not activate a conditional route`,
       );
-      assert.deepEqual(Object.keys(sent[1].sealed.contentKeys), [CONTENT_NAME]);
+      assert.deepEqual(contentNamesIn(sent[1].sealed.contentKeys), [CONTENT_NAME]);
       assert.deepEqual(result.missing, [CONTENT_NAME]);
       assert.deepEqual(result.attempts[0], {
         issuerName: ISSUER_NAME,
@@ -1960,7 +2108,7 @@ describe("What the entry admits from the issuer's answer", () => {
     const root = domOver(markup, { publisherOrigin: PUB });
     for (const status of [301, 302, 303, 307, 308]) {
       const { resolverFactory, seen } = countingResolver();
-      const body = { keys: { contentKeys: {} } };
+      const body = { keys: { contentKeys: [] } };
       let posts = 0;
       const client = createBrowserClient({
         unlockUrl: UNLOCK_URL,
@@ -2160,23 +2308,29 @@ async function obtainingFixture({ bodytextEncodings } = {}) {
   const nonce = new Uint8Array(12).fill(23);
   const names = ["bodytext", "teaser"];
   const ciphertexts = new Map();
-  const contentData = {};
+  /** @type {any[]} */
+  const contentData = [];
   const contentKeys = {};
   const resource = { origin: PUB, resourceId: "article", renderId: "AAAAAAAAAAAAAAAAAAAAAA" };
   const jwt = `${encoded(utf8Encode(JSON.stringify({ alg: "ES256", kid: "k1" })))}.${encoded(utf8Encode(JSON.stringify(resource)))}.c2lnbmF0dXJl`;
   for (const [i, name] of names.entries()) {
     const contentKey = new Uint8Array(16).fill(42 + i);
     contentKeys[name] = encoded(contentKey);
-    contentData[name] = {
+    contentData.push({
+      contentName: name,
       contentType: "text/plain",
       nonce: encoded(nonce),
       ...(name === "bodytext" && bodytextEncodings ? { contentEncodings: bodytextEncodings } : {}),
-      keys: {
-        [GROUP]: [
-          { t: T_NOW, nonce: encoded(nonce), key: encoded(await encrypt(key, nonce, contentKey)) },
-        ],
-      },
-    };
+      keys: [
+        {
+          accessGroup: GROUP,
+          period: T_NOW,
+          key: encoded(
+            await encrypt(key, wrapNonceOf({ resourceJWT: jwt }, name, GROUP, T_NOW), contentKey),
+          ),
+        },
+      ],
+    });
     const aad = contentAadOctets({ resourceJWT: jwt, contentData }, name);
     ciphertexts.set(
       name,
@@ -2188,19 +2342,15 @@ async function obtainingFixture({ bodytextEncodings } = {}) {
     resource,
     resourceJWT: jwt,
     contentData,
-    issuerData: Object.fromEntries(
-      [ISSUER_NAME, BACKUP_ISSUER].map((name) => [
-        name,
-        {
-          keyId: KEY_ID,
-          unlockUrl: UNLOCK_URL,
-          sealed: {
-            contentKeys: Object.fromEntries(names.map((item) => [item, "AA"])),
-            periodKeys: { [GROUP]: { [T_NOW]: "AA" } },
-          },
-        },
-      ]),
-    ),
+    issuerData: [ISSUER_NAME, BACKUP_ISSUER].map((name) => ({
+      issuerName: name,
+      keyId: KEY_ID,
+      unlockUrl: UNLOCK_URL,
+      sealed: {
+        contentKeys: names.map((item) => ({ contentName: item, key: "AA" })),
+        periodKeys: [{ accessGroup: GROUP, period: T_NOW, key: "AA" }],
+      },
+    })),
   };
   return {
     raw,
@@ -2234,12 +2384,14 @@ test("wrong held grant then evicted period response authenticates every obtainin
             keys:
               request.issuerName === ISSUER_NAME
                 ? {
-                    contentKeys: {
-                      bodytext: encoded(new Uint8Array(16).fill(9)),
-                      teaser: encoded(new Uint8Array(16).fill(10)),
-                    },
+                    contentKeys: [
+                      { contentName: "bodytext", key: encoded(new Uint8Array(16).fill(9)) },
+                      { contentName: "teaser", key: encoded(new Uint8Array(16).fill(10)) },
+                    ],
                   }
-                : { periodKeys: { [GROUP]: { [T_NOW]: encoded(fixture.key) } } },
+                : {
+                    periodKeys: [{ accessGroup: GROUP, period: T_NOW, key: encoded(fixture.key) }],
+                  },
           },
         };
       },
@@ -2263,8 +2415,9 @@ test("wrong held grant then evicted period response authenticates every obtainin
 test("item-local route preflight preserves valid siblings and excludes failed request coordinates", async () => {
   for (const fault of ["unsupported", "record", "cipher-width"]) {
     const fixture = await obtainingFixture();
-    if (fault === "unsupported") fixture.raw.contentData.bodytext.contentEncodings = ["unknown"];
-    if (fault === "record") fixture.raw.contentData.bodytext.contentType = null;
+    if (fault === "unsupported")
+      contentRecordOf(fixture.raw, "bodytext").contentEncodings = ["unknown"];
+    if (fault === "record") contentRecordOf(fixture.raw, "bodytext").contentType = null;
     const reader = {
       ...fixture.reader,
       extract: (name) =>
@@ -2284,7 +2437,11 @@ test("item-local route preflight preserves valid siblings and excludes failed re
             body:
               request.issuerName === ISSUER_NAME
                 ? {}
-                : { keys: { contentKeys: { teaser: fixture.contentKeys.teaser } } },
+                : {
+                    keys: {
+                      contentKeys: [{ contentName: "teaser", key: fixture.contentKeys.teaser }],
+                    },
+                  },
           };
         },
       },
@@ -2302,7 +2459,7 @@ test("item-local route preflight preserves valid siblings and excludes failed re
     assert.deepEqual(result.missing, []);
     assert.equal(posts.length, 2);
     for (const request of posts)
-      assert.deepEqual(Object.keys(request.sealed.contentKeys), ["teaser"]);
+      assert.deepEqual(contentNamesIn(request.sealed.contentKeys), ["teaser"]);
     assert.equal(utf8Decode((await client.openLocal("teaser")).bytes), "teaser");
   }
 });
@@ -2331,9 +2488,9 @@ test("ordinary unlock skips a request with no eligible coordinates without inven
 
 test("route coverage ignores malformed wrap labels before cache access and preserves storage faults", async () => {
   const fixture = await obtainingFixture();
-  for (const record of Object.values(fixture.raw.contentData)) {
-    const wrap = record.keys[GROUP][0];
-    record.keys[GROUP] = [{ ...wrap, t: "" }, wrap, { ...wrap, t: "bogus" }];
+  for (const record of fixture.raw.contentData) {
+    const [wrap] = wrapsOf(fixture.raw, record.contentName, GROUP);
+    record.keys = [{ ...wrap, period: "" }, wrap, { ...wrap, period: "bogus" }];
   }
   const reads = [];
   let posts = 0;
@@ -2399,10 +2556,11 @@ test("ordinary open preflights its used item before its own cache or acquisition
     let decodes = 0,
       reads = 0,
       posts = 0;
-    fixture.raw.contentData.bodytext.contentEncodings = ["known", "unknown"];
-    if (fault !== "unsupported") fixture.raw.contentData.bodytext.contentEncodings = ["known"];
-    if (fault === "list") fixture.raw.contentData.bodytext.contentEncodings = [];
-    if (fault === "record") fixture.raw.contentData.bodytext.contentType = null;
+    contentRecordOf(fixture.raw, "bodytext").contentEncodings = ["known", "unknown"];
+    if (fault !== "unsupported")
+      contentRecordOf(fixture.raw, "bodytext").contentEncodings = ["known"];
+    if (fault === "list") contentRecordOf(fixture.raw, "bodytext").contentEncodings = [];
+    if (fault === "record") contentRecordOf(fixture.raw, "bodytext").contentType = null;
     const client = createDeliveryClient({
       unlockUrl: UNLOCK_URL,
       reader: {
@@ -2460,7 +2618,9 @@ test("ordinary open keeps pure admission and later decoding separate; host fault
         return {
           status: 200,
           contentType: "application/json",
-          body: { keys: { contentKeys: { bodytext: fixture.contentKeys.bodytext } } },
+          body: {
+            keys: { contentKeys: [{ contentName: "bodytext", key: fixture.contentKeys.bodytext }] },
+          },
         };
       },
     },
@@ -2546,6 +2706,49 @@ describe("Browser denied unlock scheduling", () => {
     assert.equal(page.calls.count, 4);
   });
 
+  test("omitting denial scheduling retries complete denials despite persisted hints", async () => {
+    const page = await world({
+      contentKeys: false,
+      periodKeyInput: true,
+      accessPolicy: noAccess,
+      notDeliveredReport: "complete",
+    });
+    const held = storage();
+    const make = (options = {}) =>
+      createBrowserClient({
+        root: domOver(page.markup, { publisherOrigin: PUB }),
+        issuerName: ISSUER_NAME,
+        unlockUrl: UNLOCK_URL,
+        acceptDirectResponse: true,
+        relayPeriodKeys: true,
+        transport: {
+          post: async (_url, request) => ({
+            ...(await page.unlock(request)),
+            contentType: "application/json",
+          }),
+        },
+        ...options,
+      });
+    const selected = make({ denialCache: new DeniedUnlockCache({ storage: held }) });
+    assert.equal((await selected.unlock([CONTENT_NAME])).status, 200);
+    const reloaded = make({ denialCache: new DeniedUnlockCache({ storage: held }) });
+    assert.equal((await reloaded.unlock([CONTENT_NAME])).skipped, "cached-denial");
+    assert.equal(page.calls.count, 1, "the selected extension has a persisted denial");
+
+    const ordinary = make();
+    assert.equal(ordinary.denialCache, null);
+    for (let attempt = 0; attempt < 2; attempt++) {
+      const result = await ordinary.unlock([CONTENT_NAME]);
+      assert.equal(result.status, 200);
+      assert.equal(result.skipped, undefined);
+    }
+    assert.equal(page.calls.count, 3, "both ordinary attempts reach the issuer");
+    assert.equal((await reloaded.unlock([CONTENT_NAME])).skipped, "cached-denial");
+    await ordinary.clearAccessDecisions();
+    await ordinary.clearReaderContext();
+    assert.equal(ordinary.denialCache, null, "lifecycle cleanup needs no denial owner");
+  });
+
   test("HTTP refusals, failures, empty, unavailable and malformed results never imply denial", async () => {
     const page = await world({ contentKeys: false });
     for (const answer of [
@@ -2554,11 +2757,12 @@ describe("Browser denied unlock scheduling", () => {
       { status: 429 },
       { status: 503 },
       { status: 200, body: {} },
-      { status: 200, body: { notDelivered: { [GROUP]: { reason: "unavailable" } } } },
-      { status: 200, body: { notDelivered: { invented: { reason: "denied" } } } },
+      { status: 200, body: { notDelivered: [{ accessGroup: GROUP, reason: "unavailable" }] } },
+      { status: 200, body: { notDelivered: [{ accessGroup: "invented", reason: "denied" }] } },
     ]) {
       let calls = 0;
       const client = createBrowserClient({
+        denialCache: new DeniedUnlockCache(),
         root: domOver(page.markup, { publisherOrigin: PUB }),
         issuerName: ISSUER_NAME,
         unlockUrl: UNLOCK_URL,
@@ -2581,6 +2785,7 @@ describe("Browser denied unlock scheduling", () => {
     const page = await world();
     let calls = 0;
     const client = createBrowserClient({
+      denialCache: new DeniedUnlockCache(),
       root: domOver(page.markup, { publisherOrigin: PUB }),
       issuerName: ISSUER_NAME,
       unlockUrl: UNLOCK_URL,
@@ -2592,7 +2797,7 @@ describe("Browser denied unlock scheduling", () => {
           return {
             status: 200,
             contentType: "application/json",
-            body: { notDelivered: { [GROUP]: { reason: "denied" } } },
+            body: { notDelivered: [{ accessGroup: GROUP, reason: "denied" }] },
           };
         },
       },
@@ -2618,7 +2823,7 @@ describe("Browser denied unlock scheduling", () => {
           return {
             status: 200,
             contentType: "application/json",
-            body: { notDelivered: { [GROUP]: { reason: "denied" } } },
+            body: { notDelivered: [{ accessGroup: GROUP, reason: "denied" }] },
           };
         },
       },
@@ -2636,6 +2841,7 @@ describe("Browser denied unlock scheduling", () => {
       notDeliveredReport: "complete",
     });
     const client = createBrowserClient({
+      denialCache: new DeniedUnlockCache(),
       root: domOver(page.markup, { publisherOrigin: PUB }),
       issuerName: ISSUER_NAME,
       unlockUrl: UNLOCK_URL,
@@ -2710,7 +2916,7 @@ describe("Browser denied unlock scheduling", () => {
           return {
             status: 200,
             contentType: "application/json",
-            body: { notDelivered: { [GROUP]: { reason: "denied" } } },
+            body: { notDelivered: [{ accessGroup: GROUP, reason: "denied" }] },
           };
         },
       },
@@ -2867,7 +3073,10 @@ describe("Browser denied unlock scheduling", () => {
       publisherOrigin: PUB,
       issuerName: ISSUER_NAME,
       unlockUrl: UNLOCK_URL,
-      request: { resourceJWT: "render-one", sealed: { periodKeys: { premium: { t: "seal" } } } },
+      request: {
+        resourceJWT: "render-one",
+        sealed: { periodKeys: [{ accessGroup: "premium", period: "t", key: "seal" }] },
+      },
     };
     const old = await cache.capture(input);
     cache.invalidate();
@@ -2899,10 +3108,11 @@ describe("Browser reader lifecycle", () => {
   test("decision clear removes suppression without requesting or discarding granted keys", async () => {
     const page = await world({ contentKeys: false, periodKeyInput: true });
     let posts = 0;
-    const denied = { notDelivered: { [GROUP]: { reason: "denied" } } };
+    const denied = { notDelivered: [{ accessGroup: GROUP, reason: "denied" }] };
     const gates = [resetBoundary(), resetBoundary()];
     const starts = [resetBoundary(), resetBoundary()];
     const client = createBrowserClient({
+      denialCache: new DeniedUnlockCache(),
       root: domOver(page.markup, { publisherOrigin: PUB }),
       issuerName: ISSUER_NAME,
       unlockUrl: UNLOCK_URL,
@@ -2934,7 +3144,9 @@ describe("Browser reader lifecycle", () => {
     await client.clearAccessDecisions();
     gates[0].release(denied);
     gates[1].release({
-      keys: { periodKeys: { [GROUP]: { [T_NOW]: encoded(PERIOD_KEYS[T_NOW]) } } },
+      keys: {
+        periodKeys: [{ accessGroup: GROUP, period: T_NOW, key: encoded(PERIOD_KEYS[T_NOW]) }],
+      },
     });
     await Promise.all([lateDenial, positive]);
     assert.equal(utf8Decode((await client.openLocal(CONTENT_NAME)).bytes), ARTICLE);
@@ -2944,8 +3156,8 @@ describe("Browser reader lifecycle", () => {
     assert.equal(posts, 4, "late denial did not restore suppression");
   });
 
-  for (const denialCache of [false, undefined]) {
-    test(`full reset clears held item and period keys with denial cache ${denialCache === false ? "disabled" : "enabled"}`, async () => {
+  for (const denialMode of ["omitted", "disabled", "enabled"]) {
+    test(`full reset clears held item and period keys with denial cache ${denialMode}`, async () => {
       const page = await world({ periodKeyInput: true });
       let posts = 0;
       const client = createBrowserClient({
@@ -2954,7 +3166,9 @@ describe("Browser reader lifecycle", () => {
         unlockUrl: UNLOCK_URL,
         relayPeriodKeys: true,
         acceptDirectResponse: true,
-        ...(denialCache === false ? { denialCache } : {}),
+        ...(denialMode === "omitted"
+          ? {}
+          : { denialCache: denialMode === "disabled" ? false : new DeniedUnlockCache() }),
         transport: {
           async post(_url, request) {
             posts++;
@@ -3057,7 +3271,14 @@ describe("Browser reader lifecycle", () => {
           post: async () => ({
             status: 200,
             contentType: "application/json",
-            body: { keys: { contentKeys: fixture.contentKeys } },
+            body: {
+              keys: {
+                contentKeys: Object.entries(fixture.contentKeys).map(([contentName, key]) => ({
+                  contentName,
+                  key,
+                })),
+              },
+            },
           }),
         },
       });
@@ -3090,6 +3311,7 @@ describe("Browser reader lifecycle", () => {
         return {
           applyResponse: inner.applyResponse.bind(inner),
           resolveDetailed: inner.resolveDetailed.bind(inner),
+          resolveAuthenticated: inner.resolveAuthenticated.bind(inner),
           resolve: inner.resolve.bind(inner),
           contentKeyFor: inner.contentKeyFor.bind(inner),
           contentKeyWithOriginFor: inner.contentKeyWithOriginFor.bind(inner),
@@ -3249,6 +3471,7 @@ for (const kind of ["period", "chain"]) {
         return {
           applyResponse: inner.applyResponse.bind(inner),
           resolveDetailed: inner.resolveDetailed.bind(inner),
+          resolveAuthenticated: inner.resolveAuthenticated.bind(inner),
           resolve: inner.resolve.bind(inner),
           contentKeyFor: inner.contentKeyFor.bind(inner),
           contentKeyWithOriginFor: inner.contentKeyWithOriginFor.bind(inner),
@@ -3411,6 +3634,7 @@ test("a synchronously throwing key cleanup still waits for hints and permanently
       return {
         applyResponse: inner.applyResponse.bind(inner),
         resolveDetailed: inner.resolveDetailed.bind(inner),
+        resolveAuthenticated: inner.resolveAuthenticated.bind(inner),
         resolve: inner.resolve.bind(inner),
         contentKeyFor: inner.contentKeyFor.bind(inner),
         contentKeyWithOriginFor: inner.contentKeyWithOriginFor.bind(inner),
@@ -3463,6 +3687,7 @@ for (const fatalKeys of [false, true]) {
         return {
           applyResponse: inner.applyResponse.bind(inner),
           resolveDetailed: inner.resolveDetailed.bind(inner),
+          resolveAuthenticated: inner.resolveAuthenticated.bind(inner),
           resolve: inner.resolve.bind(inner),
           contentKeyFor: inner.contentKeyFor.bind(inner),
           contentKeyWithOriginFor: inner.contentKeyWithOriginFor.bind(inner),
@@ -3509,3 +3734,10 @@ for (const fatalKeys of [false, true]) {
     }
   });
 }
+
+test("browser entry refuses a reader that would replace its root reader", () => {
+  assert.throws(
+    () => createBrowserClient(/** @type {any} */ ({ root: { querySelectorAll() {} }, reader: {} })),
+    { code: "bad_config" },
+  );
+});

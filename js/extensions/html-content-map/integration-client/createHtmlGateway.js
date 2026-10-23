@@ -69,6 +69,8 @@ const GATEWAY_OWNED_OPTIONS = Object.freeze([
   "cacheKeyBy",
   "chainCache",
   "resolverFactory",
+  "reader",
+  "denialCache",
   "root",
   "transport",
   "issuerName",
@@ -99,7 +101,7 @@ const GATEWAY_OWNED_OPTIONS = Object.freeze([
  *   answer the same cache for the same scope. Left out, no chain cache.
  * @property {number} [maxRedirects] - left out, 5
  * @property {Partial<import('../core-shared--client-publisher/contentMap.js').MapLimits>} [limits]
- * @property {Omit<import('../../../integration-client/composeClient.js').ComposeClientOptions, 'cache'|'storage'|'cacheNamespace'|'cacheKeyBy'|'chainCache'|'resolverFactory'>} [clientOptions] -
+ * @property {Omit<import('../../../integration-client/createBrowserClient.js').BrowserCompositionOptions, 'cache'|'storage'|'cacheNamespace'|'cacheKeyBy'|'chainCache'|'resolverFactory'|'denialCache'>} [clientOptions] -
  *   further stateless base client composition, such as `relayPeriodKeys`,
  *   `chainKeyProfile` or `requestBuilderFactory`. A cache, chain cache,
  *   resolver factory, storage, root, transport or issuer name here is refused
@@ -152,8 +154,9 @@ export function createHtmlGateway(config) {
   if (typeof admitCaller !== "function")
     throw dcaError("bad_config", "a gateway needs an explicit caller admission policy");
   // The gateway wires these itself: a cache from clientOptions would serve
-  // every caller from one capability store (Section 8), and the root,
-  // transport and issuer come from this configuration. Refuse rather than
+  // every caller from one capability store (Section 8). A shared denialCache
+  // likewise has no per-caller owner. The root-derived reader, transport and
+  // issuer come from this configuration. Refuse rather than
   // ignore, so a mistaken deployment fails at construction.
   for (const name of GATEWAY_OWNED_OPTIONS) {
     if (

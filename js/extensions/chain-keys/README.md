@@ -229,7 +229,7 @@ request. A missing or malformed top-level `periodGeometry` pair gives no family
 chain geometry, so the relay returns that base request with no chain member
 and the issuer can still answer its content and period sections. The client
 candidate source likewise offers no cached chain candidate. Next the
-relay counts the own members of the selected issuer's received
+relay counts the raw records of the selected issuer's received
 `sealed.chainKeys` collection, read from `DcaData.toObject()` across all
 families before selecting needed families: more than the trusted capacity
 (`maxChainMembersPerMessage`, default 16) omits every chain
@@ -260,12 +260,19 @@ represent, or misses. Only a selection counts toward what this request was grant
 to represent what it selected: for each period it answers a label with either key bytes or the one
 failure recorded for that label, under an opener confined to the selected coordinates.
 
-The reference `chainKeyIssuerEngine` installs that source for the issuer's
-whole period route. One engine instance therefore does not mix a chain-owned
-family with a family the issuer receives as period keys only. A deployment
-needing that finer routing must compose separate routes or supply a
-family-aware source; the reference wrapper does not infer it from request
-contents.
+The reference `chainKeyIssuerEngine` installs that source for its independent
+chain grants. Ordinary explicit-label grants may still use the base period-key
+route. A chain grant that has no usable representation stays unavailable;
+it does not fall back to an ordinary sorted-label grant.
+
+The source counts actual distinct projected period-key candidates against the
+288-key family maximum. Its synchronous `checkPeriodKeyOutput(count)` callback
+checks all final ordinary `periodKeys`, including base fallback, against the
+512-key response maximum. `IssuerEngine` captures and invokes that callback
+automatically, including in custom compositions that install the source.
+Source decorators forward it. An output overflow refuses the whole exchange
+with `too_many_entries`; it never trims rivals. Neither maximum creates a new
+base-client admission limit.
 
 The engine declares the processor selections its route needs,
 `selectedExtensions: ["chain-keys"]` and, under the chain-key representation,
@@ -288,8 +295,10 @@ valid whether it sits at its window's terminal or below it.
 
 A member whose sealed value is not a canonical binary string stays
 member-local and does not invalidate its family. The shared carrier reader
-keeps such a label's coordinate in the family's `malformedMembers` and drops
-its value; the issuer source selects a valid member first. When an authorized
+keeps every distinct valid value at one cutoff as its own member and drops
+the others. A cutoff where no record holds a valid value becomes one entry in
+the family's `malformedMembers`, without a value; the issuer source selects a
+valid member first. When an authorized
 target falls only to a malformed member, the issuer answers `unseal_failed` at
 `accessGroup|suppliedT` without decoding or opening the value, as core
 Section 7.1 requires. A denied target never reaches the value. A port that

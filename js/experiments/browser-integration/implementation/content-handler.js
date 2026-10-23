@@ -18,6 +18,7 @@
 // page. It shows that well-behaved callbacks need no scheduler to keep delayed
 // work out of a successor's destination.
 
+import { recordsByName } from "../../../core-shared--client-publisher/deliveryRecords.js";
 import { dcaError } from "../../../core-shared/errors.js";
 import { own, setOwn } from "../../../core-shared/wire.js";
 
@@ -152,11 +153,19 @@ class Connection {
 
     const delivery = own(setup, "delivery");
     const contentData = own(delivery, "contentData");
-    if (!isRecord(delivery) || !isRecord(contentData)) {
-      throw dcaError("bad_config", "setup.delivery is a delivery object with a contentData object");
+    // DcaData admits protocol names. This standalone callback handler keeps
+    // its existing string-name contract, including names such as __proto__.
+    const records = recordsByName(contentData, "contentName", (name) => typeof name === "string");
+    if (!isRecord(delivery) || records === null) {
+      throw dcaError(
+        "bad_config",
+        "setup.delivery is a delivery object with named contentData records",
+      );
     }
-    for (const name of Object.keys(contentData)) {
-      const contentType = own(own(contentData, name), "contentType");
+    // Use the same last-whole-record selection as DcaData. A missing type in
+    // the last descriptor replaces an earlier type; it cannot inherit it.
+    for (const [name, record] of records) {
+      const contentType = own(record, "contentType");
       this.#itemTypes.set(name, typeof contentType === "string" ? contentType : null);
     }
 

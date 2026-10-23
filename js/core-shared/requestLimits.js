@@ -23,8 +23,11 @@ export function requestLimits(input) {
 }
 
 /**
- * Count the raw sealed maps before any value or envelope validation. Period
- * and chain entries share a group's limit. Arrays count their enumerable keys.
+ * Count the raw sealed records before any record, value or envelope
+ * validation, and before any copy is dropped: every array element counts,
+ * including a repeated record and one that is not a record at all. Period and
+ * chain records share their `accessGroup`'s limit. A section that is not an
+ * array counts nothing here; admission refuses it on its shape.
  * @param {any} sealed
  * @returns {{ entries: number, groups: Map<string, number> }}
  */
@@ -32,16 +35,17 @@ export function requestEntryCounts(sealed) {
   const groups = new Map();
   if (sealed === null || typeof sealed !== "object") return { entries: 0, groups };
   const content = Object.hasOwn(sealed, "contentKeys") ? sealed.contentKeys : undefined;
-  let entries = content !== null && typeof content === "object" ? Object.keys(content).length : 0;
+  let entries = Array.isArray(content) ? content.length : 0;
   for (const field of ["periodKeys", "chainKeys"]) {
-    const families = Object.hasOwn(sealed, field) ? sealed[field] : undefined;
-    if (families === null || typeof families !== "object") continue;
-    for (const group of Object.keys(families)) {
-      const family = families[group];
-      if (family === null || typeof family !== "object") continue;
-      const count = Object.keys(family).length;
-      groups.set(group, (groups.get(group) ?? 0) + count);
-      entries += count;
+    const records = Object.hasOwn(sealed, field) ? sealed[field] : undefined;
+    if (!Array.isArray(records)) continue;
+    entries += records.length;
+    for (const record of records) {
+      const group =
+        record !== null && typeof record === "object" && Object.hasOwn(record, "accessGroup")
+          ? record.accessGroup
+          : undefined;
+      if (typeof group === "string") groups.set(group, (groups.get(group) ?? 0) + 1);
     }
   }
   return { entries, groups };

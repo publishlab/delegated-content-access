@@ -34,6 +34,16 @@ import { randomPeriodKeySupply } from "../../demo/support/randomPeriodKeySupply.
 import { Random } from "../../demo/actors/Random.js";
 import { Clock } from "../../demo/actors/Clock.js";
 import { wholeRenderIssuerSupplyPlan } from "../../core-publisher/issuerSupplyPlan.js";
+import { wrapNonceOf } from "../support/contentKeyWrapNonceOctets.js";
+import { recordsByName } from "../../core-shared--client-publisher/deliveryRecords.js";
+import {
+  contentKeyMap,
+  errorMap,
+  keyAt,
+  notDeliveredMap,
+  periodKeyMap,
+  setKeyAt,
+} from "../support/namedRecords.js";
 
 const { subtle } = globalThis.crypto;
 
@@ -80,11 +90,15 @@ async function keysFromRender(page, periodKeySupply) {
   const contentKeys = {};
   const openingPeriodKey = await periodKeySupply.derive(GROUP, T0);
   for (const name of [BODY, SUMMARY]) {
-    const wrap = page.contentData[name].keys[GROUP].find(
-      (/** @type {any} */ entry) => entry.t === T0,
-    );
+    const wrap = recordsByName(page.contentData, "contentName", () => true)
+      ?.get(name)
+      .keys.find((/** @type {any} */ entry) => entry.accessGroup === GROUP && entry.period === T0);
     contentKeys[name] = base64urlEncode(
-      await decrypt(openingPeriodKey, base64urlDecode(wrap.nonce), base64urlDecode(wrap.key)),
+      await decrypt(
+        openingPeriodKey,
+        wrapNonceOf(page, name, GROUP, T0),
+        base64urlDecode(wrap.key),
+      ),
     );
   }
 
@@ -217,12 +231,12 @@ describe("the ordinary issuer answer", () => {
         { principal: null },
       );
 
-      assert.deepEqual(result.contentKeys, {
+      assert.deepEqual(contentKeyMap(result.contentKeys), {
         [BODY]: publisherKeys.contentKeys[BODY],
         [SUMMARY]: publisherKeys.contentKeys[SUMMARY],
       });
-      assert.deepEqual(result.periodKeys, { [GROUP]: publisherKeys.periodKeys });
-      assert.deepEqual(result.errors, {});
+      assert.deepEqual(periodKeyMap(result.periodKeys), { [GROUP]: publisherKeys.periodKeys });
+      assert.deepEqual(errorMap(result.errors), {});
       assert.deepEqual(result.policyData, { seat: "A-14" });
     },
   );
@@ -235,14 +249,20 @@ describe("the ordinary issuer answer", () => {
     }));
     const engine = issuerEngine({ accessPolicy: policy });
     const document = requestFor([BODY]);
-    document.sealed.periodKeys[GROUP] = {
-      [T1]: document.sealed.periodKeys[GROUP][T1],
-    };
+    document.sealed.periodKeys = document.sealed.periodKeys.filter(
+      (/** @type {any} */ record) => record.accessGroup !== GROUP || record.period === T1,
+    );
 
     const result = await engine.unlock(new DcaRequest(document), registration);
 
-    assert.deepEqual(result.periodKeys, {}, "T0 permission does not transfer to presented T1");
-    assert.deepEqual(result.contentKeys, { [BODY]: publisherKeys.contentKeys[BODY] });
+    assert.deepEqual(
+      periodKeyMap(result.periodKeys),
+      {},
+      "T0 permission does not transfer to presented T1",
+    );
+    assert.deepEqual(contentKeyMap(result.contentKeys), {
+      [BODY]: publisherKeys.contentKeys[BODY],
+    });
   });
 
   test("the core-only content-key request opens only its named item", async () => {
@@ -259,9 +279,11 @@ describe("the ordinary issuer answer", () => {
 
     const result = await engine.unlock(new DcaRequest(document), registration);
 
-    assert.deepEqual(result.contentKeys, { [BODY]: publisherKeys.contentKeys[BODY] });
-    assert.deepEqual(result.periodKeys, {});
-    assert.deepEqual(result.errors, {});
+    assert.deepEqual(contentKeyMap(result.contentKeys), {
+      [BODY]: publisherKeys.contentKeys[BODY],
+    });
+    assert.deepEqual(periodKeyMap(result.periodKeys), {});
+    assert.deepEqual(errorMap(result.errors), {});
     assert.deepEqual(result.capabilities, []);
   });
 
@@ -287,10 +309,14 @@ describe("the ordinary issuer answer", () => {
     const engine = issuerEngine({ accessPolicy: generousPolicy() });
 
     const document = requestFor([BODY]);
-    assert.deepEqual(Object.keys(document.sealed.periodKeys[GROUP]).sort(), [T0, T1, T2]);
+    assert.deepEqual(Object.keys(periodKeyMap(document.sealed.periodKeys)[GROUP]).sort(), [
+      T0,
+      T1,
+      T2,
+    ]);
 
     const result = await engine.unlock(new DcaRequest(document), registration);
-    assert.deepEqual(Object.keys(result.periodKeys[GROUP]).sort(), [T0, T1]);
+    assert.deepEqual(Object.keys(periodKeyMap(result.periodKeys)[GROUP]).sort(), [T0, T1]);
   });
 
   test("the access policy is asked once for the whole unlock", async () => {
@@ -312,9 +338,11 @@ describe("the ordinary issuer answer", () => {
       });
 
       const result = await engine.unlock(new DcaRequest(requestFor([BODY, SUMMARY])), registration);
-      assert.deepEqual(result.contentKeys, { [BODY]: publisherKeys.contentKeys[BODY] });
-      assert.deepEqual(result.periodKeys, {});
-      assert.deepEqual(result.errors, {});
+      assert.deepEqual(contentKeyMap(result.contentKeys), {
+        [BODY]: publisherKeys.contentKeys[BODY],
+      });
+      assert.deepEqual(periodKeyMap(result.periodKeys), {});
+      assert.deepEqual(errorMap(result.errors), {});
     },
   );
 
@@ -326,14 +354,18 @@ describe("the ordinary issuer answer", () => {
     // committed to `summary`, so rebuilding the binding at `bodytext` fails
     // to open it and reports one error beside the keys that did work.
     const document = requestFor([BODY, SUMMARY]);
-    document.sealed.contentKeys[SUMMARY] = document.sealed.contentKeys[BODY];
+    setKeyAt(
+      document.sealed.contentKeys,
+      { contentName: SUMMARY },
+      keyAt(document.sealed.contentKeys, { contentName: BODY }),
+    );
 
     const result = await engine.unlock(new DcaRequest(document), registration);
-    assert.deepEqual(Object.keys(result.contentKeys), [BODY]);
-    assert.deepEqual(result.errors, {
+    assert.deepEqual(Object.keys(contentKeyMap(result.contentKeys)), [BODY]);
+    assert.deepEqual(errorMap(result.errors), {
       [SUMMARY]: { error: "unseal_failed", message: "sealed value could not be opened" },
     });
-    assert.deepEqual(result.periodKeys, { [GROUP]: publisherKeys.periodKeys });
+    assert.deepEqual(periodKeyMap(result.periodKeys), { [GROUP]: publisherKeys.periodKeys });
   });
 });
 
@@ -363,12 +395,17 @@ describe("what a refused unlock never reaches", () => {
     /** @type {string[]} */
     const events = [];
     const document = requestFor([BODY, SUMMARY]);
-    document.sealed.contentKeys = new Proxy(document.sealed.contentKeys, {
-      get(target, name, receiver) {
-        if (typeof name === "string") events.push(`sealed ${name}`);
-        return Reflect.get(target, name, receiver);
-      },
-    });
+    // Each record logs the read of its envelope, not of its name: the engine
+    // reads every name to know what was presented.
+    document.sealed.contentKeys = document.sealed.contentKeys.map(
+      (/** @type {any} */ record) =>
+        new Proxy(record, {
+          get(target, name, receiver) {
+            if (name === "key") events.push(`sealed ${target.contentName}`);
+            return Reflect.get(target, name, receiver);
+          },
+        }),
+    );
     const store = registration.openingKeys;
     const watched = {
       ...registration,
@@ -390,8 +427,10 @@ describe("what a refused unlock never reaches", () => {
 
     const result = await engine.unlock(new DcaRequest(document), watched);
 
-    assert.deepEqual(result.contentKeys, { [BODY]: publisherKeys.contentKeys[BODY] });
-    assert.deepEqual(result.errors, {});
+    assert.deepEqual(contentKeyMap(result.contentKeys), {
+      [BODY]: publisherKeys.contentKeys[BODY],
+    });
+    assert.deepEqual(errorMap(result.errors), {});
     assert.deepEqual(
       events,
       [`sealed ${BODY}`, "opening key"],
@@ -458,7 +497,7 @@ describe("the issuer engine origin profile", () => {
       development.registration,
     );
     assert.equal(
-      opened.contentKeys[BODY],
+      contentKeyMap(opened.contentKeys)[BODY],
       development.publisherKeys.contentKeys[BODY],
       "the explicit opt-in is the positive control",
     );
@@ -530,10 +569,11 @@ describe("issuer engine constructor shapes", () => {
 test("a content-key source receives only the host-selected opaque scope", async () => {
   const { registration, requestFor, publisherKeys } = await world();
   const document = requestFor([BODY, SUMMARY]);
-  [document.sealed.contentKeys[BODY], document.sealed.contentKeys[SUMMARY]] = [
-    document.sealed.contentKeys[SUMMARY],
-    document.sealed.contentKeys[BODY],
-  ];
+  const [bodySeal, summarySeal] = [BODY, SUMMARY].map((contentName) =>
+    keyAt(document.sealed.contentKeys, { contentName }),
+  );
+  setKeyAt(document.sealed.contentKeys, { contentName: BODY }, summarySeal);
+  setKeyAt(document.sealed.contentKeys, { contentName: SUMMARY }, bodySeal);
   const scope = Object.freeze({ periodKey: "selected-outside-the-request" });
   let selections = 0;
   let lookups = 0;
@@ -568,7 +608,7 @@ test("a content-key source receives only the host-selected opaque scope", async 
   assert.equal(Object.hasOwn(received, "registration"), false);
   assert.equal(Object.hasOwn(received, "openingKeys"), false);
   assert.equal(lookups, 2, "each failed ordinary seal asks the one constructed source lookup");
-  assert.deepEqual(result.contentKeys, publisherKeys.contentKeys);
+  assert.deepEqual(contentKeyMap(result.contentKeys), publisherKeys.contentKeys);
 });
 
 test("an unused content-key fallback cannot spoil an ordinary open", async () => {
@@ -591,7 +631,7 @@ test("an unused content-key fallback cannot spoil an ordinary open", async () =>
 
   const result = await engine.unlock(new DcaRequest(requestFor([BODY])), registration);
 
-  assert.deepEqual(result.contentKeys, { [BODY]: publisherKeys.contentKeys[BODY] });
+  assert.deepEqual(contentKeyMap(result.contentKeys), { [BODY]: publisherKeys.contentKeys[BODY] });
   assert.equal(selections, 0);
   assert.equal(factories, 0);
 });
@@ -599,7 +639,11 @@ test("an unused content-key fallback cannot spoil an ordinary open", async () =>
 test("a retired opening key does not initialize a content-key fallback", async () => {
   const { registration, requestFor } = await world();
   const document = requestFor([BODY]);
-  document.sealed.contentKeys[BODY] = document.sealed.contentKeys[SUMMARY];
+  setKeyAt(
+    document.sealed.contentKeys,
+    { contentName: BODY },
+    keyAt(document.sealed.contentKeys, { contentName: SUMMARY }),
+  );
   let selections = 0;
   let factories = 0;
   const engine = issuerEngine({
@@ -621,7 +665,7 @@ test("a retired opening key does not initialize a content-key fallback", async (
     openingKeys: { get: () => ({ retired: true }) },
   });
 
-  assert.equal(result.errors[BODY].error, "key_retired");
+  assert.equal(errorMap(result.errors)[BODY].error, "key_retired");
   assert.equal(selections, 0);
   assert.equal(factories, 0);
 });
@@ -629,8 +673,12 @@ test("a retired opening key does not initialize a content-key fallback", async (
 test("a content source can open only its final granted content names", async () => {
   const { registration, requestFor, publisherKeys } = await world();
   const document = requestFor([BODY, SUMMARY]);
-  const ordinaryBodySeal = document.sealed.contentKeys[BODY];
-  document.sealed.contentKeys[BODY] = document.sealed.contentKeys[SUMMARY];
+  const ordinaryBodySeal = keyAt(document.sealed.contentKeys, { contentName: BODY });
+  setKeyAt(
+    document.sealed.contentKeys,
+    { contentName: BODY },
+    keyAt(document.sealed.contentKeys, { contentName: SUMMARY }),
+  );
   /** @type {import('../../core-issuer/IssuerEngine.js').ContentKeyUnlock|undefined} */
   let received;
   const engine = issuerEngine({
@@ -652,32 +700,47 @@ test("a content source can open only its final granted content names", async () 
   // source must not open the ungranted sibling, nor use an auxiliary period
   // envelope without naming the granted item it serves.
   await assert.rejects(
-    () => open(request.sealedContentKeys[SUMMARY], { contentName: SUMMARY }),
+    () =>
+      open(keyAt(request.sealedContentKeys, { contentName: SUMMARY }), { contentName: SUMMARY }),
     /** @param {any} error */ (error) => error.code === "bad_config",
   );
   await assert.rejects(
-    () => open(request.sealedPeriodKeys[GROUP][T0], { accessGroup: GROUP, t: T0 }),
-    /** @param {any} error */ (error) => error.code === "bad_config",
-  );
-  await assert.rejects(
-    () => open(request.sealedPeriodKeys[GROUP][T0], { accessGroup: GROUP, t: T0 }, SUMMARY),
-    /** @param {any} error */ (error) => error.code === "bad_config",
-  );
-  await assert.rejects(
-    () => open(request.sealedContentKeys[SUMMARY], { contentName: SUMMARY }, BODY),
+    () =>
+      open(keyAt(request.sealedPeriodKeys, { accessGroup: GROUP, period: T0 }), {
+        accessGroup: GROUP,
+        t: T0,
+      }),
     /** @param {any} error */ (error) => error.code === "bad_config",
   );
   await assert.rejects(
     () =>
       open(
-        request.sealedPeriodKeys[GROUP][T0],
+        keyAt(request.sealedPeriodKeys, { accessGroup: GROUP, period: T0 }),
+        { accessGroup: GROUP, t: T0 },
+        SUMMARY,
+      ),
+    /** @param {any} error */ (error) => error.code === "bad_config",
+  );
+  await assert.rejects(
+    () =>
+      open(
+        keyAt(request.sealedContentKeys, { contentName: SUMMARY }),
+        { contentName: SUMMARY },
+        BODY,
+      ),
+    /** @param {any} error */ (error) => error.code === "bad_config",
+  );
+  await assert.rejects(
+    () =>
+      open(
+        keyAt(request.sealedPeriodKeys, { accessGroup: GROUP, period: T0 }),
         /** @type {any} */ ({ contentName: SUMMARY, accessGroup: GROUP, t: T0 }),
         BODY,
       ),
     /** @param {any} error */ (error) => error.code === "bad_config",
   );
   const auxiliary = await open(
-    request.sealedPeriodKeys[GROUP][T0],
+    keyAt(request.sealedPeriodKeys, { accessGroup: GROUP, period: T0 }),
     { accessGroup: GROUP, t: T0 },
     BODY,
   );
@@ -718,14 +781,14 @@ test("a content source can open only its final granted content names", async () 
     await assert.rejects(
       () =>
         open(
-          request.sealedPeriodKeys[GROUP][T0],
+          keyAt(request.sealedPeriodKeys, { accessGroup: GROUP, period: T0 }),
           { accessGroup: GROUP, t: T0 },
           /** @type {any} */ (name),
         ),
       /** @param {any} error */ (error) => error.code === "bad_config",
     );
   }
-  assert.deepEqual(result.contentKeys, { [BODY]: publisherKeys.contentKeys[BODY] });
+  assert.deepEqual(contentKeyMap(result.contentKeys), { [BODY]: publisherKeys.contentKeys[BODY] });
 });
 
 for (const answerKind of ["miss", "error"]) {
@@ -734,7 +797,11 @@ for (const answerKind of ["miss", "error"]) {
     const document = requestFor([BODY, SUMMARY]);
     // The summary envelope is genuine, but does not bind to BODY. SUMMARY
     // still opens normally; only BODY needs the composed fallback.
-    document.sealed.contentKeys[BODY] = document.sealed.contentKeys[SUMMARY];
+    setKeyAt(
+      document.sealed.contentKeys,
+      { contentName: BODY },
+      keyAt(document.sealed.contentKeys, { contentName: SUMMARY }),
+    );
     const sourceError = { error: "binding_failed", message: "fallback refused the item" };
     const lookedUp = [];
     const engine = issuerEngine({
@@ -748,13 +815,15 @@ for (const answerKind of ["miss", "error"]) {
     });
     const result = await engine.unlock(new DcaRequest(document), registration);
     assert.deepEqual(lookedUp, [BODY]);
-    assert.deepEqual(result.contentKeys, { [SUMMARY]: publisherKeys.contentKeys[SUMMARY] });
-    assert.deepEqual(Object.keys(result.errors), [BODY]);
+    assert.deepEqual(contentKeyMap(result.contentKeys), {
+      [SUMMARY]: publisherKeys.contentKeys[SUMMARY],
+    });
+    assert.deepEqual(Object.keys(errorMap(result.errors)), [BODY]);
     assert.equal(
-      result.errors[BODY].error,
+      errorMap(result.errors)[BODY].error,
       answerKind === "miss" ? "unseal_failed" : sourceError.error,
     );
-    if (answerKind === "error") assert.deepEqual(result.errors[BODY], sourceError);
+    if (answerKind === "error") assert.deepEqual(errorMap(result.errors)[BODY], sourceError);
   });
 }
 
@@ -773,7 +842,11 @@ describe("what a composed content-key source cannot hand back", () => {
   async function sourceAsked(contentKeySource, extra = {}) {
     const { registration, requestFor } = await world();
     const document = requestFor([BODY, SUMMARY]);
-    document.sealed.contentKeys[BODY] = document.sealed.contentKeys[SUMMARY];
+    setKeyAt(
+      document.sealed.contentKeys,
+      { contentName: BODY },
+      keyAt(document.sealed.contentKeys, { contentName: SUMMARY }),
+    );
     const engine = issuerEngine({
       accessPolicy: policyAnswering(() => ({ contentNames: [BODY] })),
       contentKeySource,
@@ -791,7 +864,9 @@ describe("what a composed content-key source cannot hand back", () => {
     const { unlocked, answered } = await sourceAsked({
       contentKeys: () => async () => ({ bytes }),
     });
-    assert.deepEqual((await unlocked()).contentKeys, { [BODY]: base64urlEncode(bytes) });
+    assert.deepEqual(contentKeyMap((await unlocked()).contentKeys), {
+      [BODY]: base64urlEncode(bytes),
+    });
     assert.equal(answered.response.status, 200);
   });
 
@@ -896,8 +971,8 @@ describe("what a composed content-key source cannot hand back", () => {
     const document = requestFor([BODY, SUMMARY]);
     // The engine's own seal walk meets a non-string and opens nothing; the
     // source then opens the real seal under the misdeclared key.
-    const sealedBody = document.sealed.contentKeys[BODY];
-    document.sealed.contentKeys[BODY] = 42;
+    const sealedBody = keyAt(document.sealed.contentKeys, { contentName: BODY });
+    setKeyAt(document.sealed.contentKeys, { contentName: BODY }, 42);
     const misdeclared = {
       ...registration,
       openingKeys: {
@@ -960,24 +1035,29 @@ describe("selected period-source routing", () => {
           async (accessGroup, selected) => {
             assert.equal(accessGroup, GROUP);
             assert.deepEqual(selected, [{ t: T0 }]);
-            const opened = await open(request.sealedPeriodKeys[GROUP][T0], { accessGroup, t: T0 });
+            const opened = await open(
+              keyAt(request.sealedPeriodKeys, { accessGroup: GROUP, period: T0 }),
+              { accessGroup, t: T0 },
+            );
             return represented([{ t: T0, ...opened }]);
           },
       },
     });
 
     const result = await engine.unlock(new DcaRequest(requestFor([BODY])), registration);
-    assert.deepEqual(result.contentKeys, { [BODY]: publisherKeys.contentKeys[BODY] });
-    assert.deepEqual(result.periodKeys, {});
+    assert.deepEqual(contentKeyMap(result.contentKeys), {
+      [BODY]: publisherKeys.contentKeys[BODY],
+    });
+    assert.deepEqual(periodKeyMap(result.periodKeys), {});
     assert.deepEqual(result.capabilities, [
       {
         kind: "test-capability",
         accessGroup: GROUP,
-        entries: { [T0]: publisherKeys.periodKeys[T0] },
+        entries: [{ t: T0, key: publisherKeys.periodKeys[T0] }],
         interpretation: TEST_INTERPRETATION,
       },
     ]);
-    assert.deepEqual(result.errors, {});
+    assert.deepEqual(errorMap(result.errors), {});
   });
 
   test("a selected period-key projection enters the ordinary periodKeys section", async () => {
@@ -989,20 +1069,25 @@ describe("selected period-source routing", () => {
         capabilities:
           ({ request, open }) =>
           async (accessGroup) => {
-            const opened = await open(request.sealedPeriodKeys[GROUP][T0], { accessGroup, t: T0 });
+            const opened = await open(
+              keyAt(request.sealedPeriodKeys, { accessGroup: GROUP, period: T0 }),
+              { accessGroup, t: T0 },
+            );
             return { kind: "period-keys", interpretation: {}, periods: [{ t: T0, ...opened }] };
           },
       },
     });
 
     const result = await engine.unlock(new DcaRequest(requestFor([BODY])), registration);
-    assert.deepEqual(result.periodKeys, { [GROUP]: { [T0]: publisherKeys.periodKeys[T0] } });
+    assert.deepEqual(periodKeyMap(result.periodKeys), {
+      [GROUP]: { [T0]: publisherKeys.periodKeys[T0] },
+    });
     assert.deepEqual(
       result.capabilities,
       [],
       "ordinary period-key output needs no capability encoder",
     );
-    assert.deepEqual(result.errors, {});
+    assert.deepEqual(errorMap(result.errors), {});
   });
 
   test("a miss keeps period-key output while unavailable keeps it closed; neither builds a lookup", async () => {
@@ -1018,13 +1103,15 @@ describe("selected period-source routing", () => {
         },
       });
       const result = await engine.unlock(new DcaRequest(requestFor([BODY])), registration);
-      assert.deepEqual(result.contentKeys, { [BODY]: publisherKeys.contentKeys[BODY] });
+      assert.deepEqual(contentKeyMap(result.contentKeys), {
+        [BODY]: publisherKeys.contentKeys[BODY],
+      });
       assert.deepEqual(
-        result.periodKeys,
+        periodKeyMap(result.periodKeys),
         "miss" in selection ? { [GROUP]: publisherKeys.periodKeys } : {},
       );
       assert.deepEqual(result.capabilities, []);
-      assert.deepEqual(result.errors, {});
+      assert.deepEqual(errorMap(result.errors), {});
     }
   });
 
@@ -1043,11 +1130,12 @@ describe("selected period-source routing", () => {
       ...registration,
       openingKeys: { get: () => ({ retired: true }) },
     });
-    assert.deepEqual(result.contentKeys, {});
-    assert.deepEqual(result.periodKeys, {});
+    assert.deepEqual(contentKeyMap(result.contentKeys), {});
+    assert.deepEqual(periodKeyMap(result.periodKeys), {});
     assert.deepEqual(result.capabilities, []);
-    assert.deepEqual(Object.keys(result.errors).sort(), [BODY, `${GROUP}|${T0}`]);
-    for (const error of Object.values(result.errors)) assert.equal(error.error, "key_retired");
+    assert.deepEqual(Object.keys(errorMap(result.errors)).sort(), [BODY, `${GROUP}|${T0}`]);
+    for (const error of Object.values(errorMap(result.errors)))
+      assert.equal(error.error, "key_retired");
   });
 
   test("a callable selected lookup must still return a valid representation", async () => {
@@ -1092,10 +1180,15 @@ describe("the three answers a key store gives", () => {
     };
 
     const result = await engine.unlock(new DcaRequest(requestFor([BODY])), retiring);
-    assert.deepEqual(result.contentKeys, {});
-    assert.deepEqual(result.periodKeys, {});
-    assert.deepEqual(Object.keys(result.errors).sort(), [BODY, `${GROUP}|${T0}`, `${GROUP}|${T1}`]);
-    for (const entry of Object.values(result.errors)) assert.equal(entry.error, "key_retired");
+    assert.deepEqual(contentKeyMap(result.contentKeys), {});
+    assert.deepEqual(periodKeyMap(result.periodKeys), {});
+    assert.deepEqual(Object.keys(errorMap(result.errors)).sort(), [
+      BODY,
+      `${GROUP}|${T0}`,
+      `${GROUP}|${T1}`,
+    ]);
+    for (const entry of Object.values(errorMap(result.errors)))
+      assert.equal(entry.error, "key_retired");
   });
 
   test("an entry that is both held and retired, or neither, is this issuer broken", async () => {
@@ -1165,7 +1258,11 @@ describe("a configuration fault refuses the whole request", () => {
     const engine = issuerEngine({ accessPolicy: generousPolicy() });
 
     const document = requestFor([BODY, SUMMARY]);
-    document.sealed.contentKeys[SUMMARY] = document.sealed.contentKeys[BODY];
+    setKeyAt(
+      document.sealed.contentKeys,
+      { contentName: SUMMARY },
+      keyAt(document.sealed.contentKeys, { contentName: BODY }),
+    );
 
     const answered = await endpointFor(engine).handleRequest({
       request: new DcaRequest(document),
@@ -1173,8 +1270,8 @@ describe("a configuration fault refuses the whole request", () => {
     });
     assert.equal(answered.response.status, 200);
     const body = /** @type {any} */ (answered.response.body);
-    assert.deepEqual(Object.keys(body.keys.contentKeys), [BODY]);
-    assert.deepEqual(body.errors, {
+    assert.deepEqual(Object.keys(contentKeyMap(body.keys.contentKeys)), [BODY]);
+    assert.deepEqual(errorMap(body.errors), {
       [SUMMARY]: { error: "unseal_failed", message: "sealed value could not be opened" },
     });
   });
@@ -1207,10 +1304,12 @@ describe("not-delivered family reports", () => {
         notDeliveredReport: "partial",
       });
       const result = await engine.unlock(new DcaRequest(requestFor([BODY])), registration);
-      assert.deepEqual(result.contentKeys, { [BODY]: publisherKeys.contentKeys[BODY] });
-      assert.deepEqual(result.periodKeys, {});
-      assert.deepEqual(result.errors, {});
-      assert.deepEqual(result.notDelivered, { [GROUP]: { reason: "denied" } });
+      assert.deepEqual(contentKeyMap(result.contentKeys), {
+        [BODY]: publisherKeys.contentKeys[BODY],
+      });
+      assert.deepEqual(periodKeyMap(result.periodKeys), {});
+      assert.deepEqual(errorMap(result.errors), {});
+      assert.deepEqual(notDeliveredMap(result.notDelivered), { [GROUP]: { reason: "denied" } });
     }
   });
 
@@ -1222,10 +1321,12 @@ describe("not-delivered family reports", () => {
       notDeliveredReport: "partial",
     });
     const result = await engine.unlock(new DcaRequest(requestFor([BODY])), registration);
-    assert.deepEqual(result.contentKeys, { [BODY]: publisherKeys.contentKeys[BODY] });
-    assert.deepEqual(result.periodKeys, {});
-    assert.deepEqual(result.errors, {});
-    assert.deepEqual(result.notDelivered, { [GROUP]: { reason: "unavailable" } });
+    assert.deepEqual(contentKeyMap(result.contentKeys), {
+      [BODY]: publisherKeys.contentKeys[BODY],
+    });
+    assert.deepEqual(periodKeyMap(result.periodKeys), {});
+    assert.deepEqual(errorMap(result.errors), {});
+    assert.deepEqual(notDeliveredMap(result.notDelivered), { [GROUP]: { reason: "unavailable" } });
   });
 
   test("an authorized family with no current capability yields a no-key result under every report setting", async () => {
@@ -1240,12 +1341,12 @@ describe("not-delivered family reports", () => {
         notDeliveredReport: setting,
       });
       const result = await engine.unlock(new DcaRequest(requestFor([BODY])), registration);
-      assert.deepEqual(result.contentKeys, {});
-      assert.deepEqual(result.periodKeys, {});
+      assert.deepEqual(contentKeyMap(result.contentKeys), {});
+      assert.deepEqual(periodKeyMap(result.periodKeys), {});
       assert.deepEqual(result.capabilities, []);
-      assert.deepEqual(result.errors, {});
+      assert.deepEqual(errorMap(result.errors), {});
       assert.deepEqual(
-        result.notDelivered,
+        notDeliveredMap(result.notDelivered),
         setting === "none" ? {} : { [GROUP]: { reason: "unavailable" } },
       );
       assert.deepEqual(asked, [], "unreachable supply needs no opening key");
@@ -1265,10 +1366,12 @@ describe("not-delivered family reports", () => {
       notDeliveredReport: "partial",
     });
     const result = await engine.unlock(new DcaRequest(requestFor([BODY])), registration);
-    assert.deepEqual(result.contentKeys, { [BODY]: publisherKeys.contentKeys[BODY] });
-    assert.deepEqual(result.periodKeys, {});
-    assert.deepEqual(result.errors, {});
-    assert.deepEqual(result.notDelivered, {});
+    assert.deepEqual(contentKeyMap(result.contentKeys), {
+      [BODY]: publisherKeys.contentKeys[BODY],
+    });
+    assert.deepEqual(periodKeyMap(result.periodKeys), {});
+    assert.deepEqual(errorMap(result.errors), {});
+    assert.deepEqual(notDeliveredMap(result.notDelivered), {});
   });
 
   test("denied wins when the family also has no current capability", async () => {
@@ -1282,7 +1385,7 @@ describe("not-delivered family reports", () => {
       notDeliveredReport: "partial",
     });
     const result = await engine.unlock(new DcaRequest(requestFor([BODY])), registration);
-    assert.deepEqual(result.notDelivered, { [GROUP]: { reason: "denied" } });
+    assert.deepEqual(notDeliveredMap(result.notDelivered), { [GROUP]: { reason: "denied" } });
   });
 
   test("a delivered family, or one whose granted period keys fail to open, gets no entry", async () => {
@@ -1293,17 +1396,23 @@ describe("not-delivered family reports", () => {
     });
 
     const delivered = await engine.unlock(new DcaRequest(requestFor([BODY])), registration);
-    assert.deepEqual(delivered.notDelivered, {});
+    assert.deepEqual(notDeliveredMap(delivered.notDelivered), {});
 
     // Both granted blobs presented at each other's label: the family was
     // authorized and failed to open, which stays a coordinate error.
     const document = requestFor([BODY]);
-    const family = document.sealed.periodKeys[GROUP];
-    [family[T0], family[T1]] = [family[T1], family[T0]];
+    const [t0Seal, t1Seal] = [T0, T1].map((period) =>
+      keyAt(document.sealed.periodKeys, { accessGroup: GROUP, period }),
+    );
+    setKeyAt(document.sealed.periodKeys, { accessGroup: GROUP, period: T0 }, t1Seal);
+    setKeyAt(document.sealed.periodKeys, { accessGroup: GROUP, period: T1 }, t0Seal);
     const failed = await engine.unlock(new DcaRequest(document), registration);
-    assert.deepEqual(failed.periodKeys, {});
-    assert.deepEqual(Object.keys(failed.errors).sort(), [`${GROUP}|${T0}`, `${GROUP}|${T1}`]);
-    assert.deepEqual(failed.notDelivered, {});
+    assert.deepEqual(periodKeyMap(failed.periodKeys), {});
+    assert.deepEqual(Object.keys(errorMap(failed.errors)).sort(), [
+      `${GROUP}|${T0}`,
+      `${GROUP}|${T1}`,
+    ]);
+    assert.deepEqual(notDeliveredMap(failed.notDelivered), {});
   });
 
   test("a family presented only through a content-key source is never named", async () => {
@@ -1319,7 +1428,7 @@ describe("not-delivered family reports", () => {
       notDeliveredReport: "partial",
     });
     const result = await engine.unlock(new DcaRequest(requestFor([BODY])), registration);
-    assert.deepEqual(result.notDelivered, { [GROUP]: { reason: "denied" } });
+    assert.deepEqual(notDeliveredMap(result.notDelivered), { [GROUP]: { reason: "denied" } });
   });
 
   for (const setting of [{}, { notDeliveredReport: "none" }]) {
@@ -1331,7 +1440,7 @@ describe("not-delivered family reports", () => {
         ...setting,
       });
       const result = await partial.unlock(new DcaRequest(requestFor([BODY])), registration);
-      assert.deepEqual(result.notDelivered, {});
+      assert.deepEqual(notDeliveredMap(result.notDelivered), {});
 
       const denied = issuerEngine({ accessPolicy: policyAnswering(() => ({})), ...setting });
       asked.length = 0;
@@ -1374,11 +1483,15 @@ describe("not-delivered family reports", () => {
         ...(source === undefined ? {} : { periodCapabilitySource: source }),
       });
       const result = await engine.unlock(new DcaRequest(requestFor([BODY])), registration);
-      assert.deepEqual(result.contentKeys, {}, "the denied content-name coordinate is omitted");
-      assert.deepEqual(result.periodKeys, {});
+      assert.deepEqual(
+        contentKeyMap(result.contentKeys),
+        {},
+        "the denied content-name coordinate is omitted",
+      );
+      assert.deepEqual(periodKeyMap(result.periodKeys), {});
       assert.deepEqual(result.capabilities, []);
-      assert.deepEqual(result.errors, {});
-      assert.deepEqual(result.notDelivered, { [GROUP]: { reason } });
+      assert.deepEqual(errorMap(result.errors), {});
+      assert.deepEqual(notDeliveredMap(result.notDelivered), { [GROUP]: { reason } });
       assert.deepEqual(asked, [], "the no-key result reaches no opening key");
     }
   });

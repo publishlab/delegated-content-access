@@ -6,6 +6,7 @@ const VALIDATOR =
   'node --experimental-test-isolation="${DCA_NODE_TEST_ISOLATION:-process}" --test --test-reporter=spec --test-reporter-destination=stdout --test-reporter=./test-tools/test-verdict-reporter.mjs --test-reporter-destination=stderr test-contract/contract-runner-validation.test.js';
 const REFERENCE_BASE = "npm run test:contract:reference:base";
 const FIXTURE_ENDPOINT = "npm run test:contract:fixture:issuer-endpoint";
+const REFERENCE_HTML_WRITER = "npm run test:contract:reference:html-writer";
 const REFERENCE_BROWSER_ORIGIN = "npm run test:contract:reference:issuer-browser-origin";
 
 /**
@@ -89,8 +90,14 @@ export function assertContractManifestScriptCoverage(manifest, packageJson) {
     );
   }
   if (
+    scripts["test:contract:reference:html-writer"] !==
+    "npm run test:contract:html-writer -- test-contract/html-writer/bindings/reference-html-writer-binding.js"
+  ) {
+    throw new Error("test:contract:reference:html-writer does not select the HTML-writer binding");
+  }
+  if (
     aggregate !==
-    `${VALIDATOR} && ${REFERENCE_BASE} && ${FIXTURE_ENDPOINT} && ${REFERENCE_BROWSER_ORIGIN}`
+    `${VALIDATOR} && ${REFERENCE_BASE} && ${FIXTURE_ENDPOINT} && ${REFERENCE_BROWSER_ORIGIN} && ${REFERENCE_HTML_WRITER}`
   ) {
     throw new Error(
       "test:contract is not the allowed validator, reference, fixture and selected-profile chain",

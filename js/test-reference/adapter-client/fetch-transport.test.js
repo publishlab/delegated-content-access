@@ -6,6 +6,7 @@ import { createFetchTransport } from "../../adapter-client/fetchTransport.js";
 import { createDeliveryClient } from "../../integration-client/createDeliveryClient.js";
 import { world, PUB, BODYTEXT } from "../../test-lib/fixtures/wire-policy-world.js";
 import { ISSUER_NAME, UNLOCK_URL } from "../../demo/scenarios/fixtures.js";
+import { issuerBlockOf } from "../../test-lib/helpers/inspect.js";
 
 const context = { origin: PUB };
 const json = (value) =>
@@ -227,7 +228,7 @@ test("real Fetch rejection suppresses conditional B but visits independent C", a
   const { dcaData, sealedContent } = await fixture.render({ periodKeySupply: null });
   const names = [ISSUER_NAME, "backup_issuer", "independent_issuer"];
   for (const name of names.slice(1))
-    dcaData.issuerData[name] = structuredClone(dcaData.issuerData[ISSUER_NAME]);
+    dcaData.issuerData.push({ ...structuredClone(issuerBlockOf(dcaData)), issuerName: name });
   const sent = [];
   const cause = new TypeError("network failed after possible POST");
   const transport = createFetchTransport({
@@ -263,7 +264,10 @@ test("real Fetch rejection suppresses conditional B but visits independent C", a
 test("whole-acquisition abort stops the route walk before independent routes", async () => {
   const fixture = await world();
   const { dcaData, sealedContent } = await fixture.render({ periodKeySupply: null });
-  dcaData.issuerData.independent_issuer = structuredClone(dcaData.issuerData[ISSUER_NAME]);
+  dcaData.issuerData.push({
+    ...structuredClone(issuerBlockOf(dcaData)),
+    issuerName: "independent_issuer",
+  });
   const controller = new AbortController();
   const cause = new DOMException("cancelled", "AbortError");
   let calls = 0;

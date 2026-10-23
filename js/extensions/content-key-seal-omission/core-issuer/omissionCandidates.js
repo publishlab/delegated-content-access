@@ -34,16 +34,25 @@
 //
 // Every candidate is a trial: a candidate that will not open lets the next
 // one try, and the item reports one failure only when every eligible candidate
-// is spent. A trial costs a key import and an AEAD open, and the processor
-// counts no candidate at admission, so this module spends them only on
+// is spent. A trial costs a key import and an AEAD open, and admission bounds raw candidate entries, and this module spends trials only on
 // candidates that could be a wrap of the item: a content name the format
-// admits, and a nonce and wrapped key in their one admitted spelling at the v1
-// widths. Distinct material at one `(accessGroup, t)` stays an alternative,
+// admits, and a wrapped key in its one admitted spelling at the v1 width. No
+// candidate carries a nonce: `unwrap` derives it from the verified render, the
+// policy's contentName, the candidate's coordinate and the omission AAD
+// (`js/core-shared/contentKeyWrapNonce.js`), and a carried `nonce` member is
+// ignored. Distinct material at one `(accessGroup, t)` stays an alternative,
 // because only the AEAD check tells a valid wrap from a corrupted one, and the
 // first one to arrive may be either. Material identical to one already listed
-// for the item at that coordinate is the same trial, so it is listed once.
-// Request byte bounds, not this listing, limit how many distinct trials one
-// request can ask for.
+// for the item at that coordinate is the same trial, so it is listed once. The
+// same holds for the sealed period records the request carries: each distinct
+// record at a coordinate is its own trial, since array position says nothing
+// about which one the publisher sealed.
+//
+// On the wire a candidate is one `boundCandidates` record, `{contentName,
+// accessGroup, period, key, bind}`, and a sealed period key is one
+// `sealed.periodKeys` record, `{accessGroup, period, key}`. This module names
+// the period `t` inside, the way base's `open` takes its coordinate.
+// Admission bounds raw candidate entries separately from request bytes.
 //
 // This module reads a decision member of its own with the same grammar the base
 // engine reads `periodGrants` under, and holds its own copy of that reader. The
@@ -51,13 +60,16 @@
 // selected period-key view instead, so it never reaches the sibling
 // chain-key extension.
 
+import { admitOmissionCandidates } from "./omissionAdmission.js";
 import { binaryStringBytes } from "../../../core-shared/binaryStrings.js";
-import { decrypt, NONCE_BYTES, TAG_BYTES } from "../../../core-shared/aead.js";
+import { decrypt, TAG_BYTES } from "../../../core-shared/aead.js";
+import { contentKeyWrapNonce } from "../../../core-shared/contentKeyWrapNonce.js";
 import { BIND_DELIMITER } from "../../../core-shared--publisher-issuer/bind.js";
 import { dcaError } from "../../../core-shared/errors.js";
 import { isAccessGroup, isContentName } from "../../../core-shared/names.js";
 import { isPeriodKeyLabel } from "../../../core-shared/periodLabels.js";
-import { own, setOwn } from "../../../core-shared/wire.js";
+import { own } from "../../../core-shared/wire.js";
+import { sealedCandidates } from "../../../core-shared--client-issuer/DcaRequest.js";
 import { isBoundEntry, omissionBindAad } from "../core-shared/omissionBind.js";
 
 /** A wrapped v1 content key: its 16 bytes and the AES-GCM tag. */
@@ -74,7 +86,7 @@ const WRAPPED_KEY_BYTES = 16 + TAG_BYTES;
  *
  * @typedef {object} OmissionCandidate
  * @property {{ accessGroup: string, t: string }} coordinate
- * @property {() => Promise<Uint8Array|null>} [periodKey]
+ * @property {() => Promise<Uint8Array|readonly Uint8Array[]|null>} [periodKey]
  * @property {unknown} [sealed]
  * @property {(material: Uint8Array, renderId: string) => Promise<Uint8Array>} unwrap
  */
@@ -85,13 +97,16 @@ const WRAPPED_KEY_BYTES = 16 + TAG_BYTES;
  * request carrying no sealed contentKeys would otherwise not present at all.
  *
  * @param {any} request
- * @returns {{ contentNames: string[], accessGroups: string[] }}
+ * @returns {{ contentNames: string[], accessGroups: string[], sourcePeriodCoordinates: Record<string, string[]> }}
  */
 export function presentedCoordinates(request) {
   const candidates = boundCandidatesOf(request);
   return {
-    contentNames: Object.keys(candidates),
+    contentNames: [...candidates.keys()],
     accessGroups: [...candidateLabelsOf(candidates).keys()],
+    sourcePeriodCoordinates: Object.fromEntries(
+      [...candidateLabelsOf(candidates)].map(([group, periods]) => [group, [...periods].sort()]),
+    ),
   };
 }
 
@@ -103,13 +118,14 @@ export function presentedCoordinates(request) {
  * @param {object} unlock
  * @param {any} unlock.request
  * @param {any} unlock.decision - the whole policy answer; this module reads its own member
- * @param {((accessGroup: string, t: string) => Promise<Uint8Array|null>)|null} unlock.periodKeyFor -
+ * @param {((accessGroup: string, t: string) => Promise<Uint8Array|readonly Uint8Array[]|null>)|null} unlock.periodKeyFor -
  *   the period-key view already selected for the authenticated registration
  * @returns {Map<string, OmissionCandidate[]>}
  */
 export function candidatesFor({ request, decision, periodKeyFor }) {
   const candidates = boundCandidatesOf(request);
-  const sealedPeriods = request.sealedPeriodKeys ?? {};
+  // accessGroup to period to the distinct sealed values presented there.
+  const sealedPeriods = sealedCandidates(request.sealedPeriodKeys, ["accessGroup", "period"]);
 
   // Which `(accessGroup, t)` this caller's granted items may be opened
   // through. It is the policy's decision and never the candidate's label. A
@@ -127,10 +143,7 @@ export function candidatesFor({ request, decision, periodKeyFor }) {
 
   /** @type {Map<string, OmissionCandidate[]>} */
   const byContentName = new Map();
-  for (const contentName of Object.keys(candidates)) {
-    const forwarded = own(candidates, contentName);
-    if (!Array.isArray(forwarded) || forwarded.length === 0) continue;
-
+  for (const [contentName, forwarded] of candidates) {
     /** @type {OmissionCandidate[]} */
     const tries = [];
     /** @type {Set<string>} */
@@ -142,30 +155,23 @@ export function candidatesFor({ request, decision, periodKeyFor }) {
       if (!isBoundEntry(candidate)) continue;
 
       const accessGroup = own(candidate, "accessGroup");
-      const t = own(candidate, "t");
-      const nonce = own(candidate, "nonce");
+      const t = own(candidate, "period");
       const wrapped = own(candidate, "key");
-      if (
-        typeof accessGroup !== "string" ||
-        typeof t !== "string" ||
-        typeof nonce !== "string" ||
-        typeof wrapped !== "string"
-      )
+      if (typeof accessGroup !== "string" || typeof t !== "string" || typeof wrapped !== "string")
         continue;
       const at = `${accessGroup}${BIND_DELIMITER}${t}`;
       if (!allowedCoordinates.has(at)) continue;
 
-      // Both strings arrived on the wire, so they are read in the one
-      // spelling section 2.2 admits, at the widths a v1 wrap has. Anything
+      // The wrapped key arrived on the wire, so it is read in the one
+      // spelling section 2.2 admits, at the width a v1 wrap has. Anything
       // else could not be this item's wrap and costs no trial.
-      const nonceBytes = binaryStringBytes(nonce);
       const wrappedBytes = binaryStringBytes(wrapped);
-      if (nonceBytes?.length !== NONCE_BYTES || wrappedBytes?.length !== WRAPPED_KEY_BYTES)
-        continue;
-      // Each string is the one admitted spelling of its bytes, so equal
-      // strings are equal material. Neither contains a ".", so the last two
-      // fields of this key are always the nonce and the wrapped key.
-      const material = `${at}.${nonce}.${wrapped}`;
+      if (wrappedBytes?.length !== WRAPPED_KEY_BYTES) continue;
+      // The nonce follows from the coordinate, so the coordinate and the
+      // wrapped key are the whole material. The key is the one admitted
+      // spelling of its bytes and contains no ".", so equal keys here are
+      // equal material.
+      const material = `${at}.${wrapped}`;
       if (listed.has(material)) continue;
       listed.add(material);
 
@@ -173,22 +179,26 @@ export function candidatesFor({ request, decision, periodKeyFor }) {
        * @param {Uint8Array} periodKey
        * @param {string} renderId
        */
-      const unwrap = (periodKey, renderId) =>
-        decrypt(
-          periodKey,
-          nonceBytes,
-          wrappedBytes,
-          omissionBindAad({ renderId, contentName, accessGroup, t }),
-        );
+      const unwrap = async (periodKey, renderId) => {
+        // One AAD value serves the nonce transcript and GCM.
+        const aad = omissionBindAad({ renderId, contentName, accessGroup, t });
+        const nonce = await contentKeyWrapNonce({ renderId, contentName, accessGroup, t, aad });
+        if (nonce === null) {
+          throw dcaError("binding_failed", "an omission candidate has no derivable wrap nonce");
+        }
+        return decrypt(periodKey, nonce, wrappedBytes, aad);
+      };
 
-      // The issuer's own period key first, then the period blob the request
-      // forwarded. The caller opens the second one; this module opens
-      // neither.
+      // The issuer's own period key first, then each period blob the request
+      // forwarded at this coordinate. The caller opens those; this module
+      // opens neither. With no blob forwarded here, one sealed trial with
+      // nothing to open still runs, so base's opener reports that miss.
       const coordinate = { accessGroup, t };
       if (periodKeyFor !== null) {
         tries.push({ coordinate, periodKey: () => periodKeyFor(accessGroup, t), unwrap });
       }
-      tries.push({ coordinate, sealed: own(own(sealedPeriods, accessGroup), t), unwrap });
+      const blobs = sealedPeriods.get(accessGroup)?.get(t) ?? [undefined];
+      for (const sealed of blobs) tries.push({ coordinate, sealed, unwrap });
     }
 
     byContentName.set(contentName, tries);
@@ -197,21 +207,27 @@ export function candidatesFor({ request, decision, periodKeyFor }) {
 }
 
 /**
- * The forwarded candidates of one request, container-checked. A request built by
- * another client, or by a base client, carries none. A content name the format
- * refuses names no item this issuer could grant, so its candidates stay inert
- * rather than reaching the policy as a presented name.
+ * The forwarded candidate records of one request, grouped by content name in
+ * first-appearance order. A request built by another client, or by a base
+ * client, carries none, and an absent member carries none. A malformed container or record identity
+ * refuses the request before policy.
+ * Non-record elements name no item and remain inert.
  *
  * @param {any} request
- * @returns {Record<string, unknown>}
+ * @returns {Map<string, unknown[]>}
  */
 function boundCandidatesOf(request) {
+  admitOmissionCandidates(request);
   const value = own(request.toObject(), "boundCandidates");
-  /** @type {Record<string, unknown>} */
-  const candidates = {};
-  if (value === null || typeof value !== "object" || Array.isArray(value)) return candidates;
-  for (const contentName of Object.keys(value)) {
-    if (isContentName(contentName)) setOwn(candidates, contentName, own(value, contentName));
+  /** @type {Map<string, unknown[]>} */
+  const candidates = new Map();
+  if (!Array.isArray(value)) return candidates;
+  for (const record of value) {
+    const contentName = own(record, "contentName");
+    if (!isContentName(contentName)) continue;
+    const forwarded = candidates.get(contentName) ?? [];
+    forwarded.push(record);
+    candidates.set(contentName, forwarded);
   }
   return candidates;
 }
@@ -221,18 +237,16 @@ function boundCandidatesOf(request) {
  * the client's words for where its blobs sit, so they are the set a policy
  * decision is clamped against and never the decision itself.
  *
- * @param {Record<string, unknown>} candidates
+ * @param {Map<string, unknown[]>} candidates
  * @returns {Map<string, Set<string>>}
  */
 function candidateLabelsOf(candidates) {
   /** @type {Map<string, Set<string>>} */
   const labels = new Map();
-  for (const contentName of Object.keys(candidates)) {
-    const forwarded = own(candidates, contentName);
-    if (!Array.isArray(forwarded)) continue;
+  for (const forwarded of candidates.values()) {
     for (const candidate of forwarded) {
       const accessGroup = own(candidate, "accessGroup");
-      const t = own(candidate, "t");
+      const t = own(candidate, "period");
       if (!isBoundEntry(candidate) || !isAccessGroup(accessGroup) || !isPeriodKeyLabel(t)) continue;
       let periods = labels.get(accessGroup);
       if (!periods) {
@@ -252,7 +266,7 @@ function candidateLabelsOf(candidates) {
  * group visibility nor a label outside that presented set widens the grant.
  *
  * @param {{ accessGroup: string, periods: string[] }[]} grants
- * @param {Record<string, unknown>} sealedPeriods
+ * @param {Map<string, Map<string, unknown[]>>} sealedPeriods
  * @param {Map<string, Set<string>>} candidateLabels
  * @returns {Set<string>}
  */
@@ -271,11 +285,8 @@ function sourceCoordinates(grants, sealedPeriods, candidateLabels) {
   /** @type {Set<string>} */
   const coordinates = new Set();
   for (const [accessGroup, authorized] of labelsByGroup) {
-    const sealed = own(sealedPeriods, accessGroup);
     const presented = new Set([
-      ...(sealed !== null && typeof sealed === "object" && !Array.isArray(sealed)
-        ? Object.keys(sealed).filter(isPeriodKeyLabel)
-        : []),
+      ...[...(sealedPeriods.get(accessGroup)?.keys() ?? [])].filter(isPeriodKeyLabel),
       ...(candidateLabels.get(accessGroup) ?? []),
     ]);
     for (const t of authorized) {

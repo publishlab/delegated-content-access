@@ -54,7 +54,7 @@ test("a conditional retry replays only the outstanding authorized route identiti
   const retried = posted[2].request;
   assert.deepEqual(retried.requestedWidgets, { bodytext: ["w1", "w2"] });
   assert.deepEqual(retried.sealed.widgetSeeds, { bodytext: "seed-bodytext" });
-  assert.deepEqual(retried.sealed.contentKeys, {});
+  assert.deepEqual(retried.sealed.contentKeys, []);
 });
 
 test("a failed route without retry authority leaves nothing for the conditional route", async () => {
@@ -107,8 +107,8 @@ test("projectEligibleIdentities composes base and extension selection", () => {
     resourceJWT: JWT,
     keyId: "kid",
     sealed: {
-      contentKeys: { bodytext: "item" },
-      periodKeys: { premium: { t1: "p" } },
+      contentKeys: [{ contentName: "bodytext", key: "item" }],
+      periodKeys: [{ accessGroup: "premium", period: "t1", key: "p" }],
       widgetSeeds: { bodytext: "seed-bodytext", headline: "seed-headline" },
     },
     periodGeometry: { chainsPerDay: 2, periodMinutes: 60 },
@@ -129,7 +129,7 @@ test("projectEligibleIdentities composes base and extension selection", () => {
     issuerName: A,
     resourceJWT: JWT,
     keyId: "kid",
-    sealed: { contentKeys: {}, widgetSeeds: { headline: "seed-headline" } },
+    sealed: { contentKeys: [], widgetSeeds: { headline: "seed-headline" } },
     requestedWidgets: { headline: ["w3"] },
   });
   // Without the seam an extension member cannot be projected at all.

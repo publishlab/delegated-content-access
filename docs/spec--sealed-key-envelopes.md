@@ -38,7 +38,7 @@ different delivered-key width requires a new suite or specification version,
 not another v1 profile. The default seal algorithm is selected by the issuer public-key registration;
 no algorithm or width identifier is carried inside the binary envelope. The
 optional [compact ECDH profile](spec-profile--compact-ecdh.md) adds an explicit
-procedure selector beside the sealed maps while retaining the same keypair.
+procedure selector beside the sealed collections while retaining the same keypair.
 
 The current algorithms are:
 
@@ -180,8 +180,7 @@ The binary envelope is:
 | Offset | Length | Field |
 | --- | --- | --- |
 | 0 | 65 octets | Fresh ephemeral P-256 public key, uncompressed |
-| 65 | 12 octets | Fresh AES-GCM nonce |
-| 77 | 32 octets | Encrypted 16-octet payload and 16-octet GCM tag |
+| 65 | 32 octets | Encrypted 16-octet payload and 16-octet GCM tag |
 
 For each envelope, the publisher MUST generate a fresh ephemeral P-256 keypair
 using its cryptographic implementation and MUST NOT reuse an ephemeral keypair
@@ -192,14 +191,17 @@ needed. The publisher and issuer use those 32 octets directly as the
 AES-256-GCM key. A producer or issuer implementing this algorithm MUST NOT
 apply a KDF.
 
-For each envelope, the publisher MUST sample a fresh 12-octet nonce from a
-cryptographic random-bit generator. It MUST NOT deliberately or
-deterministically repeat a nonce under the same AES-GCM key. The publisher
-encrypts the payload with that nonce and the complete BIND octets as AES-GCM
-`additionalData`.
+The AES-GCM nonce MUST be twelve zero octets. It is implicit and MUST NOT
+be carried in the envelope. The publisher encrypts the payload with that nonce
+and the complete BIND octets as AES-GCM `additionalData`. The fresh ephemeral
+keypair requirement applies to every envelope, including different values at
+the same coordinate: reusing a pair with the same recipient repeats the AES key
+and nonce. Different BIND values do not make that reuse safe.
 
-The decoded envelope MUST be exactly 109 octets. The issuer MUST refuse any
-other decoded length before it opens the envelope. The first octet of the
+The decoded envelope MUST be exactly 97 octets (130 unpadded base64url
+characters). The issuer MUST refuse any other decoded length before it opens
+the envelope; no carried-nonce format
+fallback is permitted. The first octet of the
 65-octet public-point field MUST be `0x04`; the issuer MUST refuse any other
 value before importing the point, even if its cryptographic implementation
 accepts that encoding. It MUST import the received

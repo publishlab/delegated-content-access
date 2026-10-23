@@ -17,12 +17,17 @@ import {
 const GEOMETRY = { chainsPerDay: 2, periodMinutes: 15 };
 const NOW = { capturedAtMs: Date.parse("2025-10-23T14:20:00Z") };
 
-/** @param {Record<string,string>} family @param {string[]} targets */
+/** @param {{ cutoff: string, key: string }[]} family @param {string[]} targets */
 function request(family, targets = []) {
   return new DcaRequest({
-    sealed: { contentKeys: {}, chainKeys: { premium: family } },
+    sealed: {
+      contentKeys: [],
+      chainKeys: family.map(({ cutoff, key }) => ({ accessGroup: "premium", cutoff, key })),
+    },
     periodGeometry: GEOMETRY,
-    ...(targets.length ? { requestedPeriodKeys: { premium: targets } } : {}),
+    ...(targets.length
+      ? { requestedPeriodKeys: [{ accessGroup: "premium", periods: targets }] }
+      : {}),
   });
 }
 
@@ -30,7 +35,7 @@ test("off-grid-only supply establishes no authorized-unavailable condition, even
   const grant = { accessGroup: "premium", futurePeriodCount: 1, authorizePeriod: () => true };
   for (const targets of [[], ["251023T1415"]]) {
     const answer = chainKeyCapabilitySource().selection(
-      request({ "251023T1407": "AQ" }, targets),
+      request([{ cutoff: "251023T1407", key: "AQ" }], targets),
       NOW,
       [grant],
     )("premium");
@@ -47,7 +52,7 @@ test("period projection rechecks authorization after an admitted article target"
     authorizePeriod: (t) => t === targets[0],
   };
   const answer = chainKeyCapabilitySource({ representation: "period-keys" }).selection(
-    request({ "251023T2345": "AQ" }, targets),
+    request([{ cutoff: "251023T2345", key: "AQ" }], targets),
     NOW,
     [grant],
   )("premium");
@@ -141,7 +146,7 @@ test("encoder refuses a same-window cutoff above its supplied capability", () =>
       encode({
         kind: "chain-keys",
         accessGroup: "premium",
-        entries: { "251023T1500": base64urlEncode(new Uint8Array(16)) },
+        entries: [{ t: "251023T1500", key: base64urlEncode(new Uint8Array(16)) }],
         interpretation: {
           geometry: GEOMETRY,
           selections: [{ suppliedT: "251023T1415", cutoffT: "251023T1500" }],
@@ -153,7 +158,7 @@ test("encoder refuses a same-window cutoff above its supplied capability", () =>
 
 test("independent horizon miss never falls through to the ordinary sorted-label grant", () => {
   const source = { selection: () => () => ({ miss: true }), capabilities: async function* () {} };
-  const select = requireChainRepresentation(source).selection(request({}), NOW, []);
+  const select = requireChainRepresentation(source).selection(request([]), NOW, []);
   assert.deepEqual(select("premium", 1, { authorizePeriod: () => true }), { unavailable: true });
   assert.deepEqual(select("premium", 1, {}), { miss: true });
 });

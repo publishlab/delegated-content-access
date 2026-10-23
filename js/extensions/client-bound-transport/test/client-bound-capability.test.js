@@ -14,6 +14,7 @@ import { writeMarkupDelivery } from "../../../adapter-publisher/writeMarkupDeliv
 import { domOver } from "../../../test-lib/helpers/domOver.js";
 import { encrypt } from "../../../core-shared/aead.js";
 import { contentAadOctets } from "../../../test-reference/support/contentAadOctets.js";
+import { contentKeyWrapNonceOctets } from "../../../test-reference/support/contentKeyWrapNonceOctets.js";
 import { base64urlEncode, utf8Encode, utf8Decode } from "../../../core-shared/codec.js";
 import { ContentKeyResolver } from "../../../core-client/ContentKeyResolver.js";
 
@@ -679,34 +680,47 @@ for (const profile of [ecdhProfile, rsaProfile]) {
           version: "1",
           resource,
           resourceJWT: `${encode({ alg: "ES256", kid: "signer" })}.${encode(resource)}.c2ln`,
-          issuerData: {
-            [issuer]: {
+          issuerData: [
+            {
+              issuerName: issuer,
               keyId: "key",
               sealed: {
-                contentKeys: { a: "AA" },
-                ...(kind === "periodKey" ? { periodKeys: { [group]: { [t]: "AA" } } } : {}),
+                contentKeys: [{ contentName: "a", key: "AA" }],
+                ...(kind === "periodKey"
+                  ? { periodKeys: [{ accessGroup: group, period: t, key: "AA" }] }
+                  : {}),
               },
             },
-          },
-          contentData: {
-            a: {
+          ],
+          contentData: [
+            {
+              contentName: "a",
               contentType: "text/plain",
               nonce: base64urlEncode(nonce),
               ...(kind === "periodKey"
                 ? {
-                    keys: {
-                      [group]: [
-                        {
-                          t,
-                          nonce: base64urlEncode(nonce),
-                          key: base64urlEncode(await encrypt(period, nonce, key)),
-                        },
-                      ],
-                    },
+                    keys: [
+                      {
+                        accessGroup: group,
+                        period: t,
+                        key: base64urlEncode(
+                          await encrypt(
+                            period,
+                            contentKeyWrapNonceOctets({
+                              renderId: resource.renderId,
+                              contentName: "a",
+                              accessGroup: group,
+                              t,
+                            }),
+                            key,
+                          ),
+                        ),
+                      },
+                    ],
                   }
                 : {}),
             },
-          },
+          ],
         };
         const markup = writeMarkupDelivery({
           dcaData: raw,
@@ -771,8 +785,8 @@ for (const profile of [ecdhProfile, rsaProfile]) {
                   transport: { method: profile.METHOD, ...sealer.transport },
                   keys:
                     kind === "contentKey"
-                      ? { contentKeys: { a: value } }
-                      : { periodKeys: { [group]: { [t]: value } } },
+                      ? { contentKeys: [{ contentName: "a", key: value }] }
+                      : { periodKeys: [{ accessGroup: group, period: t, key: value }] },
                 },
               };
             },
@@ -797,3 +811,43 @@ for (const profile of [ecdhProfile, rsaProfile]) {
     }
   }
 }
+
+test("exported stock offer helpers reject private material and project only public members", async () => {
+  for (const [profile, algorithm, usages] of [
+    [ecdhProfile, { name: "ECDH", namedCurve: "P-256" }, ["deriveKey"]],
+    [
+      rsaProfile,
+      {
+        name: "RSA-OAEP",
+        modulusLength: 2048,
+        publicExponent: new Uint8Array([1, 0, 1]),
+        hash: "SHA-256",
+      },
+      ["encrypt", "decrypt"],
+    ],
+  ]) {
+    const pair = await subtle.generateKey(algorithm, true, usages);
+    const publicKey = await subtle.exportKey("jwk", pair.publicKey);
+    const privateKey = await subtle.exportKey("jwk", pair.privateKey);
+    delete privateKey.key_ops;
+    for (const value of [null, undefined, true, "key", [], privateKey]) {
+      assert.throws(() => profile.publicKeyForOffer(value), { code: "bad_config" });
+    }
+    for (const member of PRIVATE_JWK_MEMBERS) {
+      assert.throws(() => profile.publicKeyForOffer({ ...publicKey, [member]: "private" }), {
+        code: "bad_config",
+      });
+    }
+    const offered = profile.publicKeyForOffer({ ...publicKey, hostNote: "not offered" });
+    const allowed =
+      profile === rsaProfile
+        ? ["kty", "n", "e", "alg", "use", "ext", "key_ops"]
+        : ["kty", "crv", "x", "y"];
+    assert.ok(Object.keys(offered).every((member) => allowed.includes(member)));
+    if (profile === rsaProfile) {
+      assert.deepEqual(offered.key_ops, publicKey.key_ops);
+      assert.notEqual(offered.key_ops, publicKey.key_ops);
+      assert.equal(offered.n, publicKey.n);
+    } else assert.equal(offered.x, publicKey.x);
+  }
+});

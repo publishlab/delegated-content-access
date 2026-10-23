@@ -1,4 +1,6 @@
 // @ts-check
+import { omissionProcessorOptions } from "../core-issuer/omissionAdmission.js";
+
 import test from "node:test";
 import assert from "node:assert/strict";
 import { createDeliveryClient } from "../../../integration-client/createDeliveryClient.js";
@@ -7,10 +9,7 @@ import { IssuerProcessor } from "../../../core-issuer/IssuerProcessor.js";
 import { UnlockEndpoint } from "../../../ports/UnlockEndpoint.js";
 import { utf8Decode } from "../../../core-shared/codec.js";
 import { OmittingSealer } from "../core-publisher/OmittingSealer.js";
-import {
-  OmissionRequestBuilder,
-  omissionPresentedContentNames,
-} from "../core-client/OmissionRequestBuilder.js";
+import { OmissionRequestBuilder } from "../core-client/OmissionRequestBuilder.js";
 import { omissionContentKeyResolverFactory } from "../core-client/BoundContentKeyResolver.js";
 import { omissionIssuerEngine } from "../core-issuer/omissionIssuerEngine.js";
 import { EXTENSION_NAME } from "../core-shared/omissionBind.js";
@@ -51,11 +50,7 @@ async function fixture({
       }),
       {
         periodKeyInput: true,
-        selectedExtensions: [EXTENSION_NAME],
-        extensionCoordinates: {
-          [EXTENSION_NAME]: (request) =>
-            omissionPresentedContentNames(request.toObject()).length > 0,
-        },
+        ...omissionProcessorOptions(),
       },
     ),
   );
@@ -64,7 +59,8 @@ async function fixture({
     reader: {
       dcaData: page,
       publisherOrigin: PUB,
-      extract: (name) => page.sealedContent[name] ?? null,
+      extract: (name) =>
+        page.sealedContent.find((/** @type {any} */ r) => r.contentName === name)?.content ?? null,
     },
     issuerName: ISSUER_A,
     unlockUrl: "https://issuer.example/unlock",
@@ -81,7 +77,7 @@ async function fixture({
           return {
             status: 200,
             contentType: "application/json",
-            body: { keys: {}, notDelivered: { premium: { reason: "denied" } } },
+            body: { keys: {}, notDelivered: [{ accessGroup: "premium", reason: "denied" }] },
           };
         const { response } = await endpoint.handleDocument(JSON.stringify(request), registration);
         return { ...response, contentType: "application/json" };
@@ -96,8 +92,8 @@ test("bound candidates alone request and open an item key using the issuer's ent
   const result = await client.unlock(["bodytext"]);
   assert.equal(result.skipped, undefined);
   assert.equal(posts.length, 1);
-  assert.deepEqual(posts[0].sealed, { contentKeys: {} });
-  assert.ok(posts[0].boundCandidates.bodytext.length > 0);
+  assert.deepEqual(posts[0].sealed, { contentKeys: [] });
+  assert.ok(posts[0].boundCandidates.some((candidate) => candidate.contentName === "bodytext"));
   assert.equal(utf8Decode((await client.openLocal("bodytext")).bytes), ARTICLE);
 });
 

@@ -67,7 +67,8 @@ const REPRESENTATION_MEMBERS = ["bytes", "contentType", "contentEncodings"];
  *   when left out. On, the origin may also be `http` on a loopback host.
  * @property {{ now: () => Date }} clock - read once per render. Required.
  * @property {{ bytes: (n: number) => Uint8Array }} random - every renderId,
- *   content key and nonce. Required. A production publisher supplies a
+ *   content key, plus random bytes requested by selected contributions. Required.
+ *   The ordinary ECDH envelope uses an implicit zero nonce. A production publisher supplies a
  *   cryptographic random-bit generator; a fixed or deterministic stream is a
  *   test fixture for reproducing vectors, not a conforming deployment source
  *   (docs/spec--sealed-key-envelopes.md).
@@ -133,13 +134,26 @@ const REPRESENTATION_MEMBERS = ["bytes", "contentType", "contentEncodings"];
  * @property {string[]} [accessGroups]
  */
 
-/** @typedef {PublishTextItem|PublishBytesItem|PublishRepresentationItem} PublishItem */
+/**
+ * Extension fields are declared by the integrator, never inferred from an item.
+ * @template [Fields={}]
+ * @typedef {(PublishTextItem|PublishBytesItem|PublishRepresentationItem) & Fields} PublishItem
+ */
 
 /**
+ * @template [Fields={}]
  * @typedef {object} PublishInput
  * @property {string} resourceId
  * @property {object} data - publisher metadata the resource JWT signs
- * @property {PublishItem[]} items
+ * @property {PublishItem<Fields>[]} items
+ */
+
+/**
+ * A declared publisher composition. The integrator must also supply matching
+ * runtime contributions: this type does not prove they were configured.
+ * Unknown-member and extension validation still run for every publish.
+ * @template [Fields={}]
+ * @typedef {{ publish: (render: PublishInput<Fields>) => Promise<import('../core-publisher/Sealer.js').Render> }} Publisher
  */
 
 /**
@@ -193,7 +207,7 @@ function isRecord(value) {
  * @param {PublisherEntryConfig} config
  * @param {...import('../core-publisher/publisherComposition.js').PublisherContribution} contributions -
  *   the selected extensions, in the order their planner wrappers nest
- * @returns {{ publish: (render: PublishInput) => Promise<import('../core-publisher/Sealer.js').Render> }}
+ * @returns {Publisher}
  */
 export function createPublisher(
   config = /** @type {PublisherEntryConfig} */ ({}),

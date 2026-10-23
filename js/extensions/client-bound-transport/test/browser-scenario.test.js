@@ -8,6 +8,7 @@ import { run } from "../../../demo/browser/scenario.js";
 import { CONTENT_NAME } from "../../../demo/scenarios/fixtures.js";
 import * as clientBoundEcdh from "../ecdhP256.js";
 import { clientBoundKeyCapability } from "../core-client/clientBoundKeyCapability.js";
+import { keyAt } from "../../../test-reference/support/namedRecords.js";
 
 test("client-bound: the client offers a key, the issuer wraps to it, and the cache holds handles", async () => {
   const trace = await run(
@@ -26,7 +27,7 @@ test("client-bound: the client offers a key, the issuer wraps to it, and the cac
   assert.equal(unlock.transportMode, "client-bound");
   assert.equal(Object.hasOwn(unlock.response.transport, "mode"), false);
   assert.deepEqual(
-    Object.keys(unlock.response.keys.contentKeys[CONTENT_NAME]),
+    Object.keys(keyAt(unlock.response.keys.contentKeys, { contentName: CONTENT_NAME })),
     ["key", "nonce"],
     "a wrapped pair rather than the bytes",
   );

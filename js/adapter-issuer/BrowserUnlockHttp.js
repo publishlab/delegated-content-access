@@ -37,9 +37,55 @@ import { parseBearerAuthorization } from "./parseBearerAuthorization.js";
 
 const METHODS = ["OPTIONS", "POST"];
 
+// RFC 9110 Sections 5.6.2, 5.6.4, 5.6.6 and 8.3.1. Scan once:
+// empty parameter slots and optional whitespace must not create ambiguous
+// backtracking. Quoted commas are data, while unquoted field lists are refused.
+const MEDIA_TOKEN_CHARACTER = /^[!#$%&'*+.^_`|~0-9A-Za-z-]$/;
+
 /** @param {unknown} value */
 function isJsonContentType(value) {
-  return typeof value === "string" && /^\s*application\/json\s*(?:;.*)?$/i.test(value);
+  if (typeof value !== "string") return false;
+  const field = value;
+  let at = 0;
+  const whitespace = () => {
+    while (field[at] === " " || field[at] === "\t") at++;
+  };
+  const token = () => {
+    const start = at;
+    while (at < field.length && MEDIA_TOKEN_CHARACTER.test(field[at])) at++;
+    return at > start;
+  };
+  whitespace();
+  if (field.slice(at, at + 16).toLowerCase() !== "application/json") return false;
+  at += 16;
+  while (true) {
+    whitespace();
+    if (at === field.length) return true;
+    if (field[at++] !== ";") return false;
+    whitespace();
+    if (at === field.length || field[at] === ";") continue;
+    if (!token() || field[at++] !== "=") return false;
+    if (field[at] !== '"') {
+      if (!token()) return false;
+      continue;
+    }
+    at++;
+    let closed = false;
+    while (at < field.length) {
+      let octet = field.charCodeAt(at++);
+      if (octet === 34) {
+        closed = true;
+        break;
+      }
+      if (octet === 92) {
+        if (at === field.length) return false;
+        octet = field.charCodeAt(at++);
+      }
+      if (!(octet === 9 || (octet >= 32 && octet <= 126) || (octet >= 128 && octet <= 255)))
+        return false;
+    }
+    if (!closed) return false;
+  }
 }
 
 /** @typedef {{ status: number, headers?: Record<string, string>, body?: any }} HttpResponse */

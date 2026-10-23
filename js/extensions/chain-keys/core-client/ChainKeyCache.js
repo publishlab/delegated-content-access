@@ -60,7 +60,10 @@ import {
  */
 export const MAX_MEMOIZED_PERIOD_KEYS = 288;
 
-/** @typedef {(entry: import('../../../adapter-client/periodKeyEviction.js').EvictionEntry, context: { now: Date }) => boolean} EvictionPolicy */
+/** The coordinates this cache passes to its host's eviction callback.
+ * @typedef {{ pool: 'chain', t: string, kind: 'period-key'|'chain-key' }} ChainKeyEvictionEntry
+ */
+/** @typedef {(entry: ChainKeyEvictionEntry, context: { now: Date }) => boolean} EvictionPolicy */
 /** @typedef {{ id: number, cutoffT: string, position: number, key: Uint8Array, filed: number }} Retained */
 /** @typedef {{ key: Uint8Array, filed: number, sources: Set<number> }} MemoizedPeriodKey */
 /** @typedef {{ kind: string, parts: ReadonlyArray<string> }} CachePartition */

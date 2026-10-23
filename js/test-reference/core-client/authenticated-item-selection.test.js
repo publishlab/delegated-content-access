@@ -14,6 +14,7 @@ import { ResponseAssociation } from "../../core-client/ResponseAssociation.js";
 import { openContent } from "../../core-client/openContent.js";
 import { encrypt } from "../../core-shared/aead.js";
 import { base64urlEncode, utf8Encode } from "../../core-shared/codec.js";
+import { contentKeyWrapNonceOctets } from "../support/contentKeyWrapNonceOctets.js";
 
 const ISSUER = "issuer_example";
 const T = "251023T1500";
@@ -21,6 +22,12 @@ const PERIOD = new Uint8Array(16).fill(17);
 const WRONG = new Uint8Array(16).fill(18);
 const RIGHT = new Uint8Array(16).fill(19);
 const NONCE = new Uint8Array(12).fill(9);
+const WRAP_NONCE = contentKeyWrapNonceOctets({
+  renderId: "AAAAAAAAAAAAAAAAAAAAAA",
+  contentName: "bodytext",
+  accessGroup: "premium",
+  t: T,
+});
 
 /** @param {object} payload */
 function compactJwt(payload) {
@@ -38,24 +45,23 @@ async function world() {
         origin: "https://signed.example",
         renderId: "AAAAAAAAAAAAAAAAAAAAAA",
       }),
-      issuerData: {
-        [ISSUER]: { keyId: "k1", unlockUrl: "https://issuer.example/unlock", sealed: {} },
-      },
-      contentData: {
-        bodytext: {
+      issuerData: [
+        { issuerName: ISSUER, keyId: "k1", unlockUrl: "https://issuer.example/unlock", sealed: {} },
+      ],
+      contentData: [
+        {
+          contentName: "bodytext",
           contentType: "text/html",
           nonce: base64urlEncode(NONCE),
-          keys: {
-            premium: [
-              {
-                t: T,
-                nonce: base64urlEncode(NONCE),
-                key: base64urlEncode(await encrypt(PERIOD, NONCE, RIGHT)),
-              },
-            ],
-          },
+          keys: [
+            {
+              accessGroup: "premium",
+              period: T,
+              key: base64urlEncode(await encrypt(PERIOD, WRAP_NONCE, RIGHT)),
+            },
+          ],
         },
-      },
+      ],
     },
     { publisherOrigin: "https://publisher.example" },
   );
@@ -77,13 +83,13 @@ async function world() {
   const application = await resolver.applyResponse(
     page,
     ISSUER,
-    { keys: { contentKeys: { bodytext: base64urlEncode(WRONG) } } },
+    { keys: { contentKeys: [{ contentName: "bodytext", key: base64urlEncode(WRONG) }] } },
     new ResponseAssociation(page, ISSUER, {
       version: page.version,
       issuerName: ISSUER,
       resourceJWT: page.resourceJWT,
       keyId: page.keyIdFor(ISSUER),
-      sealed: { contentKeys: { bodytext: "AA" } },
+      sealed: { contentKeys: [{ contentName: "bodytext", key: "AA" }] },
     }),
   );
   assert.equal(application.accepted, 1);

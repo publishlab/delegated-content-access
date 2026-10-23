@@ -157,7 +157,7 @@ test("production opens each fixed seed envelope to the seed the vectors derive",
     };
     const aad = await contentNameSeedAad(binding, CHAIN);
     assert.equal(hex(aad), envelope.aadHex, `${contentName} AAD`);
-    assert.equal(Buffer.from(envelope.sealed, "base64url").length, 125);
+    assert.equal(Buffer.from(envelope.sealed, "base64url").length, 113);
     const seed = await openSeed(envelope.sealed, privateKey, aad);
     assert.equal(hex(seed), envelope.seedHex, `${contentName} opened seed`);
     const derived = await contentNameSeed(

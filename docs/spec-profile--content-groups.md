@@ -64,7 +64,7 @@ profiles remain separately selected when their ordinary routes are composed.
 Nothing is newly mandatory for a baseline-only deployment. A selecting publisher
 implements seed supply and connectors; a selecting issuer implements seed
 opening, whole-prefix authorization and authorized item-key recovery; and a
-selecting client implements the `contentGroups` response and connector opening. The ordinary setup uses two
+selecting client implements the `contentGroupKeys` response and connector opening. The ordinary setup uses two
 12-hour windows and hourly periods. Top-level `periodGeometry` is shared with
 ordinary period and chain routes in the same delivery. It carries the exact pair
 `periodMinutes` and `chainsPerDay` when this profile is selected; no group or
@@ -77,8 +77,8 @@ profile negotiation inferred from an unsigned field.
 
 Items may use connectors, ordinary item-key/period-key routes, or both for the
 same fresh content key. An ordinary-only item may omit `connectors`. A connector-only item omits ordinary
-`keys`; a present ordinary `keys` map follows the data format and is non-empty.
-Empty `keys: {}` is not a completeness marker. Every protected item MUST have
+`keys`; a present ordinary `keys` collection follows the data format and is non-empty.
+Empty `keys: []` is not a completeness marker. Every protected item MUST have
 at least one complete issuer-mediated route: an applicable connector whose
 content name has a seed for the render window at some issuer, or an
 independently complete ordinary route. An item with neither route is refused at
@@ -113,8 +113,9 @@ with geometry 2/60, so the render period is `261014T1500` in window
 `261014T1200`. The vector file holds the full seed envelopes, token and bodies;
 placeholders below state decoded widths.
 
-Each item carries a named `connectors` map containing only its applicable
-content groups. No root group dictionary or positional ordering is needed.
+Each item carries a `connectors` collection of `{group, connector}` records
+for only its applicable content groups. No root group dictionary or positional
+ordering is needed.
 The issuer authorizes requested names from verified claims or issuer-held
 state; connector names grant nothing.
 
@@ -124,35 +125,39 @@ state; connector names grant nothing.
   "resourceJWT": "<signed resource claims>",
   "periodGeometry": { "chainsPerDay": 2, "periodMinutes": 60 },
   "renderPeriod": "261014T1500",
-  "contentData": {
-    "bodytext": {
+  "contentData": [
+    {
+      "contentName": "bodytext",
       "contentType": "text/plain",
-      "connectors": {
-        "politics": "cJzy9BAORNe7WOicm5bW9w",
-        "sports": "Okl5vn3NeLvXrOKNPvavtg"
-      }
+      "connectors": [
+        { "group": "politics", "connector": "cJzy9BAORNe7WOicm5bW9w" },
+        { "group": "sports", "connector": "Okl5vn3NeLvXrOKNPvavtg" }
+      ]
     },
-    "headline": {
+    {
+      "contentName": "headline",
       "contentType": "text/plain",
-      "connectors": { "politics": "OAYiZWTBOh4vZlYIeZfCaA" }
+      "connectors": [{ "group": "politics", "connector": "OAYiZWTBOh4vZlYIeZfCaA" }]
     },
-    "shoppingAd": {
+    {
+      "contentName": "shoppingAd",
       "contentType": "text/plain",
-      "connectors": { "shopping": "MOKIZiqdUlGNzqTXNMXhaA" }
+      "connectors": [{ "group": "shopping", "connector": "MOKIZiqdUlGNzqTXNMXhaA" }]
     }
-  },
-  "issuerData": {
-    "issuerA": {
+  ],
+  "issuerData": [
+    {
+      "issuerName": "issuerA",
       "keyId": "a1",
       "sealed": {
-        "contentWindowSeeds": {
-          "bodytext": { "261014T1200": "<seed envelope (125 bytes)>" },
-          "headline": { "261014T1200": "<seed envelope (125 bytes)>" },
-          "shoppingAd": { "261014T1200": "<seed envelope (125 bytes)>" }
-        }
+        "contentWindowSeeds": [
+          { "contentName": "bodytext", "windowStart": "261014T1200", "key": "<seed envelope (113 bytes)>" },
+          { "contentName": "headline", "windowStart": "261014T1200", "key": "<seed envelope (113 bytes)>" },
+          { "contentName": "shoppingAd", "windowStart": "261014T1200", "key": "<seed envelope (113 bytes)>" }
+        ]
       }
     }
-  }
+  ]
 }
 ```
 
@@ -160,32 +165,44 @@ The members this profile adds:
 
 ```text
 renderPeriod = canonical period label of the render
-contentData.<contentName>.connectors.<group> = connector16
-issuerData.<issuer>.sealed.contentWindowSeeds.<contentName>.<windowStart> = seedEnvelope125
+contentData[].connectors[] = {group, connector: connector16}
+issuerData[].sealed.contentWindowSeeds[] = {contentName, windowStart, key: seedEnvelope113}
 ```
 
 Rules for these members:
 
-- `connectors` is a named map from group name to a canonical 16-byte connector.
-  It holds between one and `maxGroups` groups. An absent member means an
-  ordinary-only item. An empty map, an array or any other value is malformed,
-  never read as "no route": the item has no connector route. A selecting client
-  MUST NOT relay a connector route from any part of that malformed map, but
-  independently valid sibling items retain their routes. Producer validation
-  remains strict. Shared delivery/root admission and aggregate bounds are not
-  made item-local. Member order is immaterial.
+- `connectors` is a collection of `{group, connector}` records, each with a
+  canonical 16-byte connector. It holds between one and `maxGroups` raw
+  records. An absent member means an ordinary-only item. An empty array, a
+  value that is not an array, an element that is not a non-array object or a
+  record with an invalid `group` is malformed, never read as "no route": the
+  item has no connector route. A selecting client MUST NOT relay a connector
+  route from any part of that malformed collection, but independently valid
+  sibling items retain their routes. Producer validation remains strict. Shared
+  delivery/root admission and aggregate bounds are not made item-local. Record
+  order is immaterial. Several records for one group are candidate connectors
+  ([data format Section 2.3](spec--data-format.md#23-collections-of-named-records)).
 - A root `contentGroups` member is the retired indexed form. A selecting client
   relays no content-group request member for a delivery that carries it.
-- `contentWindowSeeds` maps each content name an issuer is entrusted with to
-  between one and `maxSeedWindows` aligned window starts. Each value is one seed
-  envelope for that issuer, content name and window. An issuer that receives
-  seeds is registered with an `ecdh-p256` opening key.
+- `contentWindowSeeds` holds `{contentName, windowStart, key}` records. Each
+  `key` is one seed envelope for that issuer, content name and window. Each
+  content name an issuer is entrusted with has between one and
+  `maxSeedWindows` raw records at aligned window starts. Several records at one
+  `(contentName, windowStart)` are candidate seeds. An issuer that receives
+  seeds is registered with an `ecdh-p256` opening key. An absent or empty
+  collection supplies no seed route. If the collection is not an array, or any
+  element is not a non-array object with an own valid `contentName`, nonempty string
+  `windowStart` and string `key`, a selecting client MUST NOT relay any seed
+  from that issuer's collection. This rule also applies with explicit local
+  narrowing. Independently valid ordinary routes and other issuer collections
+  survive; shared delivery/root admission and aggregate bounds retain their
+  scopes. Producer validation remains strict.
 - An issuer block lists only the content names entrusted to it. In the vector
   `issuerA` holds all three; a deployment can seal `shoppingAd` seeds to a
   retail issuer alone, and that issuer can then derive no `bodytext` or
   `headline` key.
 - Seeds derive group keys; recovering an item's random content key also requires
-  its connector. No duplicate sealed `contentKeys` entry is needed when a complete
+  its connector. No duplicate sealed `contentKeys` record is needed when a complete
   authorized connector route suffices.
 
 `renderPeriod` is the fixed sealing/connector coordinate, not an authorship
@@ -238,65 +255,89 @@ connector:
   "keyId": "a1",
   "resourceJWT": "<unchanged signed resource assertion>",
   "sealed": {
-    "contentKeys": {},
-    "contentWindowSeeds": {
-      "bodytext": { "261014T1200": "<seed envelope (125 bytes)>" },
-      "headline": { "261014T1200": "<seed envelope (125 bytes)>" },
-      "shoppingAd": { "261014T1200": "<seed envelope (125 bytes)>" }
-    }
+    "contentKeys": [],
+    "contentWindowSeeds": [
+      { "contentName": "bodytext", "windowStart": "261014T1200", "key": "<seed envelope (113 bytes)>" },
+      { "contentName": "headline", "windowStart": "261014T1200", "key": "<seed envelope (113 bytes)>" },
+      { "contentName": "shoppingAd", "windowStart": "261014T1200", "key": "<seed envelope (113 bytes)>" }
+    ]
   },
   "renderPeriod": "261014T1500",
   "periodGeometry": { "chainsPerDay": 2, "periodMinutes": 60 },
-  "requestedContentGroups": {
-    "bodytext": ["politics"],
-    "headline": ["politics"]
-  },
-  "requestedContentKeys": {
-    "shoppingAd": { "group": "shopping", "connector": "MOKIZiqdUlGNzqTXNMXhaA" }
-  }
+  "requestedContentGroups": [
+    { "contentName": "bodytext", "groups": ["politics"] },
+    { "contentName": "headline", "groups": ["politics"] }
+  ],
+  "requestedContentKeys": [
+    { "contentName": "shoppingAd", "group": "shopping", "connector": "MOKIZiqdUlGNzqTXNMXhaA" }
+  ]
 }
 ```
 
 The request members this profile adds:
 
 ```text
-request.sealed.contentWindowSeeds.<contentName>.<windowStart> = unchanged seed envelope
-request.requestedContentGroups.<contentName> = [group, ...]
-request.requestedContentKeys.<contentName> = {group, connector}
-request.requestedChainCutoffs.<windowStart> = cutoffLabel   (optional)
+request.sealed.contentWindowSeeds[] = {contentName, windowStart, key: unchanged seed envelope}
+request.requestedContentGroups[] = {contentName, groups: [group, ...]}
+request.requestedContentKeys[] = {contentName, group, connector}
+request.requestedChainCutoffs[] = {windowStart, cutoff}      (optional)
 request.renderPeriod, request.periodGeometry                 (copied from the delivery)
 ```
+
+Seed, requested-group and requested-cutoff records require their named own
+members and ignore unknown members under data format Section 2. Unknown members
+do not affect authorization and MUST NOT be relayed by clients. The expressly
+closed requested-item record below remains closed.
 
 - The client relays seed envelopes, the connector and the signed token
   unchanged. Only one issuer's source block is relayed, and its seed windows may
   be a subset of that block. `contentData`, connectors other than a requested
   item's and item masks are not relayed.
-- `requestedContentGroups` maps a content name to a nonempty list of unique
-  group names. Each name is a key of that item's `connectors` map. List order
-  does not change authorization. An explicit empty list is refused; a request
-  omits the content name instead.
-- `requestedContentKeys` maps a content name to the one group whose connector
-  the issuer recovers the ckey through. The member is `{group, connector}` with
-  exactly those two members and a canonical 16-byte connector.
+- `requestedContentGroups` holds `{contentName, groups}` records; `groups` is
+  a nonempty list of unique group names. Each name is the `group` of one of
+  that item's `connectors` records. List and record order do not change
+  authorization. An explicit empty list is refused; a request omits the content
+  name instead. Several records for one content name request the union of
+  their groups; a group named twice is requested once.
+- `requestedContentKeys` holds `{contentName, group, connector}` records with
+  exactly those three members and a canonical 16-byte connector. Each record is
+  one item route: the group whose connector the issuer recovers the ckey
+  through. Several records for one content name are alternative item routes
+  and may name the same or different groups. The issuer keeps each record's
+  `group` and `connector` together, tries every admitted route within its
+  existing work limits and returns each distinct recovered candidate ckey. The
+  routes grant only the requested item, never those groups' reusable keys.
 - Every requested content name carries a seed in `contentWindowSeeds`, and
   every seeded content name is requested. A requested content key needs the
   seed of its render window.
 - `requestedContentGroups` may be empty when `requestedContentKeys` asks an item.
   A request that selects no content-group route and no ordinary coordinate is
   refused.
-- `requestedChainCutoffs`, when present, maps supplied window starts to
-  canonical cutoff labels inside the same window. It selects that subset of
-  supplied windows and caps the cutoff of each; an empty map selects none. If
-  absent, issuer policy chooses cutoffs within the supplied windows.
-- `sealed.contentKeys` is an object and may be empty beside these members.
+- `requestedChainCutoffs`, when present, holds `{windowStart, cutoff}` records
+  whose `windowStart` is a supplied window start and whose `cutoff` is a
+  canonical label inside the same window. It selects that subset of supplied
+  windows and caps the cutoff of each; an empty array selects none. Several
+  records for one window start cap it at their lowest cutoff in label order;
+  array order never raises a ceiling. Every record's window MUST belong to
+  the union of seed windows actually supplied in this request; a window supplied
+  for one requested content name is sufficient. A record outside that union is
+  malformed and refuses before policy or opening, even beside a valid record.
+  If absent, issuer policy chooses cutoffs
+  within the supplied windows.
+- `sealed.contentKeys` is an array and may be empty beside these members.
   Ordinary keys for unresolved items may coexist.
+- Union and minimum are the normalization rules of these collections, not
+  readings of the former object form. Every label is admitted before
+  selection, and raw records and list entries count against the bounds before
+  the issuer merges them.
 
 Local narrowing that a client applies before it builds the request,
 such as selecting items or seed windows, never reaches the wire and grants
 nothing. By default a client asks every group of each needed, seeded item's
-connector map and also offers one item-key connector when this issuer supplies
-the render-window seed. It chooses the ASCII-lexically first group name for that
-item alternative; connector-map order does not affect the choice. The issuer
+`connectors` and also offers an item-key route when this issuer supplies
+the render-window seed. It chooses the ASCII-lexically first group name and
+offers every distinct connector candidate of that group for the item alternative;
+connector record order does not affect the choice. The issuer
 independently authorizes item keys, reusable capabilities, both, or neither.
 Offering a connector is not an entitlement or a requirement to grant that item.
 
@@ -307,9 +348,15 @@ item map with default groups selects group-only requests; an empty group map
 with explicit items selects item-only requests. A selected seed-window subset
 without the render window offers no automatic item route. The client MUST NOT
 invent a render-window seed or broaden a request to repair a missing item route.
-This default adds one connector per eligible needed item to uplink requests;
-publisher request-budget checks use the same projection. It changes no baseline
+Each candidate connector of the chosen group adds one requested item record.
+The raw projected records count against `maxItems`; publisher request-budget
+checks MUST use this same projection and bound. It changes no baseline
 support requirement or cryptographic construction.
+
+A client applying one local cutoff map to several issuers projects that map
+onto each request's relayed seed windows. A present map with no matching window
+MUST produce an empty requested-cutoff array; it MUST NOT become an absent
+member that delegates cutoff selection to policy.
 
 The issuer verifies and admits the JWT under core Section 4 in the selected
 publisher registration before opening-key use. The reference verification host
@@ -324,8 +371,8 @@ issuer mechanics; seed opening does not replace that handler.
 
 ### Admission order and refusal
 
-- The issuer counts raw request members against the bounds and checks their
-  shapes before signature verification. A count over a bound refuses with
+- The issuer counts raw request records and list entries against the bounds
+  and checks their shapes before signature verification. A count over a bound refuses with
   `too_many_entries`; a malformed member refuses with `binding_failed`.
 - A requested content name without a seed, or a seed for a content name the
   request does not ask, is malformed and refuses with `binding_failed` before
@@ -359,7 +406,7 @@ issuer mechanics; seed opening does not replace that handler.
   does not stop an independent route to another issuer.
 - A retired opening key is not such a refusal. The engine answers every seed
   opening under that key with `key_retired`. The issuer reports each authorized
-  grant whose seed it attempted in `contentGroups.errors` (see "Direct response
+  grant whose seed it attempted in `contentGroupKeys.errors` (see "Direct response
   and retention") and answers `200`, beside the base result's own per-coordinate
   `key_retired` entries.
 
@@ -409,14 +456,21 @@ render time. The policy answers grants of three kinds. The vector policy answers
   and future matching articles; otherwise the issuer refuses the grant.
 - A period grant MUST lie inside a requested content name and group, a supplied
   window and at or below that window's requested ceiling.
-- An item grant MUST name a requested content key. The issuer derives the
-  period key of the requested group at the request's `renderPeriod` from the
-  render-window seed, pads it with the verified `renderId` and the content
-  name, XORs the relayed connector, and returns the resulting candidate key.
+- An item grant MUST name a requested content key. For each requested item
+  route, the issuer derives the period key of the route's group at the
+  request's `renderPeriod` from the render-window seed, pads it with the
+  verified `renderId` and the content name, XORs that route's connector, and
+  returns each distinct resulting candidate key.
   The issuer MUST authorize the item independently of the connector's presence
   or value. It does not verify that this candidate equals the published ckey.
 - A grant outside the request, a duplicate grant or a grant over its bound is a
   policy fault, never a wider answer.
+- Several seed records for one content name and window are candidate sources.
+  The issuer opens each one that an authorized grant uses, under the refusal
+  rules above, and derives from each; distinct results become candidate keys at
+  the grant's coordinate.
+  Policy answers once per logical grant, not once per candidate, and a host
+  meters that grant once.
 
 A changed, valid-width connector can yield a wrong candidate key. That key
 cannot authenticate the genuine encrypted item. The client MUST authenticate
@@ -433,40 +487,66 @@ veto or shared accounting, such as one metering count across both routes,
 implements it in both ports using shared trusted policy. This profile defines
 no precedence between the two decisions.
 
+When neither policy authorizes any coordinate in the exchange, core Section
+6.2 governs complete denial. This profile adds no `notDelivered` family report,
+so a content-group-only exchange with no authorized coordinate is refused with
+HTTP `4xx`, rather than an empty `200`. An empty content-group grant list does
+not veto an independently authorized base result or a no-key core result that
+core Section 6.2 permits. A result carrying only authorized errors remains
+`200` as specified below.
+
 ## Direct response and retention
+
+### Reading the key records
+
+`contentGroupKeys` separates these content-name-scoped grants from ordinary
+access-group grants under `keys`. Both constructions deliver period keys and
+chain keys. Inside `contentGroupKeys`, the subsection names the delivered key kind;
+the fields of each record identify the key's coordinates, and `key` holds the
+delivered key:
+
+- `chainKeys`: `contentName`, e.g. `bodytext`; `group`, e.g. `politics`;
+  `cutoff`, the chain cutoff, e.g. `261014T1800`.
+- `periodKeys`: `contentName`, e.g. `headline`; `group`, e.g. `politics`;
+  `period`, e.g. `261014T1500`.
+- `contentKeys`: `contentName`, e.g. `shoppingAd`.
+
+Thus the `chainKeys` record with `bodytext`, `politics` and `261014T1800`
+identifies a chain key for the `politics` group of `bodytext`, delivered at
+cutoff 18:00 UTC. The date label is a coordinate, not a separate key
+identifier. A `contentKeys` record needs only the content name because it
+delivers that rendered item's content key. Omit subsections and records for
+which no key or error is returned, under the admission rules below. Record
+order and JSON member order carry no coordinate meaning; the field names do.
 
 The vector answer carries one key of each kind:
 
 ```json
 {
-  "keys": { "contentKeys": {} },
-  "contentGroups": {
-    "chainKeys": {
-      "bodytext": {
-        "politics": {
-          "261014T1800": "y-W5pEt7JcGJXpTV_JNbug"
-        }
-      }
-    },
-    "periodKeys": {
-      "headline": { "politics": { "261014T1500": "f5_xFO8-no-F7IpVyrkI1g" } }
-    },
-    "contentKeys": { "shoppingAd": "wMHCw8TFxsfIycrLzM3Ozw" }
-  }
+    "keys": { "contentKeys": [] },
+    "contentGroupKeys": {
+        "chainKeys": [
+            { "contentName": "bodytext", "group": "politics", "cutoff": "261014T1800", "key": "y-W5pEt7JcGJXpTV_JNbug" }
+        ],
+        "periodKeys": [
+            { "contentName": "headline", "group": "politics", "period": "261014T1500", "key": "f5_xFO8-no-F7IpVyrkI1g" }
+        ],
+        "contentKeys": [{ "contentName": "shoppingAd", "key": "wMHCw8TFxsfIycrLzM3Ozw" }]
+    }
 }
 ```
 
 ```text
-response.contentGroups.chainKeys.<contentName>.<group>.<cutoffLabel> = key
-response.contentGroups.periodKeys.<contentName>.<group>.<periodLabel> = key
-response.contentGroups.contentKeys.<contentName> = key
-response.contentGroups.errors.chainKeys.<contentName>.<group>.<cutoffLabel> = {"error": "key_retired"}
-response.contentGroups.errors.periodKeys.<contentName>.<group>.<periodLabel> = {"error": "key_retired"}
-response.contentGroups.errors.contentKeys.<contentName> = {"error": "key_retired"}
+response.contentGroupKeys.chainKeys[] = {contentName, group, cutoff, key}
+response.contentGroupKeys.periodKeys[] = {contentName, group, period, key}
+response.contentGroupKeys.contentKeys[] = {contentName, key}
+response.contentGroupKeys.errors.chainKeys[] = {contentName, group, cutoff, error: "key_retired"}
+response.contentGroupKeys.errors.periodKeys[] = {contentName, group, period, error: "key_retired"}
+response.contentGroupKeys.errors.contentKeys[] = {contentName, error: "key_retired"}
 ```
 
-Each chain member is named by its cutoff label and carries only the delivered
-key value, as a period member does. The client derives its window and position
+Each chain record names its cutoff label in `cutoff` and carries only the
+delivered key value in `key`, as a period record does. The client derives its window and position
 from that label and the complete geometry captured in its associated request;
 no numeric position or outer key wrapper is transmitted. In direct transport
 the value is the canonical base64url encoding of the 16 key bytes; client-bound
@@ -476,47 +556,62 @@ The issuer MUST NOT return a seed, including through an additional response memb
 extension-point admission rules; client rejection cannot undo disclosure of a
 seed already sent.
 
-`contentGroups.errors` reports a scoped grant whose seed opening found the
+`contentGroupKeys.errors` reports a scoped grant whose seed opening found the
 selected opening key retired. For example, under a retired key:
 
 ```json
 {
-  "contentGroups": {
+  "contentGroupKeys": {
     "errors": {
-      "chainKeys": {
-        "bodytext": {
-          "politics": { "261014T1800": { "error": "key_retired" } }
-        }
-      },
-      "periodKeys": {
-        "headline": {
-          "politics": { "261014T1500": { "error": "key_retired" } }
-        }
-      },
-      "contentKeys": { "shoppingAd": { "error": "key_retired" } }
+      "chainKeys": [
+        { "contentName": "bodytext", "group": "politics", "cutoff": "261014T1800", "error": "key_retired" }
+      ],
+      "periodKeys": [
+        { "contentName": "headline", "group": "politics", "period": "261014T1500", "error": "key_retired" }
+      ],
+      "contentKeys": [{ "contentName": "shoppingAd", "error": "key_retired" }]
     }
   }
 }
 ```
 
-- Its three maps mirror the key sections at the same coordinate depth. A chain
-  error is named by the cutoff label the issuer would have served, the lower of
-  the policy cutoff and the requested ceiling; a period error by its period
-  label; an item error by its content name.
-- Each leaf is exactly `{"error": "key_retired"}`, with no message or other
-  member, and carries no key material. An empty map is omitted, and `errors`
-  with it.
+- Its three collections mirror the key sections: each error record carries the
+  coordinate fields of that kind's key records, an `error` member and no `key`.
+  A chain error names the cutoff label the issuer would have served, the lower
+  of the policy cutoff and the requested ceiling; a period error its period
+  label; an item error its content name.
+- Each record has exactly those coordinate fields and `"error": "key_retired"`,
+  with no message or other member, and carries no key material. An empty
+  collection is omitted, and `errors` with it. The issuer emits one error
+  record per coordinate; a client that finds several for one coordinate uses
+  the last whole record
+  ([data format Section 2.3](spec--data-format.md#23-collections-of-named-records)).
 - Only a coordinate the policy authorized and the issuer attempted carries an
   error. A denied or unrequested coordinate carries neither key nor error.
 - No other error code appears here. A seed that does not open or a malformed seed
   still refuses the whole exchange. This profile adds
   no core error-coordinate spelling and no unavailable-family report.
-- One coordinate carries a key or an error, never both: an item by content
+- One coordinate carries keys or an error, never both: an item by content
   name, a period by content name, group and label, and a chain by content name,
-  group and window, which holds at most one chain key or chain error.
-- Error entries count with key entries toward `maxResponseMembers`. A period
-  error counts toward `maxPeriodKeysPerContentGroup`, and a chain error toward
-  `maxWindowsPerGroup`, with the keys of its content name and group.
+  group and window. That chain window has one selected cutoff, which carries
+  either chain keys or one chain error. Several chain-key records at the
+  selected cutoff are candidate keys; records at different cutoffs in one
+  window conflict. Several period-key or content-key records at one coordinate
+  are likewise candidate keys.
+- Error records and every raw key record, candidates included, count toward
+  `maxResponseMembers`. Raw period records and period errors count toward
+  `maxPeriodKeysPerContentGroup` for their content name and group. Chain
+  records and chain errors count toward `maxWindowsPerGroup` by distinct window
+  of their content name and group, so several candidates at one cutoff use one
+  window.
+- Before answering, the issuer MUST apply these output bounds to its actual
+  candidate and error records. An answer over a bound refuses the whole
+  exchange with `too_many_entries`, including otherwise successful base keys;
+  it is not trimmed. This is a selected-profile finite output processing-limit
+  refusal under core Section 8 and HTTP binding Section 3.4: HTTP 4xx, with no
+  conditional fallback. This output refusal is distinct from the policy fault
+  for an invalid trusted grant list and from the client's member-scoped
+  response refusal.
 - An answer that carries only errors is a `200` result, not a denial. Successful
   base and scoped siblings remain beside it. Retirement belongs to the
   request's selected opening key, so every seed opening of that exchange reports
@@ -527,25 +622,25 @@ issuer and key selection, response association, resource assertion, geometry,
 requested content names, groups, items, supplied windows and cutoff ceilings.
 The request relays `renderPeriod` and the complete `periodGeometry` pair; the
 issuer MUST NOT echo either in its response for this profile. Admission of
-the `contentGroups` member is atomic:
+the `contentGroupKeys` member is atomic:
 
-- The client counts raw entries against `maxResponseMembers` before reading
-  any entry.
+- The client counts raw records against `maxResponseMembers` before reading
+  any record.
 - Before opening any key, the client validates and captures the complete geometry
   pair from the immutable request associated with this response. A missing, malformed
   or unsupported pair refuses the member. The same captured pair governs every
   coordinate and cache partition throughout admission and retention, including
   after asynchronous opening. Response metadata and later delivery changes MUST
   NOT supply or override geometry. This applies to direct and client-bound responses.
-- Every chain or period member sits inside a requested content name, group and
+- Every chain or period record sits inside a requested content name, group and
   supplied window, at or below its requested ceiling. The client derives each
-  member's position from its label under the captured request geometry.
+  record's position from its label under the captured request geometry.
 - `contentKeys` holds only requested items. Every key is canonical 16 bytes.
-- `errors` holds only the three error maps at their sections' depths, each
-  leaf exactly `{"error": "key_retired"}`. Every error sits inside the captured
+- `errors` holds only the three error collections, each record exactly its
+  kind's coordinate fields and `"error": "key_retired"`. Every error sits inside the captured
   names, groups, windows and ceilings, or names a requested item, under the
   same rules as a key. No coordinate carries both a key and an error, and the
-  raw count includes error entries.
+  raw count includes error records.
 - Only then does any key open, under the kind its section fixes. The member
   reaches retention only when every key opened.
 - An admitted error delivers no key, enters no cache and promotes nothing. The
@@ -554,7 +649,7 @@ the `contentGroups` member is atomic:
   conditional route eligible, and an independent route still runs.
 
 A smaller authorized result is valid. Invalid supported carrier data MUST NOT
-partly update retention for this member. Refusal of `contentGroups` does not
+partly update retention for this member. Refusal of `contentGroupKeys` does not
 invalidate independently admissible ordinary keys or other supported members;
 it supplies no capability or route-control permission from the refused member.
 Common response association, representation and selected transport checks still
@@ -563,7 +658,7 @@ association is consumed once, even on refusal. No additional publisher or render
 remain reusable within their captured scope.
 
 A recovered item ckey is held for that publisher, render and item, as a base
-`keys.contentKeys` entry is. Chain and period keys enter dedicated caches that
+`keys.contentKeys` record is. Chain and period keys enter dedicated caches that
 are not the ordinary period-key or chain-key caches. A cache partition is the
 construction identifier, trusted publisher origin, `chainsPerDay`,
 `periodMinutes`, content name and group. It names no issuer: seeds take no issuer
@@ -588,8 +683,10 @@ older held keys. A persistent store applies the same bounds when it loads.
 To open an item, the client reads its connector routes and the render
 coordinate, asks its period-key cache and then its chain-key cache for keys of
 each route's partition at `renderPeriod`, pads each key and XORs the connector.
-Each result is a candidate; body AES-GCM authentication decides which one is
-the ckey. In the vector, the T18 `bodytext` chain key derives the T15 period key
+Each result is a candidate, including results from several candidate keys or
+connector records; body AES-GCM authentication decides which one is the ckey.
+A failed body opening does not hide another admitted candidate or route.
+In the vector, the T18 `bodytext` chain key derives the T15 period key
 `9d24cf2fc780660e0ca66294e4b161c1`, whose pad recovers the `bodytext` ckey
 `a0a1a2a3a4a5a6a7a8a9aaabacadaeaf`.
 
@@ -599,20 +696,20 @@ Under client-bound transport the issuer wraps every content-group key entry
 under the one response transport, bound to the key kind its section fixes
 ([response binding Section 6](spec--response-binding.md#6-client-bound-common-representation)):
 
-- `contentGroups.chainKeys`: `contentGroupChainKey`, opened to 16 raw bytes.
-- `contentGroups.periodKeys`: `contentGroupPeriodKey`, opened to 16 raw bytes.
-- `contentGroups.contentKeys`: `contentKey`, opened like a base content key.
+- `contentGroupKeys.chainKeys`: `contentGroupChainKey`, opened to 16 raw bytes.
+- `contentGroupKeys.periodKeys`: `contentGroupPeriodKey`, opened to 16 raw bytes.
+- `contentGroupKeys.contentKeys`: `contentKey`, opened like a base content key.
 
 The client derives from chain and period keys, so no non-extractability claim
 applies to them. Direct fallback follows the response-binding rules: a
 client-bound composition that does not accept direct fallback opens nothing from
-a direct `contentGroups` member or an unwrapped content-group key. A
+a direct `contentGroupKeys` member or an unwrapped content-group key. A
 transport that cannot open raw keys, such as an RSA-OAEP key pair without
 `decrypt` usage, is refused at setup.
 
-Error records under `contentGroups.errors` are not key entries. The issuer sends
-them unwrapped, its transport admits only the declared error maps with fixed
-`key_retired` leaves beside the declared key sections, and the client admits
+Error records under `contentGroupKeys.errors` are not key entries. The issuer sends
+them unwrapped, its transport admits only the declared error collections with
+fixed `key_retired` records beside the declared key sections, and the client admits
 them without opening anything.
 
 ## Bounds and names
@@ -620,19 +717,22 @@ them without opening anything.
 There is no protocol-wide catalogue or group-count ceiling. These are trusted
 reference defaults, not grants or wire-negotiated capabilities:
 
-- `maxItems` (64) bounds every per-exchange content-name map: issuer seed maps,
-  requested group and item maps, and publication inputs.
-- `maxGroups` (1,024) bounds the groups of one content name.
-- `maxSeedWindows` (2) bounds the seed windows per issuer and content name.
+- `maxItems` (64) bounds the content names of every per-exchange collection:
+  the content names of issuer seed records, the raw records of requested group
+  and item collections, and publication inputs.
+- `maxGroups` (1,024) bounds the groups of one content name: its raw connector
+  records and its raw requested group names across records.
+- `maxSeedWindows` (2) bounds the raw seed records per issuer and content name.
 - `maxWindowsPerGroup` (2) bounds chain windows per content name and group.
 - `maxPeriodKeysPerContentGroup` (48) counts period results per content name and
   group, never across another content name.
-- `maxResponseMembers` (2,048) bounds policy grants and raw response entries,
-  error entries included.
+- `maxResponseMembers` (2,048) bounds policy grants and raw response records,
+  error records included.
 - `maxCachedWindows` (4,096), `maxRivalsPerWindow` (4) and `maxTrialsPerItem`
   (4,096) bound client retention and opening trials.
 
-Count raw entries before filtering, policy and expensive derivation. Limits are
+Count raw records and list entries before merging, filtering, policy and
+expensive derivation. Limits are
 finite positive safe integers. Unknown limit names are refused, including the
 retired `maxScopes` and `maxPeriodKeysPerGroup`. Producer and consumer
 deployments must align capacities. Raising a local limit does not change the
@@ -662,8 +762,9 @@ Stock chain-profile bounds remain unchanged. This dedicated carrier does not
 claim to be a stock 16-member chain response. Names use the stock letter-led
 ASCII grammar, at most 64 characters. Refuse noncanonical binary strings and
 raw-width errors. Shared geometry, ordinary routes and unsupported fields keep
-their owning profiles' rules. Protocol entries are own JSON members: a name such
-as `__proto__` or `constructor` is a name like any other.
+their owning profiles' rules. Protocol fields are own JSON members, and identity
+values are plain strings: a name such as `toString` or `constructor` is a name
+like any other, also when an implementation files records in an internal lookup.
 
 ## Byte transcripts
 
@@ -787,11 +888,29 @@ keys are 16 raw bytes. A period key is not used directly as the XOR pad.
 ## Seed envelope and issuer custody
 
 Selected seed envelope algorithm: `ecdh-p256-content-name-seed`.
-It uses fresh P-256 ephemeral ECDH, the 32-byte shared x-coordinate as an
-AES-256-GCM key, a fresh 12-byte nonce, and a 32-byte seed payload with a
-16-byte tag. Layout: 65-byte uncompressed public point, 12-byte nonce,
-48-byte encrypted seed/tag = 125 bytes. The stock 109-byte, 16-byte-payload
-key envelope stays unchanged. Do not infer envelope algorithms from length.
+For each envelope the publisher MUST generate a fresh ephemeral P-256 keypair
+and MUST NOT reuse one across envelopes, including rival seeds at the same
+coordinate. The 32-byte shared x-coordinate is the AES-256-GCM key, with no
+KDF. The AES-GCM nonce MUST be twelve zero bytes; it is implicit and MUST NOT
+be carried. The payload is the 32-byte seed with a 16-byte tag. Layout:
+65-byte uncompressed public point, then 48-byte encrypted seed/tag = 113 bytes
+(151 unpadded base64url characters). The fresh keypair makes the zero nonce
+safe: each agreement encrypts one seed. Reusing a pair with the same recipient
+repeats the AES key and nonce, and a different AAD does not make that reuse
+safe. Resending bytes already sealed is not a new encryption.
+
+The issuer MUST refuse a decoded envelope of any other length before it opens
+it. That includes the former 125-byte layout, which carried a 12-byte nonce
+between point and ciphertext; there is no fallback to it. The stock 97-byte,
+16-byte-payload key envelope has the same construction for its smaller
+payload. Do not infer envelope algorithms from length.
+
+Publisher and issuer update together. An issuer on this procedure refuses
+deliveries sealed in the former 125-byte layout: republish them, or open them
+with a separately maintained implementation of the former procedure. Clients
+relay seed envelopes unchanged and never open them. The AAD, seed derivation,
+chain and period keys, connectors and wire members are unchanged.
+
 The issuer opens a seed envelope with the opening key its trusted registration
 selects, under that key entry's `ecdh-p256` procedure.
 

@@ -258,10 +258,16 @@ test("unknown during delivery retrieval pauses issuer dispatch until the same re
       globalThis.__contextControl.releaseDelivery("resumed");
     });
     const waitingForContext = await page.waitForFunction(
-      () => globalThis.__contextRuns.resumed.phase === "issuer",
+      () =>
+        globalThis.__contextRuns.resumed.phase === "issuer" ||
+        globalThis.__contextRuns.resumed.settled,
       { timeout: 15000 },
     );
     await waitingForContext.dispose();
+    const pausedRun = await page.evaluate(() => globalThis.__contextRuns.resumed);
+    assert.equal(pausedRun.error, null, pausedRun.error ?? "delivery preparation succeeded");
+    assert.equal(pausedRun.phase, "issuer");
+    assert.equal(pausedRun.settled, false, "the issuer boundary is paused, not retired");
     assert.deepEqual(responses, [], "unknown context prevented issuer dispatch");
     assert.equal(await page.$eval("#article-body", (target) => target.textContent), "Locked.");
     await page.evaluate(() => globalThis.__contextControl.publish(2, true));
@@ -307,12 +313,17 @@ test("an issuer response received during unknown waits before key opening or DOM
     await page.evaluate(() => globalThis.__contextControl.publish(1, false));
     releaseResponse();
     const waitingToApply = await page.waitForFunction(
-      () => globalThis.__contextRuns.gap.phase === "apply-response",
+      () =>
+        globalThis.__contextRuns.gap.phase === "apply-response" ||
+        globalThis.__contextRuns.gap.settled,
       { timeout: 15000 },
     );
     await waitingToApply.dispose();
     assert.deepEqual(responses, ["dispatched"]);
     const waitingState = await page.evaluate(() => globalThis.__contextRuns.gap);
+    assert.equal(waitingState.error, null, waitingState.error ?? "response processing succeeded");
+    assert.equal(waitingState.phase, "apply-response");
+    assert.equal(waitingState.settled, false, "response application is paused, not retired");
     assert.equal(waitingState.openingStarts, 0, "unknown context has not opened plaintext");
     assert.equal(await page.$eval("#article-body", (target) => target.textContent), "Locked.");
 

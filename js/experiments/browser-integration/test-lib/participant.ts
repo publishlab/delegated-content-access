@@ -81,7 +81,7 @@ export function installParticipant(
   }
   const selected = registry.lookup<ContentHandler>(articleKey);
   const connection = selected?.connect({
-    delivery: { contentData: { article: { contentType: "text/html" } } },
+    delivery: { contentData: [{ contentName: "article", contentType: "text/html" }] },
     isEligible,
     values: { article: "strictUTF8" },
     targets: { article: renderArticle },

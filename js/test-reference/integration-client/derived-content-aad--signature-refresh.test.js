@@ -7,12 +7,15 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { contentAadOctets } from "../support/contentAadOctets.js";
+import { contentRecordOf } from "../../test-lib/helpers/inspect.js";
 import {
   BODY,
   GROUP,
   LOCKED,
   encodedItem,
   ENCODED,
+  periodKeysAnswered,
+  putItemRecord,
   segment,
   text,
   world,
@@ -23,8 +26,8 @@ async function granted() {
   const delivered = await w.render({ items: [BODY, LOCKED, encodedItem()] });
   const grantee = w.client(delivered);
   assert.equal(text((await grantee.open(BODY.name)).bytes), BODY.value);
-  assert.deepEqual(w.exchanges[0].body.keys.contentKeys, {});
-  assert.ok(Object.keys(w.exchanges[0].body.keys.periodKeys[GROUP]).length > 0);
+  assert.deepEqual(w.exchanges[0].body.keys.contentKeys, []);
+  assert.ok(periodKeysAnswered(w.exchanges[0].body, GROUP).length > 0);
   return { w, delivered, cache: grantee.cache };
 }
 
@@ -139,22 +142,26 @@ test("deferred ciphertext delivered later opens only with its original render's 
     assert.equal(text((await later.openLocal(LOCKED.name)).bytes), LOCKED.value);
   }
 
-  // Beside a fresh render of the same resource and period it does not: with
-  // that render's own record, or with the original record under its token.
+  // Beside a fresh render of the same resource and period it does not. With
+  // that render's own record, the fresh wrap opens a key that fails the content
+  // AAD. With the original record under the fresh token, the original wrap opens
+  // nothing: its nonce derives from the original render ID.
   const next = await w.render({ items: [BODY, LOCKED, encodedItem()] });
   const originalRecord = {
     ...next.dcaData,
     contentData: structuredClone(next.dcaData.contentData),
   };
-  originalRecord.contentData[LOCKED.name] = structuredClone(
-    delivered.dcaData.contentData[LOCKED.name],
+  putItemRecord(
+    originalRecord,
+    LOCKED.name,
+    structuredClone(contentRecordOf(delivered.dcaData, LOCKED.name)),
   );
-  for (const [why, dcaData] of [
-    ["the fresh render's own record", next.dcaData],
-    ["the original record under the fresh render's token", originalRecord],
+  for (const [why, dcaData, code] of [
+    ["the fresh render's own record", next.dcaData, "decrypt_failed"],
+    ["the original record under the fresh render's token", originalRecord, "no_key"],
   ]) {
     const later = w.retained({ dcaData, sealedContent: { [LOCKED.name]: ciphertext } }, cache);
-    await assert.rejects(later.openLocal(LOCKED.name), { code: "decrypt_failed" }, String(why));
+    await assert.rejects(later.openLocal(LOCKED.name), { code }, String(why));
   }
 });
 

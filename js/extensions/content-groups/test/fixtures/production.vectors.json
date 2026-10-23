@@ -46,16 +46,13 @@
     },
     "envelopes": {
       "bodytext": {
-        "ephemeralPrivateScalarHex": "560297df2ad0367abb4291afdc2cdffe08d056dcc0e56c9d188f597583b09bae",
-        "nonceHex": "101112131415161718191a1b"
+        "ephemeralPrivateScalarHex": "560297df2ad0367abb4291afdc2cdffe08d056dcc0e56c9d188f597583b09bae"
       },
       "headline": {
-        "ephemeralPrivateScalarHex": "543235b8ea4f5cd38fd3aa75faa581f3dcecaf296940f2a8b46d9d1c386caf0f",
-        "nonceHex": "202122232425262728292a2b"
+        "ephemeralPrivateScalarHex": "543235b8ea4f5cd38fd3aa75faa581f3dcecaf296940f2a8b46d9d1c386caf0f"
       },
       "shoppingAd": {
-        "ephemeralPrivateScalarHex": "21da058854d29451faf7f18cd8ad01d28e481659a0b16d416681d4f6dcf67c49",
-        "nonceHex": "303132333435363738393a3b"
+        "ephemeralPrivateScalarHex": "21da058854d29451faf7f18cd8ad01d28e481659a0b16d416681d4f6dcf67c49"
       }
     },
     "narrowing": {
@@ -126,12 +123,11 @@
           "x": "kXbBEZetkN_x6y9Tb4yorlVGJZi7mbWomskRS9h2064",
           "y": "2yab9PqZL_0LxjJzXKHDzHAHD3uo0sVW7F6Sm5K9KUQ"
         },
-        "nonceHex": "101112131415161718191a1b",
         "sharedSecretHex": "8225d7db069d363fcfc97c0410f6e203e2fe9bda35303c32a17953ea9c6c9eb0",
         "aadText": "[\"dca-bind-content-name-seed\",\"2d0a016473ff75fd2afa3cc1dac401896235215a4a61e06d11129ff3442837a7\",\"AAECAwQFBgcICQoLDA0ODw\",\"issuerA\",\"bodytext\",\"261014T1200\",2,60]",
         "aadHex": "5b226463612d62696e642d636f6e74656e742d6e616d652d73656564222c2232643061303136343733666637356664326166613363633164616334303138393632333532313561346136316530366431313132396666333434323833376137222c2241414543417751464267634943516f4c4441304f4477222c2269737375657241222c22626f647974657874222c223236313031345431323030222c322c36305d",
         "seedHex": "d9b1274900e75c2ddcf90b8015ffc87d4bd60eb8b84298d5ec9d57e26223a8f3",
-        "sealed": "BJF2wRGXrZDf8esvU2-MqK5VRiWYu5m1qJrJEUvYdtOu2yab9PqZL_0LxjJzXKHDzHAHD3uo0sVW7F6Sm5K9KUQQERITFBUWFxgZGhvO5i58Iziu1D73OkkjFKNvqX3rsST6FucdKm7sfKi_eL5hEyPgguQwGBAyCAipNYw"
+        "sealed": "BJF2wRGXrZDf8esvU2-MqK5VRiWYu5m1qJrJEUvYdtOu2yab9PqZL_0LxjJzXKHDzHAHD3uo0sVW7F6Sm5K9KUQpXsLcHi_0eQ-qQZ03-h0q3Jwpmml1uIycrdeepfmfnLdUlCESluor5r4IuIiqkbk"
       },
       "headline": {
         "windowStart": "261014T1200",
@@ -141,12 +137,11 @@
           "x": "X8rEWupo-AZZyoXqzkLVQXXCBPnrsgizXNehIQyaHa4",
           "y": "2R-3Oc7sbI57PIWMAC51J02cg09OIoDQlElHHAJAxsE"
         },
-        "nonceHex": "202122232425262728292a2b",
         "sharedSecretHex": "3c2418874d2428bf79b1dc5e1959738b21bb10a0fcf6e9633ab5787a3cf8c5c3",
         "aadText": "[\"dca-bind-content-name-seed\",\"2d0a016473ff75fd2afa3cc1dac401896235215a4a61e06d11129ff3442837a7\",\"AAECAwQFBgcICQoLDA0ODw\",\"issuerA\",\"headline\",\"261014T1200\",2,60]",
         "aadHex": "5b226463612d62696e642d636f6e74656e742d6e616d652d73656564222c2232643061303136343733666637356664326166613363633164616334303138393632333532313561346136316530366431313132396666333434323833376137222c2241414543417751464267634943516f4c4441304f4477222c2269737375657241222c22686561646c696e65222c223236313031345431323030222c322c36305d",
         "seedHex": "a37781481a359bd8eb12be8b5d603ba0fc9371ec70e189bc528ab0aed5ebec7b",
-        "sealed": "BF_KxFrqaPgGWcqF6s5C1UF1wgT567IIs1zXoSEMmh2u2R-3Oc7sbI57PIWMAC51J02cg09OIoDQlElHHAJAxsEgISIjJCUmJygpKisz8N4zd1yvqnJX2oBH91or7RyDxE68iOYL1pQeaxb4fYhlRkoXTDqP6lAOSdKl450"
+        "sealed": "BF_KxFrqaPgGWcqF6s5C1UF1wgT567IIs1zXoSEMmh2u2R-3Oc7sbI57PIWMAC51J02cg09OIoDQlElHHAJAxsEtNjdYINICLBYqATIva80QBvtSpX9oqig6Df_UL-kUkEPHC7ZxpfrhZpoB1lk0fkY"
       },
       "shoppingAd": {
         "windowStart": "261014T1200",
@@ -156,12 +151,11 @@
           "x": "qcl4VIDVER_UrDh70009SBZ9-VVelcXvO1XypqFCVHQ",
           "y": "CHu8zvLx-JUs2KV1wvBIZmu-Cf2mZvNVgcFcGG0C7kY"
         },
-        "nonceHex": "303132333435363738393a3b",
         "sharedSecretHex": "b44eb4ccfa0a0e6f48f237bd4c7ad9e7eddfb99d388f47660418fac3fc1809ea",
         "aadText": "[\"dca-bind-content-name-seed\",\"2d0a016473ff75fd2afa3cc1dac401896235215a4a61e06d11129ff3442837a7\",\"AAECAwQFBgcICQoLDA0ODw\",\"issuerA\",\"shoppingAd\",\"261014T1200\",2,60]",
         "aadHex": "5b226463612d62696e642d636f6e74656e742d6e616d652d73656564222c2232643061303136343733666637356664326166613363633164616334303138393632333532313561346136316530366431313132396666333434323833376137222c2241414543417751464267634943516f4c4441304f4477222c2269737375657241222c2273686f7070696e674164222c223236313031345431323030222c322c36305d",
         "seedHex": "b9e1f7cdee3659496716dc84789550450d2898c103f20bcff8d55a2cc12c5671",
-        "sealed": "BKnJeFSA1REf1Kw4e9NNPUgWfflVXpXF7ztV8qahQlR0CHu8zvLx-JUs2KV1wvBIZmu-Cf2mZvNVgcFcGG0C7kYwMTIzNDU2Nzg5Ojvy6-v_2ubZa7Y7TOIznwBW7-KoX5KiXmxv3mi3oPWXjA_a3xUdKIopf13Ub-pIkn8"
+        "sealed": "BKnJeFSA1REf1Kw4e9NNPUgWfflVXpXF7ztV8qahQlR0CHu8zvLx-JUs2KV1wvBIZmu-Cf2mZvNVgcFcGG0C7kafpmmg4_-TeTd9gIJL0uISf32zF14cf09b0Ov7_mSvURI_fBXib1SOc6lYmp24QiA"
       }
     },
     "items": {
@@ -221,45 +215,67 @@
           "periodMinutes": 60
         },
         "renderPeriod": "261014T1500",
-        "contentData": {
-          "bodytext": {
+        "contentData": [
+          {
+            "contentName": "bodytext",
             "contentType": "text/plain",
-            "connectors": {
-              "politics": "cJzy9BAORNe7WOicm5bW9w",
-              "sports": "Okl5vn3NeLvXrOKNPvavtg"
-            }
-          },
-          "headline": {
-            "contentType": "text/plain",
-            "connectors": {
-              "politics": "OAYiZWTBOh4vZlYIeZfCaA"
-            }
-          },
-          "shoppingAd": {
-            "contentType": "text/plain",
-            "connectors": {
-              "shopping": "MOKIZiqdUlGNzqTXNMXhaA"
-            }
-          }
-        },
-        "issuerData": {
-          "issuerA": {
-            "sealed": {
-              "contentWindowSeeds": {
-                "bodytext": {
-                  "261014T1200": "BJF2wRGXrZDf8esvU2-MqK5VRiWYu5m1qJrJEUvYdtOu2yab9PqZL_0LxjJzXKHDzHAHD3uo0sVW7F6Sm5K9KUQQERITFBUWFxgZGhvO5i58Iziu1D73OkkjFKNvqX3rsST6FucdKm7sfKi_eL5hEyPgguQwGBAyCAipNYw"
-                },
-                "headline": {
-                  "261014T1200": "BF_KxFrqaPgGWcqF6s5C1UF1wgT567IIs1zXoSEMmh2u2R-3Oc7sbI57PIWMAC51J02cg09OIoDQlElHHAJAxsEgISIjJCUmJygpKisz8N4zd1yvqnJX2oBH91or7RyDxE68iOYL1pQeaxb4fYhlRkoXTDqP6lAOSdKl450"
-                },
-                "shoppingAd": {
-                  "261014T1200": "BKnJeFSA1REf1Kw4e9NNPUgWfflVXpXF7ztV8qahQlR0CHu8zvLx-JUs2KV1wvBIZmu-Cf2mZvNVgcFcGG0C7kYwMTIzNDU2Nzg5Ojvy6-v_2ubZa7Y7TOIznwBW7-KoX5KiXmxv3mi3oPWXjA_a3xUdKIopf13Ub-pIkn8"
-                }
+            "connectors": [
+              {
+                "group": "politics",
+                "connector": "cJzy9BAORNe7WOicm5bW9w"
+              },
+              {
+                "group": "sports",
+                "connector": "Okl5vn3NeLvXrOKNPvavtg"
               }
+            ]
+          },
+          {
+            "contentName": "headline",
+            "contentType": "text/plain",
+            "connectors": [
+              {
+                "group": "politics",
+                "connector": "OAYiZWTBOh4vZlYIeZfCaA"
+              }
+            ]
+          },
+          {
+            "contentName": "shoppingAd",
+            "contentType": "text/plain",
+            "connectors": [
+              {
+                "group": "shopping",
+                "connector": "MOKIZiqdUlGNzqTXNMXhaA"
+              }
+            ]
+          }
+        ],
+        "issuerData": [
+          {
+            "issuerName": "issuerA",
+            "sealed": {
+              "contentWindowSeeds": [
+                {
+                  "contentName": "bodytext",
+                  "windowStart": "261014T1200",
+                  "key": "BJF2wRGXrZDf8esvU2-MqK5VRiWYu5m1qJrJEUvYdtOu2yab9PqZL_0LxjJzXKHDzHAHD3uo0sVW7F6Sm5K9KUQpXsLcHi_0eQ-qQZ03-h0q3Jwpmml1uIycrdeepfmfnLdUlCESluor5r4IuIiqkbk"
+                },
+                {
+                  "contentName": "headline",
+                  "windowStart": "261014T1200",
+                  "key": "BF_KxFrqaPgGWcqF6s5C1UF1wgT567IIs1zXoSEMmh2u2R-3Oc7sbI57PIWMAC51J02cg09OIoDQlElHHAJAxsEtNjdYINICLBYqATIva80QBvtSpX9oqig6Df_UL-kUkEPHC7ZxpfrhZpoB1lk0fkY"
+                },
+                {
+                  "contentName": "shoppingAd",
+                  "windowStart": "261014T1200",
+                  "key": "BKnJeFSA1REf1Kw4e9NNPUgWfflVXpXF7ztV8qahQlR0CHu8zvLx-JUs2KV1wvBIZmu-Cf2mZvNVgcFcGG0C7kafpmmg4_-TeTd9gIJL0uISf32zF14cf09b0Ov7_mSvURI_fBXib1SOc6lYmp24QiA"
+                }
+              ]
             },
             "keyId": "a1"
           }
-        }
+        ]
       },
       "sealedContent": {
         "bodytext": "ORX8dw3hrMcRW-aFt9q_A546QCwp2m4GbA",
@@ -273,67 +289,85 @@
       "resourceJWT": "eyJhbGciOiJFUzI1NiIsInR5cCI6IkpXVCIsImtpZCI6InB1Ymxpc2hlci1rMSJ9.eyJyZW5kZXJJZCI6IkFBRUNBd1FGQmdjSUNRb0xEQTBPRHciLCJvcmlnaW4iOiJodHRwczovL25ld3MuZXhhbXBsZSIsImlzc3VlZEF0IjoiMjAyNi0xMC0xNFQxNTowNTowMC4wMDBaIiwicmVzb3VyY2VJZCI6InN0b3J5MSIsImRhdGEiOnt9fQ.SF5CgH42d2O_4YAVn7OHBPFedUowNbS7bLdnuYrAvT17PA25wbLNH5EaWN5JBgb6I8AdQyseSb9aH3wh8RLjoQ",
       "keyId": "a1",
       "sealed": {
-        "contentKeys": {},
-        "contentWindowSeeds": {
-          "bodytext": {
-            "261014T1200": "BJF2wRGXrZDf8esvU2-MqK5VRiWYu5m1qJrJEUvYdtOu2yab9PqZL_0LxjJzXKHDzHAHD3uo0sVW7F6Sm5K9KUQQERITFBUWFxgZGhvO5i58Iziu1D73OkkjFKNvqX3rsST6FucdKm7sfKi_eL5hEyPgguQwGBAyCAipNYw"
+        "contentKeys": [],
+        "contentWindowSeeds": [
+          {
+            "contentName": "bodytext",
+            "windowStart": "261014T1200",
+            "key": "BJF2wRGXrZDf8esvU2-MqK5VRiWYu5m1qJrJEUvYdtOu2yab9PqZL_0LxjJzXKHDzHAHD3uo0sVW7F6Sm5K9KUQpXsLcHi_0eQ-qQZ03-h0q3Jwpmml1uIycrdeepfmfnLdUlCESluor5r4IuIiqkbk"
           },
-          "headline": {
-            "261014T1200": "BF_KxFrqaPgGWcqF6s5C1UF1wgT567IIs1zXoSEMmh2u2R-3Oc7sbI57PIWMAC51J02cg09OIoDQlElHHAJAxsEgISIjJCUmJygpKisz8N4zd1yvqnJX2oBH91or7RyDxE68iOYL1pQeaxb4fYhlRkoXTDqP6lAOSdKl450"
+          {
+            "contentName": "headline",
+            "windowStart": "261014T1200",
+            "key": "BF_KxFrqaPgGWcqF6s5C1UF1wgT567IIs1zXoSEMmh2u2R-3Oc7sbI57PIWMAC51J02cg09OIoDQlElHHAJAxsEtNjdYINICLBYqATIva80QBvtSpX9oqig6Df_UL-kUkEPHC7ZxpfrhZpoB1lk0fkY"
           },
-          "shoppingAd": {
-            "261014T1200": "BKnJeFSA1REf1Kw4e9NNPUgWfflVXpXF7ztV8qahQlR0CHu8zvLx-JUs2KV1wvBIZmu-Cf2mZvNVgcFcGG0C7kYwMTIzNDU2Nzg5Ojvy6-v_2ubZa7Y7TOIznwBW7-KoX5KiXmxv3mi3oPWXjA_a3xUdKIopf13Ub-pIkn8"
+          {
+            "contentName": "shoppingAd",
+            "windowStart": "261014T1200",
+            "key": "BKnJeFSA1REf1Kw4e9NNPUgWfflVXpXF7ztV8qahQlR0CHu8zvLx-JUs2KV1wvBIZmu-Cf2mZvNVgcFcGG0C7kafpmmg4_-TeTd9gIJL0uISf32zF14cf09b0Ov7_mSvURI_fBXib1SOc6lYmp24QiA"
           }
-        }
+        ]
       },
       "renderPeriod": "261014T1500",
       "periodGeometry": {
         "chainsPerDay": 2,
         "periodMinutes": 60
       },
-      "requestedContentGroups": {
-        "bodytext": [
-          "politics"
-        ],
-        "headline": [
-          "politics"
-        ]
-      },
-      "requestedContentKeys": {
-        "shoppingAd": {
+      "requestedContentGroups": [
+        {
+          "contentName": "bodytext",
+          "groups": [
+            "politics"
+          ]
+        },
+        {
+          "contentName": "headline",
+          "groups": [
+            "politics"
+          ]
+        }
+      ],
+      "requestedContentKeys": [
+        {
+          "contentName": "shoppingAd",
           "group": "shopping",
           "connector": "MOKIZiqdUlGNzqTXNMXhaA"
         }
-      }
+      ]
     },
     "response": {
       "keys": {
-        "contentKeys": {}
+        "contentKeys": []
       },
-      "contentGroups": {
-        "chainKeys": {
-          "bodytext": {
-            "politics": {
-              "261014T1800": "y-W5pEt7JcGJXpTV_JNbug"
-            }
+      "contentGroupKeys": {
+        "chainKeys": [
+          {
+            "contentName": "bodytext",
+            "group": "politics",
+            "cutoff": "261014T1800",
+            "key": "y-W5pEt7JcGJXpTV_JNbug"
           }
-        },
-        "periodKeys": {
-          "headline": {
-            "politics": {
-              "261014T1500": "f5_xFO8-no-F7IpVyrkI1g"
-            }
+        ],
+        "periodKeys": [
+          {
+            "contentName": "headline",
+            "group": "politics",
+            "period": "261014T1500",
+            "key": "f5_xFO8-no-F7IpVyrkI1g"
           }
-        },
-        "contentKeys": {
-          "shoppingAd": "wMHCw8TFxsfIycrLzM3Ozw"
-        }
+        ],
+        "contentKeys": [
+          {
+            "contentName": "shoppingAd",
+            "key": "wMHCw8TFxsfIycrLzM3Ozw"
+          }
+        ]
       }
     },
     "jsonBytes": {
-      "publication": 1770,
-      "request": 1305,
-      "response": 258
+      "publication": 1967,
+      "request": 1423,
+      "response": 353
     }
   }
 }

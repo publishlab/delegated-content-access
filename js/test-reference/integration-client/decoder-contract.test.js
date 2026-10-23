@@ -28,14 +28,15 @@ test("public client composition accepts a budget-required decoder and forwards i
     version: "1",
     resourceJWT:
       "eyJhbGciOiJFUzI1NiJ9.eyJyZW5kZXJJZCI6IkFBQUFBQUFBQUFBQUFBQUFBQUFBQUEifQ.c2lnbmF0dXJl",
-    contentData: {
-      bodytext: {
+    contentData: [
+      {
+        contentName: "bodytext",
         contentType: "text/plain",
         contentEncodings: ["custom"],
         nonce: base64urlEncode(nonce),
       },
-    },
-    issuerData: { issuer: { keyId: "opening", sealed: { contentKeys: {} } } },
+    ],
+    issuerData: [{ issuerName: "issuer", keyId: "opening", sealed: { contentKeys: [] } }],
   });
   const item = page.contentItemFor("bodytext");
   assert.ok(item);

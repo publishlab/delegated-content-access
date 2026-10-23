@@ -17,48 +17,108 @@ An example with geometry 2/60 (two windows a day, hourly periods), origin `https
   `bodytext` carries the item option `contentGroups: ["politics", "sports"]`. The render period is `261014T1200`.
 - For each group the publisher derives the seed of (origin, `bodytext`, 2/60, window `261014T1200`), runs stock
   Root/Step/Leaf to the group's period key at T12, derives a 16-byte pad from that key, the render ID and
-  `bodytext`, and writes `connector = contentKey XOR pad` to `contentData.bodytext.connectors.politics`.
-- The publisher seals the seed to `issuerA` under
-  `issuerData.issuerA.sealed.contentWindowSeeds.bodytext.261014T1200`.
-- The client sends `requestedContentGroups: {bodytext: ["politics", "sports"]}` with the unchanged seed envelope.
-  The issuer verifies the JWT, asks its policy, opens the seed and answers
-  `contentGroups.chainKeys.bodytext.politics.261014T1800 = key`.
+  `bodytext`, and writes `connector = contentKey XOR pad` as the `politics` record of the `bodytext` item's
+  `connectors`.
+- The publisher seals the seed to `issuerA` as the `issuerA` block's `sealed.contentWindowSeeds` record
+  `{contentName: "bodytext", windowStart: "261014T1200", key}`.
+- The client sends `requestedContentGroups: [{contentName: "bodytext", groups: ["politics", "sports"]}]` with the
+  unchanged seed envelope. The issuer verifies the JWT, asks its policy, opens the seed and answers the
+  `contentGroupKeys.chainKeys` record `{contentName: "bodytext", group: "politics", cutoff: "261014T1800", key}`.
 - The client files that chain key under (construction, origin, 2/60, `bodytext`, `politics`). A later `bodytext`
   article rendered at T15 in the same window opens without a request. A `headline` item or a T19 render does not.
 - An item route asks one content key: the client names `requestedContentKeys: {shoppingAd: "sports"}` locally, the
-  request carries `{group: "sports", connector}`, and the issuer authorizes the item, derives a candidate key
-  and answers `contentGroups.contentKeys.shoppingAd`. The client authenticates the body with that candidate.
+  request carries `{contentName: "shoppingAd", group: "sports", connector}`, and the issuer authorizes the item,
+  derives a candidate key and answers a `contentGroupKeys.contentKeys` record for `shoppingAd`. The client
+  authenticates the body with that candidate.
   A changed valid-width connector can yield a wrong key; the issuer does not verify correct recovery.
 
 The wire members:
 
 ```text
-issuerData.<issuer>.sealed.contentWindowSeeds.<contentName>.<windowStart> = seedEnvelope
-contentData.<contentName>.connectors.<group> = connector16
-request.requestedContentGroups.<contentName> = [group, ...]
-request.requestedContentKeys.<contentName> = {group, connector}
-response.contentGroups.chainKeys.<contentName>.<group>.<cutoffLabel> = key
-response.contentGroups.periodKeys.<contentName>.<group>.<periodLabel> = key
-response.contentGroups.contentKeys.<contentName> = key
-response.contentGroups.errors.chainKeys.<contentName>.<group>.<cutoffLabel> = {"error": "key_retired"}
-response.contentGroups.errors.periodKeys.<contentName>.<group>.<periodLabel> = {"error": "key_retired"}
-response.contentGroups.errors.contentKeys.<contentName> = {"error": "key_retired"}
+issuerData[].sealed.contentWindowSeeds[] = {contentName, windowStart, key: seedEnvelope}
+contentData[].connectors[] = {group, connector: connector16}
+request.requestedContentGroups[] = {contentName, groups: [group, ...]}
+request.requestedContentKeys[] = {contentName, group, connector}
+request.requestedChainCutoffs[] = {windowStart, cutoff}
+response.contentGroupKeys.chainKeys[] = {contentName, group, cutoff, key}
+response.contentGroupKeys.periodKeys[] = {contentName, group, period, key}
+response.contentGroupKeys.contentKeys[] = {contentName, key}
+response.contentGroupKeys.errors.chainKeys[] = {contentName, group, cutoff, error: "key_retired"}
+response.contentGroupKeys.errors.periodKeys[] = {contentName, group, period, error: "key_retired"}
+response.contentGroupKeys.errors.contentKeys[] = {contentName, error: "key_retired"}
 ```
 
 Chain values carry no numeric position or outer key wrapper. The cutoff label and captured request geometry
 supply position; direct values are base64url and client-bound values are the method's protected key object.
 The section still fixes `contentGroupChainKey`, and caches retain the derived position and complete identity.
 
+### Reading and typing a response
+
+Each section is an array of records. A reusable-key record names its **content name, group and cutoff or
+period**; a content-key record names its **content name**. For example:
+
+```json
+{
+    "contentGroupKeys": {
+        "chainKeys": [
+            { "contentName": "bodytext", "group": "politics", "cutoff": "261014T1800", "key": "<chain key @16 bytes>" }
+        ],
+        "periodKeys": [
+            { "contentName": "headline", "group": "politics", "period": "261014T1500", "key": "<period key @16 bytes>" }
+        ],
+        "contentKeys": [{ "contentName": "shoppingAd", "key": "<content key @16 bytes>" }]
+    }
+}
+```
+
+This is a section illustration with placeholders; a complete response also
+carries ordinary `keys`. Absent optional sections are omitted. The profile's
+[record definition](../../../docs/spec-profile--content-groups.md#reading-the-key-records)
+and [exchange example](../../../docs/design--data-format--example.md#content-groups--html-delivery-proposal)
+explain the coordinates alongside actual vector values.
+
+`core-shared--client-issuer/request.js` exports the JSDoc response types,
+starting at `ContentGroupResponse<Key>`. Each section type is an array of
+records with named coordinate fields, `cutoff` for a chain and `period` for a
+period key, and a `key` of type `Key`. Use `string` for the direct key, or the
+selected transport's protected-value type. Error records carry the same
+coordinate fields and the fixed `error` value instead of `key`.
+
+These types check record shape; they do not validate an incoming response, and
+a record for a selected coordinate need not exist. Several records can share a
+coordinate as candidate keys. Existing `admitContentGroupResponse`
+processing stages entries with named
+`contentName`, `group`, `cutoffT`/`t` fields before key opening and retention.
+Integrators can use those existing role APIs rather than walk wire records
+themselves. No additional lookup API or wire conversion is required.
+
+### Captured request context
+
 The delivery also carries root `renderPeriod` and `periodGeometry`; the request relays both with an optional
 `requestedChainCutoffs`. Responses echo neither; the client uses the complete pair captured from its
 immutable associated request for admission and retention, even across asynchronous key opening. A root `contentGroups` member is the retired indexed form, and the extension refuses it.
 
-The issuer writes `contentGroups.errors` when a seed opening finds the selected opening key retired. Each
-coordinate the policy granted and the issuer attempted with that seed gets the fixed leaf at the depth of its key
-map. The answer stays 200, and base coordinates report their own `key_retired` entries under root `errors`. The
+The issuer writes `contentGroupKeys.errors` when a seed opening finds the selected opening key retired. Each
+coordinate the policy granted and the issuer attempted with that seed gets one error record with the coordinate
+fields of its key kind. The answer stays 200, and base coordinates report their own `key_retired` records under
+root `errors`. The
 client admits the errors together with the keys of the same member, files no key for an error, and reports each in
 the application's `errors` as
-`{section, contentName, group, windowStart?, t?, error: "key_retired", consumer: "contentGroups"}`.
+`{section, contentName, group, windowStart?, t?, error: "key_retired", consumer: "contentGroupKeys"}`.
+
+## Seed envelope
+
+`core-shared/seed-envelope.js` seals and opens the `ecdh-p256-content-name-seed` envelope. Every seal draws a fresh
+ephemeral P-256 pair, uses the raw 32-byte ECDH x-coordinate as the AES-256-GCM key and encrypts the 32-byte seed
+under twelve zero nonce bytes with the seed AAD. The nonce is implicit, so the envelope is the 65-byte point, then
+the 48-byte ciphertext and tag: 113 bytes, 151 base64url characters. The fresh pair keeps the zero nonce safe,
+since no agreement encrypts a second seed; resending a saved envelope is not a new encryption.
+
+`openSeed` refuses every width but 113 bytes before key work, including the former 125-byte layout that carried a
+nonce at offset 65, and the issuer's request bounds refuse it at admission. A delivery sealed in that layout needs
+republishing. The [profile](../../../docs/spec-profile--content-groups.md#seed-envelope-and-issuer-custody) states
+the procedure; `test/seed-envelope.test.js` opens an independent node:crypto known answer and checks the zero
+nonce and the legacy refusal.
 
 ## Known content keys and connector isolation
 
@@ -216,15 +276,15 @@ content-group key unwrapped. `referenceProfile.js` imports every role; a browser
 `core-client/client.js` directly.
 
 Local `narrowing` selects what the request asks. Without it, each needed content name with a seed from this
-issuer asks every group of its connector map and offers one item connector, choosing the first group in ASCII
+issuer asks every group of its `connectors` and offers one item connector, choosing the first group in ASCII
 order. The item alternative is offered only when the selected seeds include the render's window. The issuer may
 answer with reusable keys, an item key, both or neither; an offered connector grants nothing.
 
 An explicit `requestedContentGroups` or `requestedContentKeys` map disables automatic item offering. Use an empty
 `requestedContentKeys` map to retain the default group requests without item alternatives, or supply only
 `requestedContentKeys` for item-only requests. `requestedChainCutoffs` caps the cutoff per window;
-`requestedContentItems` and `seedWindows` narrow locally and never reach the wire. A malformed connector map
-suppresses that item's connector routes as a unit; valid sibling items remain usable. Producer validation and
+`requestedContentItems` and `seedWindows` narrow locally and never reach the wire. A malformed `connectors`
+collection suppresses that item's connector routes as a unit; valid sibling items remain usable. Producer validation and
 shared delivery context and aggregate limits remain strict.
 
 ## Base seams it uses
@@ -237,16 +297,18 @@ shared delivery context and aggregate limits remain strict.
 - Issuer: `createIssuerCore` contributions. `requestBounds` reads the request with the client's request reader before
   signature verification: it counts raw members, and refuses with `binding_failed` a requested content name without
   a seed or a seed for a name the request does not ask. The
-  `responseSectionSource` answers `contentGroups`, registers its seed opener under the base
+  `responseSectionSource` answers `contentGroupKeys`, registers its seed opener under the base
   procedure `ecdh-p256`, and opens seeds through the engine's `openAuxiliary(sealed, {aad})`, so the trusted key
   entry picks the procedure. An issuer that selects another procedure opens no seed, and the exchange refuses.
 - Client: `requestBuilderFactory` (`ContentGroupRequestBuilder` wraps the base request and reports `keyFamilies`
   and `routeProjection`), one `ContentKeyResolver` recovery source and one response-section consumer. The
   consumer opens keys through the resolver's `openKey` and hands a recovered item key to `holdContentKey`.
 - Caches: one `PeriodKeyCache` and one `ChainKeyCache`, each with its own `entryKind` and structured `partition`.
-  Neither is the client's ordinary cache. The client passes `maxResponseMembers` and `maxWindowsPerGroup` to the
-  chain cache as `maxMembersPerMessage` and `maxMembersPerFamily`, because one answer carries more chain keys than
-  the chain-keys bounds of 16 per answer and two per family.
+  Neither is the client's ordinary cache. The client passes `maxResponseMembers` to the chain cache as both
+  `maxMembersPerMessage` and `maxMembersPerFamily`, preserving all admitted candidates for the pending attempt.
+  `maxWindowsPerGroup` separately bounds distinct windows through `maxWindowsPerFamily`; `maxRivalsPerWindow`
+  bounds later retained rivals, and `maxTrialsPerItem` bounds opening trials. Neither retention nor window count
+  truncates the pending answer's candidate set.
 - Transport: `KeyDelivery` `composedSections` and `composedKinds`, and the `composedKinds` option of
   `clientBoundKeyCapability`.
 
@@ -279,10 +341,10 @@ It copies no base lines.
 Trusted defaults from `settleLimits`; an unknown name is refused, including the retired `maxScopes` and
 `maxPeriodKeysPerGroup`:
 
-- `maxItems` 64 bounds every per-exchange content-name map.
+- `maxItems` 64 bounds the content names of every per-exchange collection.
 - `maxGroups` 1024 per content name; `maxPeriodKeysPerContentGroup` 48 per (content name, group).
 - `maxSeedWindows` 2 per issuer and content name; `maxWindowsPerGroup` 2 per (content name, group).
-- `maxResponseMembers` 2048 over grants and raw response entries, `key_retired` errors included.
+- `maxResponseMembers` 2048 over grants and raw response records, `key_retired` errors included.
 - `maxCachedWindows` 4096, `maxRivalsPerWindow` 4 and `maxTrialsPerItem` 4096 on the client.
 
 Retention and work bounds are independent. The content-group recovery source
@@ -312,7 +374,13 @@ node --test extensions/content-groups/test/*.test.js test-extensions/content-gro
 ## Wire sizes
 
 Historical setup: the now-retired `measure-content-groups.mjs`, captured after commitment
-removal on 2026-10-16. Each row publishes one item `bodytext` at render T12,
+removal on 2026-10-16. These retained captures still carry the former per-item
+`contentData.bodytext.nonce` (27 raw JSON bytes) and use the former object maps instead of
+named-record arrays; they are not current wire totals. They also carry the former
+125-byte seed envelopes; the current 113-byte envelope saves 12 decoded bytes, or 16 base64url characters, per seed.
+Removing that field alone saves 27 metadata bytes per item; key IDs and request
+selection must also match before comparing a fresh run with these captures.
+Each row publishes one item `bodytext` at render T12,
 geometry 2/60, whose connector map names N groups. The measurement selects group-only requests
 with `narrowing: { requestedContentKeys: {} }`; it measures reusable delivery rather than the default
 item alternative. One issuer holds seeds for

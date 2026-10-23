@@ -139,7 +139,7 @@ async function route(active) {
   void sealedContent;
   const view = new DcaData(page, { publisherOrigin: PUB });
   const request = active
-    ? new OmissionRequestBuilder().build(view, ISSUER_A, ITEMS)
+    ? new OmissionRequestBuilder({ relayPeriodKeys: true }).build(view, ISSUER_A, ITEMS)
     : new DcaRequestBuilder().build(view, ISSUER_A, ITEMS);
 
   const accessPolicy = contentOnlyPolicy(ITEMS);
@@ -149,9 +149,12 @@ async function route(active) {
 
   const unlock = async () => {
     const result = await engine.unlock(request, registration);
-    if (Object.keys(result.contentKeys).length !== ITEMS.length) {
+    if (
+      JSON.stringify(result.contentKeys.map((record) => record.contentName).sort()) !==
+      JSON.stringify([...ITEMS].sort())
+    ) {
       throw new Error(
-        `the ${active ? "active" : "inactive"} route answered ${Object.keys(result.contentKeys)}`,
+        `the ${active ? "active" : "inactive"} route answered ${result.contentKeys.map((record) => record.contentName)}`,
       );
     }
     return result;
@@ -198,6 +201,7 @@ out.push("");
 out.push("| route | in flight | unlocks | throughput /s | p50 ms | p95 ms | p99 ms |");
 out.push("| --- | --- | --- | --- | --- | --- | --- |");
 for (const [name, one] of Object.entries(routes)) {
+  if (process.argv.includes("--smoke")) continue;
   await drive(one.unlock, 50, 8);
   for (const inFlight of [...CONCURRENCIES, BURST]) {
     const total = inFlight === BURST ? BURST : UNLOCKS;

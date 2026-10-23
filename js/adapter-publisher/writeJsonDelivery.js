@@ -3,7 +3,7 @@
 // This module emits the baseline delivery form: one serialized JSON document,
 // per spec--data-format.md Section 6, object delivery. The document holds the
 // `dca-data` members in one enclosing object and adds the optional
-// `sealedContent` map of Section 5 beside them. `adapter-client/JsonDeliveryReader.js`
+// `sealedContent` records of Section 5 beside them. `adapter-client/JsonDeliveryReader.js`
 // reads it back. The markup form in `writeMarkupDelivery.js` carries the same
 // two values in two script elements; that form belongs to the
 // `dca-profile-html-carrier` profile.
@@ -29,7 +29,7 @@ import { validateContentName } from "../core-shared/names.js";
 /** The members a render hands this writer; any other member is refused. */
 const RENDER_MEMBERS = ["dcaData", "sealedContent"];
 
-/** The document member that carries the sealed-content map. */
+/** The document member that carries the sealed-content records. */
 const SEALED_MEMBER = "sealedContent";
 
 /**
@@ -68,7 +68,7 @@ function validateCiphertext(contentName, ciphertext) {
  *
  * The document is one JSON object: every own enumerable member of `dcaData`, in
  * its order, and then `sealedContent`. The bytes are UTF-8 with no byte order
- * mark. The writer always writes `sealedContent`, as `{}` when the render
+ * mark. The writer always writes `sealedContent`, as `[]` when the render
  * carries no ciphertext, so the document says the publisher delivered no
  * ciphertext rather than leaving the reader to infer it.
  *
@@ -108,17 +108,22 @@ export function writeJsonDelivery(render) {
       "the JSON writer needs the sealedContent object beside the dcaData, even if it is empty",
     );
   }
-  // The writer puts the ciphertext map in one place. A dcaData that brings its
-  // own would put a second map in the document, and one of the two would
-  // silently replace the other.
+  // The writer puts the ciphertext records in one place. A dcaData that brings
+  // its own would put a second member in the document, and one of the two
+  // would silently replace the other.
   if (Object.hasOwn(dcaData, SEALED_MEMBER)) {
     throw dcaError("bad_config", "the dcaData already carries a sealedContent member");
   }
 
-  /** @type {Record<string, string>} */
-  const carrier = {};
+  // The render holds ciphertext by name; the document carries one
+  // `{contentName, content}` record per item, in the render's item order.
+  /** @type {{ contentName: string, content: string }[]} */
+  const carrier = [];
   for (const [contentName, ciphertext] of Object.entries(sealedContent)) {
-    carrier[validateContentName(contentName)] = validateCiphertext(contentName, ciphertext);
+    carrier.push({
+      contentName: validateContentName(contentName),
+      content: validateCiphertext(contentName, ciphertext),
+    });
   }
 
   // The spread defines each member as an own data property, so a member named

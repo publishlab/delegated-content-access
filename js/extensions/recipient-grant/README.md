@@ -104,12 +104,14 @@ Verification accepts additional noncritical metadata but refuses `crit`,
   resource, validity window and revocation.
 - Issuer result: base issuer core decides under a policy scoped to the
   intersection of granted names, presented items and current host policy.
-  It returns item content keys only; a request carrying period or chain
-  material, or a result carrying either, is refused.
+  It returns item content keys only. Admission refuses the request members
+  listed in recipient-grant Section 3 and the response sections listed below.
 - Client result refusal: a response with `periodKeys`, `chainKeys`,
   `periodGeometry` or legacy `chainGeometry` fails with `bad_response` before
   any key is kept. Base
-  response association still applies.
+  response association still applies. Unselected proposal members, including
+  `contentGroupKeys`, are ignored and supply no retained or usable capability.
+  This does not select a recipient-grant/content-groups composition.
 
 The issuer uses base `createIssuerCore` and `BrowserUnlockHttp`; the client
 uses base `createBrowserClient` with its `resolverFactory` and transport

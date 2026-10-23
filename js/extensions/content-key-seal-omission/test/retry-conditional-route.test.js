@@ -8,6 +8,8 @@
 // never carries the original request's bound candidates; and a marked wrap is
 // opened only with its binding, never retried without it.
 
+import { omissionProcessorOptions } from "../core-issuer/omissionAdmission.js";
+
 import test from "node:test";
 import assert from "node:assert/strict";
 
@@ -20,6 +22,7 @@ import { IssuerProcessor } from "../../../core-issuer/IssuerProcessor.js";
 import { UnlockEndpoint } from "../../../ports/UnlockEndpoint.js";
 import { AllowAllPolicy } from "../../../demo/support/AllowAllPolicy.js";
 import { base64urlEncode, utf8Decode } from "../../../core-shared/codec.js";
+import { recordsByName } from "../../../core-shared--client-publisher/deliveryRecords.js";
 import { OmittingSealer } from "../core-publisher/OmittingSealer.js";
 import { OmissionRequestBuilder } from "../core-client/OmissionRequestBuilder.js";
 import {
@@ -43,6 +46,35 @@ import {
 
 const { subtle } = globalThis.crypto;
 const ITEMS = ["bodytext", "sidebar"];
+
+/**
+ * The distinct values of one field across a record array, in first-seen order:
+ * what `Object.keys` read off the map the array replaced.
+ *
+ * @param {any[]} records
+ * @param {string} field
+ */
+const distinct = (records, field) => [...new Set(records.map((record) => record[field]))];
+
+/**
+ * One named record of a delivery collection.
+ *
+ * @param {any[]} collection
+ * @param {string} name
+ */
+const item = (collection, name) => recordsByName(collection, "contentName", () => true)?.get(name);
+
+/**
+ * The first key entry of one item in one access group.
+ *
+ * @param {any[]} contentData
+ * @param {string} name
+ * @param {string} accessGroup
+ */
+const firstKey = (contentData, name, accessGroup) =>
+  item(contentData, name).keys.find(
+    (/** @type {any} */ entry) => entry.accessGroup === accessGroup,
+  );
 
 /** @param {string} issuerName */
 const routeTo = (issuerName) => ({
@@ -91,7 +123,7 @@ async function walkWorld({
       new UnlockEndpoint(
         new IssuerProcessor(
           omissionIssuerEngine({ operatingIssuerNames: [issuerName], accessPolicy }),
-          { periodKeyInput: true },
+          { periodKeyInput: true, ...omissionProcessorOptions() },
         ),
       ),
     ]),
@@ -105,7 +137,7 @@ async function walkWorld({
     reader: {
       dcaData: delivery,
       publisherOrigin: PUB,
-      extract: (/** @type {string} */ name) => sealedContent[name] ?? null,
+      extract: (/** @type {string} */ name) => item(sealedContent, name)?.content ?? null,
     },
     issuerName: ISSUER_A,
     relayPeriodKeys: true,
@@ -144,17 +176,17 @@ test("an item content key from the omission issuer is admitted, and a failed sib
     { ...routeTo(ISSUER_B), independent: true },
   ]);
 
-  assert.deepEqual(Object.keys(answers[0].keys.contentKeys), ["bodytext"]);
-  assert.deepEqual(Object.keys(answers[0].errors), ["sidebar"]);
+  assert.deepEqual(distinct(answers[0].keys.contentKeys, "contentName"), ["bodytext"]);
+  assert.deepEqual(distinct(answers[0].errors, "coordinate"), ["sidebar"]);
   assert.deepEqual(
     posts.map((request) => request.issuerName),
     [ISSUER_A, ISSUER_B],
   );
   // The later route asks only for what is still missing: one item's bound
   // candidates and that item's period family, never the original request.
-  assert.deepEqual(Object.keys(posts[1].boundCandidates), ["sidebar"]);
-  assert.deepEqual(Object.keys(posts[1].sealed.periodKeys), ["free"]);
-  assert.deepEqual(posts[1].sealed.contentKeys, {});
+  assert.deepEqual(distinct(posts[1].boundCandidates, "contentName"), ["sidebar"]);
+  assert.deepEqual(distinct(posts[1].sealed.periodKeys, "accessGroup"), ["free"]);
+  assert.deepEqual(posts[1].sealed.contentKeys, []);
   assert.deepEqual(result, {
     missing: [],
     attempts: [
@@ -201,7 +233,7 @@ test("a client composed with BoundContentKeyResolver walks routes as the factory
     posts.map((request) => request.issuerName),
     [ISSUER_A, ISSUER_B],
   );
-  assert.deepEqual(Object.keys(posts[1].boundCandidates), ["sidebar"]);
+  assert.deepEqual(distinct(posts[1].boundCandidates, "contentName"), ["sidebar"]);
   assert.deepEqual(result, {
     missing: [],
     attempts: [
@@ -240,7 +272,12 @@ test("a key for an item the omission request did not present stays unsolicited",
     policies: { [ISSUER_A]: contentOnlyPolicy(ITEMS) },
     rewrite: (body) => ({
       ...body,
-      keys: { contentKeys: { ...body.keys.contentKeys, sidebar: body.keys.contentKeys.bodytext } },
+      keys: {
+        contentKeys: [
+          ...body.keys.contentKeys,
+          { ...item(body.keys.contentKeys, "bodytext"), contentName: "sidebar" },
+        ],
+      },
     }),
   });
   const { application } = /** @type {any} */ (await client.unlock(["bodytext"]));
@@ -329,10 +366,10 @@ test("the walk opens marked wraps only with their binding and skips an unknown m
     policies: { [ISSUER_A]: new AllowAllPolicy() },
     // One sidebar entry carries a marker this composition does not own.
     mutate: (delivery) => {
-      delivery.contentData.sidebar.keys.free[0].bind = "another-binding";
+      firstKey(delivery.contentData, "sidebar", "free").bind = "another-binding";
     },
   });
-  assert.equal(page.contentData.bodytext.keys.premium[0].bind, OMISSION_BIND_IDENTIFIER);
+  assert.equal(firstKey(page.contentData, "bodytext", "premium").bind, OMISSION_BIND_IDENTIFIER);
 
   /** @type {{ bytes: string, bound: boolean }[]} */
   const decrypts = [];
@@ -355,16 +392,17 @@ test("the walk opens marked wraps only with their binding and skips an unknown m
   // Content-key wraps are the only decrypts whose bytes sit in contentData keys.
   const entryOf = new Map(
     ITEMS.flatMap((name) =>
-      Object.values(page.contentData[name].keys)
-        .flat()
-        .map((/** @type {any} */ entry) => [`${entry.nonce}|${entry.key}`, entry]),
+      item(page.contentData, name).keys.map((/** @type {any} */ entry) => [
+        `${entry.period}|${entry.key}`,
+        entry,
+      ]),
     ),
   );
   const keyBytes = new Set([...entryOf.values()].map((entry) => entry.key));
   const wraps = decrypts.filter((call) => keyBytes.has(call.bytes));
   assert.ok(wraps.length > 0, "the walk tried the bound wraps");
   assert.equal(
-    wraps.some((call) => call.bytes === page.contentData.sidebar.keys.free[0].key),
+    wraps.some((call) => call.bytes === firstKey(page.contentData, "sidebar", "free").key),
     false,
     "the entry with an unknown marker is never tried",
   );

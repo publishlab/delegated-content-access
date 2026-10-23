@@ -88,10 +88,9 @@ export function disagreeingShippedAad(pageOrDcaData) {
   const disagreeing = structuredClone(pageOrDcaData);
 
   const contentData = own(disagreeing, "contentData");
-  if (contentData === null || typeof contentData !== "object") return disagreeing;
+  if (!Array.isArray(contentData)) return disagreeing;
 
-  for (const contentName of Object.keys(contentData)) {
-    const record = own(contentData, contentName);
+  for (const record of contentData) {
     if (record !== null && typeof record === "object") record.aad = DISAGREEING_AAD;
   }
 

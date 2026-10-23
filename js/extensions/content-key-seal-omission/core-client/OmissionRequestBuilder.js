@@ -9,7 +9,7 @@
 // this issuer, how a needed item's groups are walked, and what an incomplete
 // page sends are all decided there and not repeated here.
 //
-// The candidate carries the accessGroup and t it was read at. Those are labels
+// The candidate carries the accessGroup and period it was read at. Those are labels
 // and nothing else: they select which blob the issuer tries, and a wrong one
 // fails authentication rather than moving the coordinate. The client submits no
 // authoritative binding string.
@@ -26,7 +26,7 @@ const OPTIONS = ["clientPublicKey", "relayPeriodKeys", "innerBuilder"];
 /**
  * @typedef {{ build: Function, acceptsPeriodKeyResponseCoordinate?:
  *   (accessGroup: string, t: string, request: unknown) => boolean,
- *   keyFamilies?: (request: any) => import("../../../adapter-client/routeAttempts.js").ExtensionKeyFamilies }} InnerRequestBuilder
+ *   keyFamilies?: (request: any) => import("../../../core-client/requestBuilderContracts.js").ExtensionKeyFamilies }} InnerRequestBuilder
  */
 
 export class OmissionRequestBuilder {
@@ -86,7 +86,7 @@ export class OmissionRequestBuilder {
    * Bound candidates ask for item keys, never derivation keys. Keep any
    * additional key kinds the selected inner builder reports.
    * @param {any} request
-   * @returns {import("../../../adapter-client/routeAttempts.js").ExtensionKeyFamilies}
+   * @returns {import("../../../core-client/requestBuilderContracts.js").ExtensionKeyFamilies}
    */
   keyFamilies(request) {
     const document = typeof request?.toObject === "function" ? request.toObject() : request;
@@ -125,9 +125,12 @@ export class OmissionRequestBuilder {
  */
 export function omissionPresentedContentNames(request) {
   const candidates = own(request, "boundCandidates");
-  if (candidates === null || typeof candidates !== "object" || Array.isArray(candidates)) return [];
-  return Object.keys(candidates).filter((contentName) => {
-    const forwarded = own(candidates, contentName);
-    return Array.isArray(forwarded) && forwarded.length > 0;
-  });
+  if (!Array.isArray(candidates)) return [];
+  /** @type {Set<string>} */
+  const names = new Set();
+  for (const candidate of candidates) {
+    const contentName = own(candidate, "contentName");
+    if (typeof contentName === "string") names.add(contentName);
+  }
+  return [...names];
 }

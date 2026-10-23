@@ -20,6 +20,8 @@ import {
   ISSUER_NAME,
   PUBLISHER_ORIGIN,
 } from "../../../test-lib/fixtures/endpoint-hardening-world.js";
+import { sealedContentOf } from "../../../test-lib/helpers/inspect.js";
+import { keyAt } from "../../../test-reference/support/namedRecords.js";
 
 const NOW = Date.parse("2025-10-23T14:20:00Z");
 const REFERENCE = "opaque-issuer-reference";
@@ -98,13 +100,13 @@ test("recipient grant opens only an admitted current-render named item", async (
   const { unlock, calls } = await fixture();
   const answer = await unlock();
   assert.equal(answer.status, 200);
-  assert.ok(answer.body.keys.contentKeys[BODYTEXT]);
+  assert.ok(keyAt(answer.body.keys.contentKeys, { contentName: BODYTEXT }));
   assert.equal(answer.body.keys.periodKeys, undefined);
   assert.equal(answer.body.keys.chainKeys, undefined);
   assert.deepEqual(calls, { lookup: 1, policy: 1, opening: 1 });
   const nonBrowser = await unlock({ observedOrigin: undefined });
   assert.equal(nonBrowser.status, 200);
-  assert.ok(nonBrowser.body.keys.contentKeys[BODYTEXT]);
+  assert.ok(keyAt(nonBrowser.body.keys.contentKeys, { contentName: BODYTEXT }));
   assert.deepEqual(calls, { lookup: 2, policy: 2, opening: 2 });
 });
 
@@ -167,8 +169,8 @@ test("scope intersects presented names and current issuer policy", async () => {
   const { unlock, calls, request } = await fixture();
   const mixed = await unlock({ document: request([BODYTEXT, PREMIUM]) });
   assert.equal(mixed.status, 200);
-  assert.ok(mixed.body.keys.contentKeys[BODYTEXT]);
-  assert.equal(mixed.body.keys.contentKeys[PREMIUM], undefined);
+  assert.ok(keyAt(mixed.body.keys.contentKeys, { contentName: BODYTEXT }));
+  assert.equal(keyAt(mixed.body.keys.contentKeys, { contentName: PREMIUM }), undefined);
   assert.equal(calls.opening, 1);
 
   const ungranted = await unlock({ document: request([PREMIUM]) });
@@ -222,15 +224,16 @@ test("period input and invalid header are whole-request refusals", async () => {
   const { unlock, calls, request } = await fixture();
   const malformed = await unlock({ authorization: ["Bearer one", "Bearer two"] });
   assert.equal(malformed.status, 401);
+  // An empty record array is a present section: presence alone refuses.
   for (const section of ["periodKeys", "chainKeys"]) {
     const candidate = JSON.parse(request());
-    candidate.sealed[section] = {};
+    candidate.sealed[section] = [];
     const answer = await unlock({ document: JSON.stringify(candidate) });
     assert.equal(answer.status, 400, section);
   }
   for (const section of ["periodGeometry", "chainGeometry", "requestedPeriodKeys"]) {
     const candidate = JSON.parse(request());
-    candidate[section] = {};
+    candidate[section] = section === "requestedPeriodKeys" ? [] : {};
     const answer = await unlock({ document: JSON.stringify(candidate) });
     assert.equal(answer.status, 400, section);
   }
@@ -242,10 +245,14 @@ test("chain-key input is a whole-request refusal before grant lookup", async () 
   // A chain-key relay adds explicit geometry and one positioned sealed chain
   // key per access group. The blob is a real issuer envelope from this render.
   const relayed = JSON.parse(JSON.stringify(requestFor(page, ISSUER_NAME, [BODYTEXT])));
-  const [periodEnvelope] = Object.values(relayed.sealed.periodKeys[ARTICLE_GROUP]);
+  const { key: periodEnvelope } = relayed.sealed.periodKeys.find(
+    (/** @type {any} */ record) => record.accessGroup === ARTICLE_GROUP,
+  );
   const chain = JSON.parse(request());
   chain.periodGeometry = { chainsPerDay: 2, periodMinutes: 15 };
-  chain.sealed.chainKeys = { [ARTICLE_GROUP]: { "251023T2345": periodEnvelope } };
+  chain.sealed.chainKeys = [
+    { accessGroup: ARTICLE_GROUP, cutoff: "251023T2345", key: periodEnvelope },
+  ];
   const document = JSON.stringify(chain);
   // The base processor admits these bytes, so the refusal below is the grant
   // rule and not byte parsing.
@@ -272,7 +279,7 @@ test("grant presentation checks the one admitted request value, so one initial B
   // the grant rule must read that same parsed value, not reparse the bytes.
   const bom = await unlock({ document: `\uFEFF${request()}` });
   assert.equal(bom.status, 200);
-  assert.ok(bom.body.keys.contentKeys[BODYTEXT]);
+  assert.ok(keyAt(bom.body.keys.contentKeys, { contentName: BODYTEXT }));
   assert.deepEqual(calls, { lookup: 1, policy: 1, opening: 1 });
 
   const browser = issuer.browserHttp((origin) => origin === PUBLISHER_ORIGIN);
@@ -299,7 +306,11 @@ test("grant presentation checks the one admitted request value, so one initial B
     ["top", "requestedPeriodKeys"],
   ]) {
     const candidate = JSON.parse(request());
-    (where === "sealed" ? candidate.sealed : candidate)[section] = {};
+    // Carriers are empty record arrays and geometries empty objects: each is
+    // present and well formed, so only the presence check can refuse it.
+    (where === "sealed" ? candidate.sealed : candidate)[section] = section.endsWith("Keys")
+      ? []
+      : {};
     const answer = await unlock({ document: `\uFEFF${JSON.stringify(candidate)}` });
     assert.deepEqual(answer, { status: 400, body: { error: "binding_failed" } }, section);
   }
@@ -588,7 +599,7 @@ test("signed resource A controls grant scope despite an unsigned diagnostic reso
   assert.equal(admitted.status, 200);
   await client.applyResponse(page, ISSUER_NAME, JSON.parse(JSON.stringify(admitted.body)));
   assert.equal(
-    utf8Decode(await client.decrypt(page, BODYTEXT, allowed.page.sealedContent[BODYTEXT])),
+    utf8Decode(await client.decrypt(page, BODYTEXT, sealedContentOf(allowed.page, BODYTEXT))),
     "<p>The council voted 7-2 to rezone the harbour.</p>",
   );
   assert.deepEqual(allowed.calls, { lookup: 1, policy: 1, opening: 1 });
@@ -603,4 +614,22 @@ test("an admitted unsigned issuer alias cannot select a different grant audience
   assert.equal(answer.status, 401);
   assert.equal(answer.body.keys, undefined);
   assert.deepEqual(configured.calls, { lookup: 1, policy: 0, opening: 0 });
+});
+
+test("opaque records admit only content names without imposing signed-form array bounds", async () => {
+  for (const badName of ["bad|name", "bad name", "bad\nname", "x".repeat(65)]) {
+    const { unlock, calls } = await fixture({ contentNames: [BODYTEXT, badName] });
+    assert.equal((await unlock()).status, 401);
+    assert.deepEqual(calls, { lookup: 1, policy: 0, opening: 0 });
+  }
+  for (const contentNames of [
+    [BODYTEXT, BODYTEXT],
+    [BODYTEXT, ...Array.from({ length: 64 }, (_, i) => `other${i}`)],
+  ]) {
+    const { unlock, calls } = await fixture({ contentNames });
+    const answer = await unlock();
+    assert.equal(answer.status, 200, "opaque store encoding and set size remain local");
+    assert.ok(keyAt(answer.body.keys.contentKeys, { contentName: BODYTEXT }));
+    assert.deepEqual(calls, { lookup: 1, policy: 1, opening: 1 });
+  }
 });

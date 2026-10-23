@@ -16,14 +16,15 @@ Run one target against one or more bindings:
 npm run test:contract:issuer-endpoint -- path/to/binding.js
 npm run test:contract:issuer-core -- path/to/binding.js
 npm run test:contract:issuer-browser-origin -- path/to/binding.js
+npm run test:contract:html-writer -- path/to/binding.js
 ```
 
 The paths are relative to `js/`. Every binding comes from the command line.
 `npm run test:contract:reference:base` explicitly selects the combined local
 reference binding. `npm run test:contract` adds runner validation and the
 separately named endpoint fixture binding, then the selected browser-Origin
-reference binding. That selected target has its own command and is not baseline
-issuer evidence.
+reference binding and the selected HTML-writer reference binding. These selected
+targets have their own commands and are not baseline issuer evidence.
 
 A binding is an ESM module exporting `dcaTestBinding.targets`. Each own target
 name selects a closed entry in `contract-targets.json`. Its declaration names
@@ -38,3 +39,8 @@ through host callback instrumentation. Its passing result covers that selected
 admission boundary; it does not establish complete browser-profile conformance
 or a deployed host’s TLS and response-cache behavior. Other optional extensions
 keep their reference tests under `extensions/<name>/test/`.
+
+The [HTML-writer target](html-writer/README.md) supplies passive dangerous-script
+spellings to a callback writer and checks carrier values and the following page
+sentinel with scripting-enabled HTML parsing. Its deliberate slash-only binding
+is rejected by an owning negative proof. No native-port result is implied.

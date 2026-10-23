@@ -41,9 +41,7 @@ function encodeChainCapability(record, chainKeyBytes) {
     typeof record !== "object" ||
     record.kind !== "chain-keys" ||
     typeof record.accessGroup !== "string" ||
-    record.entries === null ||
-    typeof record.entries !== "object" ||
-    Array.isArray(record.entries)
+    !Array.isArray(record.entries)
   ) {
     throw dcaError(
       "bad_config",
@@ -92,21 +90,27 @@ function encodeChainCapability(record, chainKeyBytes) {
     cutoffs.add(selection.cutoffT);
   }
 
-  const names = Object.keys(record.entries);
+  // Each entry is one candidate chain key at a selected cutoff. Rival source
+  // records can give one cutoff several, and every one still comes from one
+  // record of this family, so the family bound holds for the entries too.
+  const entries = record.entries;
   if (
-    names.length === 0 ||
-    names.length > MAX_CHAIN_MEMBERS_PER_FAMILY ||
-    names.some((cutoffT) => !cutoffs.has(cutoffT))
+    entries.length === 0 ||
+    entries.length > MAX_CHAIN_MEMBERS_PER_FAMILY ||
+    entries.some(
+      (/** @type {any} */ entry) =>
+        entry === null || typeof entry !== "object" || !cutoffs.has(entry.t),
+    )
   ) {
     throw dcaError("bad_config", "a frozen chain response contains only selected cutoff entries");
   }
-  for (const cutoffT of names) {
-    if (typeof record.entries[cutoffT] !== "string") {
+  for (const { key } of entries) {
+    if (typeof key !== "string") {
       throw dcaError("bad_config", "a frozen chain response entry is base64url key material");
     }
     let bytes;
     try {
-      bytes = base64urlDecode(record.entries[cutoffT]);
+      bytes = base64urlDecode(key);
     } catch {
       throw dcaError("bad_config", "a frozen chain response entry is base64url key material");
     }

@@ -6,7 +6,6 @@
 import { requireBrowserCapabilities } from "./browserCapabilities.js";
 import { createDeliveryClient } from "./createDeliveryClient.js";
 import { MarkupDeliveryReader } from "../adapter-client/MarkupDeliveryReader.js";
-import { DeniedUnlockCache } from "../adapter-client/DeniedUnlockCache.js";
 import { dcaError } from "../core-shared/errors.js";
 
 /**
@@ -16,16 +15,31 @@ import { dcaError } from "../core-shared/errors.js";
  * @property {{ post: (url: string, request: object, context: { origin: string }) => Promise<{ status: number, contentType: string|null, body?: any }> }} transport
  * @property {string|null} [unlockUrl]
  * @property {boolean} [developmentHttpOrigin]
- * @property {import("../adapter-client/DeniedUnlockCache.js").BrowserDenialCache|false} [denialCache] - Defaults to a ten-minute in-memory cache.
+ * @property {import("../adapter-client/DeniedUnlockCache.js").BrowserDenialCache|false} [denialCache] - Explicitly composed denial scheduling; omitted by default. Positive key retention is independent.
  * @property {boolean} [acceptDirectResponse]
  */
-/** @typedef {BrowserEntryOptions & import("./composeClient.js").ComposeClientOptions} BrowserClientConfig */
+/** @typedef {{ clearReaderContext: () => void|Promise<void> }} ReaderReset */
+/**
+ * Browser setup validates recursive reset duties in addition to delivery.
+ * @typedef {Omit<import("./createDeliveryClient.js").DeliveryCompositionOptions, 'cache'|'chainCache'|'resolverFactory'|'recoverySources'|'responseSections'> & {
+ * cache?: import("./composeClient.js").ClientCache & ReaderReset,
+ * chainCache?: NonNullable<import("./composeClient.js").ComposeClientOptions['chainCache']> & ReaderReset,
+ * resolverFactory?: (options: import("./composeClient.js").ResolverOptions) => import("./createDeliveryClient.js").DeliveryResolver & ReaderReset,
+ * recoverySources?: (import("../core-client/ContentKeyResolver.js").RecoverySource & ReaderReset)[],
+ * responseSections?: (import("../core-client/ContentKeyResolver.js").ResponseSectionConsumer & ReaderReset)[]
+ * }} BrowserCompositionOptions
+ */
+/** @typedef {BrowserEntryOptions & BrowserCompositionOptions} BrowserClientConfig */
+/** @typedef {Omit<import("./createDeliveryClient.js").DeliveryClient, 'cache'|'resolver'> & { cache: import("./composeClient.js").ClientCache & ReaderReset, resolver: import("./createDeliveryClient.js").DeliveryResolver & ReaderReset, denialCache: import("../adapter-client/DeniedUnlockCache.js").BrowserDenialCache|null }} BrowserClient */
 
-/** @param {BrowserClientConfig} config @returns {import("./createDeliveryClient.js").DeliveryClient & { denialCache: import("../adapter-client/DeniedUnlockCache.js").BrowserDenialCache|null }} */
+/** @param {BrowserClientConfig} config @returns {BrowserClient} */
 export function createBrowserClient(config = /** @type {any} */ ({})) {
+  if (Object.hasOwn(config, "reader"))
+    throw dcaError("bad_config", "a browser client owns its reader; supply root");
   requireBrowserCapabilities();
-  const { root, denialCache = new DeniedUnlockCache(), ...rest } = config;
+  const { root, denialCache, ...rest } = config;
   if (
+    denialCache !== undefined &&
     denialCache !== false &&
     ["capture", "deny", "invalidate", "setContext", "denyContext"].some(
       (name) => typeof (/** @type {any} */ (denialCache)?.[name]) !== "function",
@@ -40,7 +54,7 @@ export function createBrowserClient(config = /** @type {any} */ ({})) {
   const client = createDeliveryClient({
     reader: new MarkupDeliveryReader(root),
     ...rest,
-    ...(denialCache === false ? {} : { denialCache }),
+    ...(denialCache === undefined || denialCache === false ? {} : { denialCache }),
   });
   if (typeof client.resolver.clearReaderContext !== "function")
     throw dcaError(
@@ -58,5 +72,8 @@ export function createBrowserClient(config = /** @type {any} */ ({})) {
     if (typeof (/** @type {any} */ (owner)?.clearReaderContext) !== "function")
       throw dcaError("bad_config", "a registered extension owner needs clearReaderContext");
   client.resolver.assertReaderContextReset?.();
-  return { ...client, denialCache: denialCache === false ? null : denialCache };
+  return /** @type {BrowserClient} */ ({
+    ...client,
+    denialCache: denialCache === undefined || denialCache === false ? null : denialCache,
+  });
 }

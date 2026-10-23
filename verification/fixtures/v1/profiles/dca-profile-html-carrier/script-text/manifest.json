@@ -1,0 +1,13 @@
+{
+  "schema": "dca-protocol-fixture-manifest/v1",
+  "protocol": "dca",
+  "version": "1",
+  "stability": "draft",
+  "files": [
+    {
+      "path": "dangerous-script-spellings.json",
+      "vectorFormat": "html-writer/1",
+      "consumers": ["base-contract"]
+    }
+  ]
+}

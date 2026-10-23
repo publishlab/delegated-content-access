@@ -83,6 +83,7 @@ import { DcaRequest } from "../../../core-shared--client-issuer/DcaRequest.js";
 import { sign, verify } from "../../../core-shared--publisher-issuer/jwt.js";
 import { decrypt } from "../../../core-shared/aead.js";
 import { randomPeriodKeySupply } from "../../../demo/support/randomPeriodKeySupply.js";
+import { writeJsonDelivery } from "../../../adapter-publisher/writeJsonDelivery.js";
 import { Sealer } from "../../../core-publisher/Sealer.js";
 import { wholeRenderIssuerSupplyPlan } from "../../../core-publisher/issuerSupplyPlan.js";
 import { Client } from "../../../test-lib/harnesses/client.js";
@@ -291,43 +292,47 @@ function issuerSpeaking(versions, { privateKey, algorithm, publisherKey, tierOf 
     const sealing = sealingWith(own(speaks, request.version));
     const renderId = claims.resource.renderId;
 
-    const presentedContent = request.sealedContentKeys ?? {};
-    const presentedPeriods = request.sealedPeriodKeys ?? {};
-
-    const contentNames = granted?.contentNames ?? Object.keys(presentedContent);
-    const accessGroups = granted?.accessGroups ?? Object.keys(presentedPeriods);
-
-    /** @type {Record<string, string>} */
-    const contentKeys = {};
-    for (const contentName of contentNames) {
-      const blob = own(presentedContent, contentName);
-      if (typeof blob !== "string") continue;
-      contentKeys[contentName] = await open(
-        blob,
-        { renderId, contentName },
-        sealing,
-        `contentKeys.${contentName}`,
-      );
-    }
-
-    /** @type {Record<string, Record<string, string>>} */
-    const periodKeys = {};
-    for (const accessGroup of accessGroups) {
-      const byPeriod = own(presentedPeriods, accessGroup);
-      if (byPeriod === null || typeof byPeriod !== "object") continue;
-
-      /** @type {Record<string, string>} */
-      const opened = {};
-      for (const t of Object.keys(byPeriod)) {
-        opened[t] = await open(
-          byPeriod[t],
-          { renderId, accessGroup, t },
-          sealing,
-          `periodKeys.${accessGroup}.${t}`,
-        );
+    // This historical grammar control retains every distinct successful rival.
+    // A failed opening cannot hide a success at the same coordinate. Preserve
+    // its original binding_failed assertion when a coordinate has no success.
+    const openRivals = async (records, fields, permitted, bindingFor) => {
+      const successes = [];
+      const failures = new Map();
+      const openedCoordinates = new Set();
+      for (const record of records) {
+        if (!permitted(record)) continue;
+        const identity = Object.fromEntries(fields.map((field) => [field, record[field]]));
+        const coordinate = JSON.stringify(fields.map((field) => record[field]));
+        try {
+          const key = await open(record.key, bindingFor(record), sealing, coordinate);
+          openedCoordinates.add(coordinate);
+          if (
+            !successes.some(
+              (entry) =>
+                fields.every((field) => entry[field] === record[field]) && entry.key === key,
+            )
+          )
+            successes.push({ ...identity, key });
+        } catch (error) {
+          failures.set(coordinate, error);
+        }
       }
-      periodKeys[accessGroup] = opened;
-    }
+      for (const [coordinate, error] of failures)
+        if (!openedCoordinates.has(coordinate)) throw error;
+      return successes;
+    };
+    const contentKeys = await openRivals(
+      request.sealedContentKeys ?? [],
+      ["contentName"],
+      ({ contentName }) => !granted?.contentNames || granted.contentNames.includes(contentName),
+      ({ contentName }) => ({ renderId, contentName }),
+    );
+    const periodKeys = await openRivals(
+      request.sealedPeriodKeys ?? [],
+      ["accessGroup", "period"],
+      ({ accessGroup }) => !granted?.accessGroups || granted.accessGroups.includes(accessGroup),
+      ({ accessGroup, period: t }) => ({ renderId, accessGroup, t }),
+    );
 
     return { contentKeys, periodKeys };
   };
@@ -730,11 +735,74 @@ describe("The dispatch key is the client's", () => {
           keyId: KEY_ID,
           resource,
           resourceJWT,
-          sealed: { contentKeys: { [ITEM_BODYTEXT]: v1.contentKeys[ITEM_BODYTEXT] } },
+          sealed: {
+            contentKeys: [{ contentName: ITEM_BODYTEXT, key: v1.contentKeys[ITEM_BODYTEXT] }],
+          },
         };
 
         const opened = await issuer.unlock(honest, { contentNames: [ITEM_BODYTEXT] });
-        assert.equal(opened.contentKeys[ITEM_BODYTEXT], asWire(ITEM_KEYS[ITEM_BODYTEXT]));
+        assert.equal(
+          opened.contentKeys.find((record) => record.contentName === ITEM_BODYTEXT).key,
+          asWire(ITEM_KEYS[ITEM_BODYTEXT]),
+        );
+
+        // Distinct key material at one coordinate survives in both carrier
+        // arms; failed and duplicate candidates cannot erase either success.
+        const sealing = sealingWith(world.build["1"]);
+        const alternate = new Uint8Array(16).fill(0x99);
+        const contentRival = await sealing.seal(
+          alternate,
+          world.publicKey,
+          carrier.algorithm,
+          carrierOptions({
+            random: seededRandom(901),
+            binding: { renderId: RENDER_A, contentName: ITEM_BODYTEXT },
+          }),
+        );
+        const periodRival = await sealing.seal(
+          alternate,
+          world.publicKey,
+          carrier.algorithm,
+          carrierOptions({
+            random: seededRandom(902),
+            binding: { renderId: RENDER_A, accessGroup: TIER_PREMIUM, t: T },
+          }),
+        );
+        const candidates = {
+          contentKeys: [
+            { contentName: ITEM_BODYTEXT, key: v1.contentKeys[ITEM_PREMIUM] },
+            honest.sealed.contentKeys[0],
+            { contentName: ITEM_BODYTEXT, key: contentRival },
+            honest.sealed.contentKeys[0],
+            { contentName: ITEM_BODYTEXT, key: v1.contentKeys[ITEM_PREMIUM] },
+          ],
+          periodKeys: [
+            { accessGroup: TIER_PREMIUM, period: T, key: v1.periodKeys[TIER_VAULT][T] },
+            { accessGroup: TIER_PREMIUM, period: T, key: v1.periodKeys[TIER_PREMIUM][T] },
+            { accessGroup: TIER_PREMIUM, period: T, key: periodRival },
+            { accessGroup: TIER_PREMIUM, period: T, key: v1.periodKeys[TIER_PREMIUM][T] },
+            { accessGroup: TIER_PREMIUM, period: T, key: v1.periodKeys[TIER_VAULT][T] },
+          ],
+        };
+        for (const reverse of [false, true]) {
+          const sealed = Object.fromEntries(
+            Object.entries(candidates).map(([name, records]) => [
+              name,
+              reverse ? [...records].reverse() : records,
+            ]),
+          );
+          const before = issuer.touched.count;
+          const rivals = await issuer.unlock({ ...honest, sealed });
+          assert.equal(issuer.touched.count - before, 10, "every candidate is attempted");
+          assert.deepEqual(
+            rivals.contentKeys.map((record) => record.key).sort(),
+            [asWire(ITEM_KEYS[ITEM_BODYTEXT]), asWire(alternate)].sort(),
+          );
+          assert.deepEqual(
+            rivals.periodKeys.map((record) => record.key).sort(),
+            [asWire(TIER_KEYS[TIER_PREMIUM][T]), asWire(alternate)].sort(),
+          );
+        }
 
         // One field changed, in the one place the reader is free to
         // change it. The outcome is a refusal and never "opened under
@@ -754,7 +822,9 @@ describe("The dispatch key is the client's", () => {
               {
                 ...honest,
                 version: "X",
-                sealed: { contentKeys: { [ITEM_BODYTEXT]: v1.contentKeys[ITEM_PREMIUM] } },
+                sealed: {
+                  contentKeys: [{ contentName: ITEM_BODYTEXT, key: v1.contentKeys[ITEM_PREMIUM] }],
+                },
               },
               grantedByTier(TIER_PREMIUM),
             ),
@@ -853,9 +923,7 @@ async function fleet() {
     // `core-publisher/Sealer` still writes version 1 and the shipped client
     // admits only that version. `requestUnder` manually selects the hypothetical
     // grammar at the issuer; this does not establish a deployable vX exchange.
-    return JSON.parse(
-      JSON.stringify({ ...rendered.dcaData, sealedContent: rendered.sealedContent }),
-    );
+    return JSON.parse(utf8Decode(writeJsonDelivery(rendered)));
   };
 
   // The store counts its own reaches, which is what "no private key was
@@ -946,7 +1014,9 @@ async function readWith(page, contentName, keyBase64url) {
     await decrypt(
       base64urlDecode(keyBase64url),
       new Uint8Array(12),
-      base64urlDecode(page.sealedContent[contentName]),
+      base64urlDecode(
+        page.sealedContent.find((record) => record.contentName === contentName).content,
+      ),
       aad,
     ),
   );
@@ -993,7 +1063,11 @@ describe("Hypothetical two-grammar deployment", () => {
       const opened = await dual.unlock(request, { contentNames: [ITEM_BODYTEXT] });
 
       assert.equal(
-        await readWith(page, ITEM_BODYTEXT, opened.contentKeys[ITEM_BODYTEXT]),
+        await readWith(
+          page,
+          ITEM_BODYTEXT,
+          opened.contentKeys.find((record) => record.contentName === ITEM_BODYTEXT).key,
+        ),
         ARTICLES.A,
         `the key came back for version ${version} and opens the article`,
       );
@@ -1015,7 +1089,7 @@ describe("Hypothetical two-grammar deployment", () => {
     // world: the shipped issuer opens the shipped grammar.
     const ok = await endpoint.unlock(requestUnder("1", v1Page));
     assert.equal(ok.status, 200);
-    assert.ok(ok.body.keys.contentKeys[ITEM_BODYTEXT]);
+    assert.ok(ok.body.keys.contentKeys.find((record) => record.contentName === ITEM_BODYTEXT)?.key);
 
     const before = { keyStore: keyStore.reachCount, publisherKeys: asked.publisherKeys };
 
@@ -1048,7 +1122,11 @@ describe("Hypothetical two-grammar deployment", () => {
       contentNames: [ITEM_BODYTEXT],
     });
     assert.equal(
-      await readWith(vXPage, ITEM_BODYTEXT, opened.contentKeys[ITEM_BODYTEXT]),
+      await readWith(
+        vXPage,
+        ITEM_BODYTEXT,
+        opened.contentKeys.find((record) => record.contentName === ITEM_BODYTEXT).key,
+      ),
       ARTICLES.A,
     );
 
@@ -1090,7 +1168,11 @@ describe("Hypothetical two-grammar deployment", () => {
         contentNames: [ITEM_BODYTEXT],
       });
       assert.equal(
-        await readWith(page, ITEM_BODYTEXT, opened.contentKeys[ITEM_BODYTEXT]),
+        await readWith(
+          page,
+          ITEM_BODYTEXT,
+          opened.contentKeys.find((record) => record.contentName === ITEM_BODYTEXT).key,
+        ),
         ARTICLES.A,
       );
     }
@@ -1109,7 +1191,7 @@ describe("Hypothetical two-grammar deployment", () => {
           {
             ...vXRequest,
             sealed: {
-              contentKeys: { [ITEM_BODYTEXT]: v1Request.sealed.contentKeys[ITEM_BODYTEXT] },
+              contentKeys: v1Request.sealed.contentKeys,
             },
           },
           { contentNames: [ITEM_BODYTEXT] },
@@ -1123,7 +1205,7 @@ describe("Hypothetical two-grammar deployment", () => {
           {
             ...v1Request,
             sealed: {
-              contentKeys: { [ITEM_BODYTEXT]: vXRequest.sealed.contentKeys[ITEM_BODYTEXT] },
+              contentKeys: vXRequest.sealed.contentKeys,
             },
           },
           { contentNames: [ITEM_BODYTEXT] },
@@ -1171,11 +1253,18 @@ describe("Hypothetical two-grammar deployment", () => {
     // still produces a well-formed request: every member is there, and the
     // blobs are the page's.
     assert.deepEqual(
-      Object.keys(vXBuilt.sealed.contentKeys),
+      vXBuilt.sealed.contentKeys.map((record) => record.contentName),
       [ITEM_BODYTEXT],
       "the item asked for, and no mangling around it",
     );
-    assert.deepEqual(Object.keys(vXBuilt.sealed.periodKeys), [TIER_PREMIUM]);
+    assert.deepEqual(
+      vXBuilt.sealed.periodKeys.map(({ accessGroup, period }) => ({ accessGroup, period })),
+      vXPage.issuerData
+        .find((record) => record.issuerName === ISSUER_NAME)
+        .sealed.periodKeys.filter((record) => record.accessGroup === TIER_PREMIUM)
+        .map(({ accessGroup, period }) => ({ accessGroup, period })),
+      "every period coordinate for the requested item's tier is relayed unchanged",
+    );
     assert.equal(vXBuilt.resourceJWT, vXPage.resourceJWT);
 
     // The test, acting as a reader that edits the POST body, moves one field
@@ -1190,7 +1279,11 @@ describe("Hypothetical two-grammar deployment", () => {
     const dual = issuer(["1", "X"]);
     const opened = await dual.unlock(vXRequest, { contentNames: [ITEM_BODYTEXT] });
     assert.equal(
-      await readWith(vXPage, ITEM_BODYTEXT, opened.contentKeys[ITEM_BODYTEXT]),
+      await readWith(
+        vXPage,
+        ITEM_BODYTEXT,
+        opened.contentKeys.find((record) => record.contentName === ITEM_BODYTEXT).key,
+      ),
       ARTICLES.A,
     );
 
@@ -1221,7 +1314,11 @@ describe("Hypothetical two-grammar deployment", () => {
 
     // What landed in the cache is a period key and nothing about a grammar.
     assert.deepEqual(
-      base64urlDecode(body.keys.periodKeys[TIER_PREMIUM][PERIOD_T]),
+      base64urlDecode(
+        body.keys.periodKeys.find(
+          (record) => record.accessGroup === TIER_PREMIUM && record.period === PERIOD_T,
+        ).key,
+      ),
       await periodKeySupply.derive(TIER_PREMIUM, PERIOD_T),
     );
 
