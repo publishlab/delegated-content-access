@@ -83,7 +83,7 @@ The keys here are published test keys. The ES256 signatures are retained
 values: a regeneration keeps a recorded signature only after it verifies over
 the same header and payload.
 
-Limitations: every claim decision is incomplete. The package is regression and
+Limitations: the package is regression and
 provenance evidence for the JavaScript issuer and client, not independent
 conformance. It does not replay the publisher: the renders are recorded input.
 It covers one geometry, one window and one cutoff, one issuer, direct

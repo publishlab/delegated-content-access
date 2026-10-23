@@ -7,8 +7,8 @@
 // Section 2.2 admits canonical unpadded base64url and refuses padding,
 // standard-base64 characters, undecodable input and a spelling with nonzero
 // unused trailing bits. `codec.js` decodes all but the last of those on
-// purpose: PEM key material goes through the same call, and the encoding
-// reference documents that leniency. So this module implements the strict rule
+// purpose: PEM key material goes through the same call and may need lenient
+// decoding. This module implements the strict wire rule
 // under its own name, and builds it on the generic pair instead of replacing it.
 //
 // Before this module existed, three receive boundaries implemented the same

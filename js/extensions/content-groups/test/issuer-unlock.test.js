@@ -220,8 +220,14 @@ function request(
     },
     renderPeriod: page.renderPeriod,
     periodGeometry: page.periodGeometry,
-    ...(groups === undefined ? {} : { requestedContentGroups: groups }),
-    ...(items === undefined ? {} : { requestedContentKeys: items }),
+    ...(groups === undefined && items === undefined
+      ? {}
+      : {
+          requested: {
+            ...(groups === undefined ? {} : { contentGroups: groups }),
+            ...(items === undefined ? {} : { contentKeys: items }),
+          },
+        }),
     ...(cutoffs === undefined ? {} : { requestedChainCutoffs: cutoffs }),
     ...rest,
   };
@@ -648,7 +654,7 @@ test("an authorized changed connector returns a candidate that cannot open the g
     base64urlEncode(new Uint8Array(16)),
   ]) {
     const changed = structuredClone(body);
-    changed.requestedContentKeys[0].connector = connector;
+    changed.requested.contentKeys[0].connector = connector;
     const result = await send(w, core, changed);
     assert.equal(result.response.status, 200);
     await assert.rejects(
@@ -660,7 +666,7 @@ test("an authorized changed connector returns a candidate that cannot open the g
   assert.equal(denied.code, "denied");
   assert.equal(Object.hasOwn(denied.response.body, "contentGroupKeys"), false);
   const malformed = structuredClone(body);
-  malformed.requestedContentKeys[0].connector = base64urlEncode(new Uint8Array(15));
+  malformed.requested.contentKeys[0].connector = base64urlEncode(new Uint8Array(15));
   assert.equal((await send(w, core, malformed)).code, "binding_failed");
 });
 

@@ -151,7 +151,7 @@ function assertComplete(html) {
   assert.equal(page.inner(bodytext), BODYTEXT, "#main .bodytext holds the full body");
   assert.equal(page.attribute(bodytext, "class"), "bodytext");
   assert.equal(page.attribute(page.byTag("body")[0], "class"), "article");
-  assert.equal(page.byClass("paywallTeaser").length, 0, "the prompt is gone");
+  assert.equal(page.byClass("subscription-prompt").length, 0, "the prompt is gone");
   const inline = page.inner(page.byId("factbox-inline"));
   assert.equal(inline, FACTBOX);
   assert.equal(page.inner(page.byId("factbox-aside")), inline, "repeated placement");
@@ -168,9 +168,9 @@ function assertFactboxOnly(html) {
   const page = observe(html);
   const [bodytext] = page.byClass("bodytext");
   assert.match(page.inner(bodytext), /The first lines of the story/, "the teaser stays");
-  assert.equal(page.attribute(bodytext, "class"), "bodytext lab-paywall-locked teaserContent");
+  assert.equal(page.attribute(bodytext, "class"), "bodytext locked preview-content");
   assert.equal(page.attribute(page.byTag("body")[0], "class"), "article blur-content");
-  assert.equal(page.byClass("paywallTeaser").length, 1, "the prompt stays");
+  assert.equal(page.byClass("subscription-prompt").length, 1, "the prompt stays");
   assert.equal(page.inner(page.byId("factbox-inline")), FACTBOX);
   assert.equal(page.inner(page.byId("factbox-aside")), FACTBOX);
 }

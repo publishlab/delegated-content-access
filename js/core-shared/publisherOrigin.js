@@ -63,9 +63,6 @@ function loopbackHost(host) {
  * `Origin` header would pass an http delivery: a page served over http reports
  * the http origin, so the two values agree, but no production render uses http.
  *
- * A PHP counterpart, `Origin::canonical($value, $localhostHttp)`, uses the
- * same host set and the same opt-in.
- *
  * @param {unknown} value
  * @param {boolean} [developmentHttpOrigin] - the development profile
  * @returns {string|null}

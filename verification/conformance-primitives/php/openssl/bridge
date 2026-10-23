@@ -40,7 +40,7 @@ if [ $# -gt 0 ]; then
 fi
 
 if [ "$mode" = prepare ]; then
-  [ -f "$HERE/v1/bridge.php" ] || { echo "no $HERE/v1/bridge.php; the PHP bridge has not landed yet" >&2; exit 2; }
+  [ -f "$HERE/v1/bridge.php" ] || { echo "no $HERE/v1/bridge.php; the PHP bridge source is missing" >&2; exit 2; }
 
   if ! BASE="$("$HERE/../install-toolchain" --version "$VERSION")"; then
     echo "no PHP toolchain for version $VERSION, so the bridge was not prepared." >&2

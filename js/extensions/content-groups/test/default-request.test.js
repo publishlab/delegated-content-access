@@ -26,11 +26,11 @@ test("the same default request lets issuer policy choose reusable, item-only, or
     const client = w.reader().client(publication, issuer);
     await client.attempt(["bodytext"]);
     assert.equal(client.sent.length, 1, mode);
-    assert.deepEqual(client.sent[0].requestedContentGroups, [
+    assert.deepEqual(client.sent[0].requested.contentGroups, [
       { contentName: "bodytext", groups: ["sports"] },
     ]);
     assert.deepEqual(
-      findAll(client.sent[0].requestedContentKeys, { contentName: "bodytext" }).map(
+      findAll(client.sent[0].requested.contentKeys, { contentName: "bodytext" }).map(
         (route) => route.group,
       ),
       ["sports"],
@@ -67,7 +67,7 @@ test("a malformed connector sibling leaves valid grouped and ordinary items open
   await client.attempt(["bodytext", "headline", "purchase"]);
   assert.equal(client.sent.length, 1);
   assert.deepEqual(
-    client.sent[0].requestedContentGroups.map((entry) => entry.contentName),
+    client.sent[0].requested.contentGroups.map((entry) => entry.contentName),
     ["bodytext"],
   );
   assert.equal(await client.open("bodytext"), "valid body");

@@ -129,8 +129,8 @@ export async function bindSelfTest({ fixture, privateKey, algorithm, keySealing 
  */
 
 /**
- * The two failure shapes 7.2 asks an issuer to keep apart, decided by the
- * fixture and not by the count.
+ * Distinguish a misconfigured opener from a failing request blob using the
+ * self-test fixture rather than the number of failed request entries.
  *
  * @param {SelfTestResult} selfTest
  * @param {BlobOutcome[]} outcomes - this request's blobs

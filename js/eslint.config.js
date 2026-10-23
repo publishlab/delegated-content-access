@@ -5,7 +5,7 @@ import globals from "globals";
 
 export default [
   {
-    // paths lint does not cover yet; coverage grows as entries come off this list
+    // Generated mutation output and installed dependencies are excluded from lint.
     ignores: [".stryker-tmp/**", "node_modules/**"],
   },
   js.configs.recommended,

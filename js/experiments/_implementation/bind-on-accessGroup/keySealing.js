@@ -28,10 +28,7 @@ function checkedOptions(options) {
     );
   }
   if (checked.binding === undefined) {
-    throw dcaError(
-      "binding_failed",
-      "this variant seals nothing unbound; core/keySealing is what an unbound seal is",
-    );
+    throw dcaError("binding_failed", "this variant requires a binding coordinate");
   }
   return checked;
 }

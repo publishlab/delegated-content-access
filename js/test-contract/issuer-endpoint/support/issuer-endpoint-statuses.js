@@ -195,8 +195,7 @@ export const NON_VECTOR_STATUS_CASES = [
  */
 export function assertContractOwnsItsStatuses(sources) {
   const contractRoot = new URL("../../", import.meta.url).href;
-  const referenceStatusSource = ["Unlock", "Endpoint.js"].join("");
-  const productStatusSource = ["Dca", "Unlock", "Endpoint"].join("");
+  const implementationEndpoint = ["Unlock", "Endpoint"].join("");
   /** @type {string[]} */
   const failures = [];
   for (const source of sources) {
@@ -208,9 +207,8 @@ export function assertContractOwnsItsStatuses(sources) {
         failures.push(`${file} imports ${specifier}, which is outside test-contract/`);
       }
     }
-    if (text.includes(referenceStatusSource))
-      failures.push(`${file} names ${referenceStatusSource}`);
-    if (text.includes(productStatusSource)) failures.push(`${file} names ${productStatusSource}`);
+    if (text.includes(implementationEndpoint))
+      failures.push(`${file} names an implementation endpoint`);
   }
   return failures;
 }

@@ -1,14 +1,8 @@
 // @ts-check
 //
-// The Sealer's config surface. A name the constructor does not read is refused
-// where it arrives, not dropped in the destructure: an option that never
-// reaches the wire makes a caller believe it configured something, and the
-// render comes out of the other end looking correct. `domain` is the one that
-// proved it. It was read out of the signed resource and every call site kept
-// passing it, so the vector generator failed as a byte diff and one wire test
-// asserted a fixture constant it could no longer change. The render's delivery
-// coordinate is `origin` now, and `domain` is a name this Sealer has never
-// read; it stays here as the case the rule was written for.
+// The Sealer refuses unknown configuration names at construction, so a caller
+// cannot silently configure an option it never reads. `origin` is the render's
+// delivery coordinate; `domain` exercises the unknown-option refusal.
 //
 // `periodSecret` keeps its own refusal, and a `bad_config` rather than this
 // one, because it is a retired base configuration shape rather than a typo.

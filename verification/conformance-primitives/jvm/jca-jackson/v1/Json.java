@@ -14,7 +14,7 @@ import java.util.Map;
  * gives the result the shape the bridge reads.
  *
  * The JDK ships no JSON parser, so the lane pins Jackson through
- * `install-toolchain` and compiles and runs against those jars. Jackson reads
+ * `install-libraries` and compiles and runs against those jars. Jackson reads
  * the bytes and {@link ObjectNode} holds the result; the accessors below hand
  * the bridge Java values, so no operation touches a Jackson type.
  *

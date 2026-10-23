@@ -30,8 +30,8 @@ fi
 
 mkdir -p "$BRIDGE_OUT"
 
-# The cache dir is shared: $HOME is a bind mount several concurrent runs see at once,
-# and two runs from this same tree publish to this same directory. One exclusive lock
+# The cache dir may be shared by several concurrent runs, and two runs from
+# this tree publish to the same directory. One exclusive lock
 # covers the publish, so a second caller waits rather than executing an assembly that
 # is halfway written.
 exec 9>"$BRIDGE_OUT/.build.lock"

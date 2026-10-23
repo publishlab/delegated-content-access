@@ -1,5 +1,5 @@
 // @ts-check
-// Experimental replacement for the ordinary ECDH carrier, not an adopted suite.
+// Independent implementation of the adopted ordinary ECDH carrier for comparison.
 // Copies the ECDH flow and validation from core-shared--publisher-issuer/keySealing.js:
 // that module has no carrier-layout seam. The shared crypto operations stay reused.
 import { encrypt, decrypt } from "../../../core-shared/aead.js";

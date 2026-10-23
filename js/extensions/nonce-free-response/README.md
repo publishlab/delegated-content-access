@@ -2,7 +2,7 @@
 
 Status: provisional implementation-only experiment. No profile or method ID,
 profile-system registration, negotiation, fallback or operative protocol change.
-Adoption remains paused. Only an explicit caller of this experiment uses it.
+It is not adopted. Only an explicit caller of this experiment uses it.
 It depends on `client-bound-transport` for peer admission and settled kind/AAD
 semantics; it does not select that extension's current wire procedure.
 
@@ -53,7 +53,7 @@ batch framework. Cloning preserves shared array references, so the output writer
 copies ancestors before replacing each entry. An issuer may reuse an array in
 different sections without one location overwriting another's ciphertext.
 
-**Unique-coordinate restriction:** this paused prototype refuses a repeated
+**Unique-coordinate restriction:** this prototype refuses a repeated
 kind and semantic path before any derivation or encryption, consuming that
 preparation attempt. It does not support same-coordinate rival candidates,
 even if their key bytes are equal. The local duplicate check prevents reuse
@@ -98,8 +98,8 @@ key/kind to a wrapping callback; stock resolver and extension `openKey` omit ful
 path; retained wrapped-period cache reopening does not pass it. These callers
 need one consistent original-path argument before stock composition could use
 this candidate. Current generic composed names also admit lone surrogates;
-this experiment's framing enforces scalar admission locally. No stock source,
-cache adapter, spec, profile catalogue, vector or conformance corpus changed.
+this experiment's framing enforces scalar admission locally. The specified
+response procedures, stock caches and conformance claims remain unchanged.
 The tests demonstrate candidate mechanics and usable delivered capability, not
 a stock resolver or whole application integration claim.
 

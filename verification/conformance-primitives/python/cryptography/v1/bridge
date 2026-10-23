@@ -10,9 +10,8 @@
 # where the interpreter is stays with the lane that owns it, the same way the
 # lane check asks it.
 #
-# `python3` on PATH is not that interpreter. The system one here is 3.11 with no
-# cryptography, so a bridge started through it would report a missing AES
-# library rather than an observation.
+# `python3` on PATH need not match the selected interpreter or have the pinned
+# cryptography package. Use the lane installers to select both dependencies.
 #
 # The Python wrapper has no code for the protocol, the operations or what an
 # observation looks like. It reads nothing on stdin and writes nothing on

@@ -7,7 +7,9 @@
 // with `--go-result <file>`, this script merges that implementation's report
 // and marks, per case, exactly which recorded fields it checked, and adds the
 // envelopes it sealed for Node to open. Without the flag, every case records
-// an empty `goChecked` list.
+// an empty `goChecked` list. The Go checker is not included here; `--go-result`
+// imports an externally supplied report. Without it, this recorder reproduces
+// the Node cases without the recorded independent-check evidence.
 //
 //   node tools/record-dca-vectors.mjs [--go-result <file>]
 //   npx prettier --write test/vectors/dca-compact-ecdh.json

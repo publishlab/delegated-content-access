@@ -2,11 +2,10 @@
 //
 // This module defines the identifier grammar once, for every role that reads a name.
 //
-// DCA carries three identifiers (`contentName`, `accessGroup`, `issuerName`)
-// in JSON member position, and member position is the one place in the
-// document whose host-language representation is lossy. Only some strings
-// survive the round trip unchanged in JavaScript, PHP and Python, and this
-// module defines that narrower set.
+// contentName, accessGroup and issuerName are record-field values on the wire.
+// Implementations may also use them as lookup keys across JavaScript, PHP and
+// Python; this module implements their shared grammar from
+// docs/spec--data-format.md Section 2.1.
 //
 // One grammar covers all three. The publisher's sealer runs a name through
 // here at the point it takes it, so a name that cannot be walked safely never
@@ -21,26 +20,17 @@
 //
 // ## What a name has to survive
 //
-// A name is used as a JSON member key, looked up across JS, PHP and Python, and
-// inside the sealed blob's BIND value. Period keys are also supplied at
-// coordinates containing the accessGroup. Each of these uses needs the same
-// bytes on every runtime and every read: no case folding, no Unicode
-// normalization, no reordering, and a length small enough that the BIND still
-// fits, which is what MAX_NAME_LENGTH guards.
-// A consumer compares names by exact bytes, never a fuzzy or normalized match.
-// A name enters the crypto binding and serves as a lookup key across runtimes,
-// so every refusal below serves that byte stability.
+// Names enter sealed-blob BIND values and may serve as lookup keys across
+// runtimes. Each use needs the same bytes: no case folding or Unicode
+// normalization, and a length small enough for BIND, guarded by MAX_NAME_LENGTH.
+// Consumers compare names by exact bytes, never a fuzzy or normalized match.
 //
 // ## What the grammar refuses, and why
 //
-// - **integer-like names** - `2`, `10`, `0`, `2025-10`. ES
-//   `OrdinaryOwnPropertyKeys` hoists integer-like member names ahead of every
-//   string key and sorts them ascending, in every engine, so the client's
-//   walk is no longer the publisher's authored order. PHP `json_encode` goes
-//   further and emits a JSON **array** for a level whose keys are all numeric.
-//   That silently corrupts the wire at the producer, and the publisher CMS is
-//   written in PHP. Requiring a letter first closes the whole class, and that
-//   is why the grammar starts `[a-zA-Z]`.
+// - **digit-initial names** - when implementations use names as lookup keys,
+//   JavaScript reorders integer-like keys and PHP coerces numeric keys.
+//   Requiring a letter first avoids that class of representation differences.
+//   Wire collections themselves remain arrays of named records.
 // - **the delimiter `|`** - BIND and the period-key labels join their fields
 //   on it. With `|` banned in every field that enters a join, `premium1` and
 //   `premium|1` cannot produce one string, so no pair of fields can be
@@ -67,13 +57,8 @@
 // authority is `docs/spec--data-format.md` Section 2.1; this reference does not
 // maintain a narrower producer grammar beside the accepted wire grammar.
 //
-// `resourceId` and `keyId` are values rather than member names, so the
-// member-name reasoning does not apply to them. The spec's own examples,
-// `123456` and `2025-10`, are digit-initial and would fail the grammar above.
-// `keyId` is opaque, and consumers require only that it is a non-empty string.
-// `resourceId` enters the aad, and its own rule lives in
-// `core-shared--client-publisher/names`, beside the delimiter it must not
-// contain.
+// `resourceId` and `keyId` are opaque string values rather than identifiers
+// governed by this grammar. Their own validation rules apply.
 
 import { dcaError } from "./errors.js";
 
@@ -92,8 +77,7 @@ import { dcaError } from "./errors.js";
  *
  * `|` stays banned in all three, which keeps the aad and BIND joins
  * unambiguous; `:` and `_` are safe there because neither is a join character.
- * A `:` in a name reaches a JSON member name in `dca-sealed-content`, where it
- * needs no escape: `{"sponsor:intro": "..."}`.
+ * A `:` is carried unchanged in the name field of a `dca-sealed-content` record.
  */
 export const NAME_PATTERN = /^[a-zA-Z][a-zA-Z0-9_:-]*$/;
 
@@ -106,8 +90,7 @@ export const NAME_PATTERN = /^[a-zA-Z][a-zA-Z0-9_:-]*$/;
  * the exact 22-character renderId, a 64-character accessGroup remains below
  * that ceiling.
  *
- * The PHP validators enforce the same cap, and the rule reads: an identifier
- * contains 1 through 64 characters.
+ * An identifier contains 1 through 64 characters.
  */
 export const MAX_NAME_LENGTH = 64;
 
@@ -117,7 +100,7 @@ export const CONTENT_NAME_PATTERN = NAME_PATTERN;
 /** Same grammar. An accessGroup is a name in its own namespace. */
 export const ACCESS_GROUP_PATTERN = NAME_PATTERN;
 
-/** Same grammar; the spec's own example contains `_`. */
+/** Same grammar. An issuerName is a name in its own namespace. */
 export const ISSUER_NAME_PATTERN = NAME_PATTERN;
 
 /**

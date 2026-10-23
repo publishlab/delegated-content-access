@@ -39,8 +39,8 @@ export const CONTRACT = Object.freeze({
   wire: Object.freeze({
     sealedSeeds: "contentWindowSeeds",
     connectors: "connectors",
-    requestedContentGroups: "requestedContentGroups",
-    requestedContentKeys: "requestedContentKeys",
+    requested: "requested",
+    contentGroups: "contentGroups",
     requestedChainCutoffs: "requestedChainCutoffs",
     response: "contentGroupKeys",
     chainKeys: "chainKeys",

@@ -264,13 +264,15 @@ connector:
   },
   "renderPeriod": "261014T1500",
   "periodGeometry": { "chainsPerDay": 2, "periodMinutes": 60 },
-  "requestedContentGroups": [
-    { "contentName": "bodytext", "groups": ["politics"] },
-    { "contentName": "headline", "groups": ["politics"] }
-  ],
-  "requestedContentKeys": [
-    { "contentName": "shoppingAd", "group": "shopping", "connector": "MOKIZiqdUlGNzqTXNMXhaA" }
-  ]
+  "requested": {
+    "contentGroups": [
+      { "contentName": "bodytext", "groups": ["politics"] },
+      { "contentName": "headline", "groups": ["politics"] }
+    ],
+    "contentKeys": [
+      { "contentName": "shoppingAd", "group": "shopping", "connector": "MOKIZiqdUlGNzqTXNMXhaA" }
+    ]
+  }
 }
 ```
 
@@ -278,11 +280,20 @@ The request members this profile adds:
 
 ```text
 request.sealed.contentWindowSeeds[] = {contentName, windowStart, key: unchanged seed envelope}
-request.requestedContentGroups[] = {contentName, groups: [group, ...]}
-request.requestedContentKeys[] = {contentName, group, connector}
+request.requested.contentGroups[] = {contentName, groups: [group, ...]}
+request.requested.contentKeys[] = {contentName, group, connector}
 request.requestedChainCutoffs[] = {windowStart, cutoff}      (optional)
 request.renderPeriod, request.periodGeometry                 (copied from the delivery)
 ```
+
+When present, `requested` MUST be a non-null object and MUST NOT be an array.
+The issuer MUST refuse any other container shape with `binding_failed` before
+signature verification, policy or opening, even beside ordinary coordinates.
+Members of `requested` defined by other selected capabilities keep their own
+rules. Unknown members follow data format Section 2: issuers ignore them and
+clients MUST NOT relay them. Top-level `requestedContentGroups` and
+`requestedContentKeys` are unknown members, not equivalent selections; they
+supply neither collection.
 
 Seed, requested-group and requested-cutoff records require their named own
 members and ignore unknown members under data format Section 2. Unknown members
@@ -293,13 +304,13 @@ closed requested-item record below remains closed.
   unchanged. Only one issuer's source block is relayed, and its seed windows may
   be a subset of that block. `contentData`, connectors other than a requested
   item's and item masks are not relayed.
-- `requestedContentGroups` holds `{contentName, groups}` records; `groups` is
+- `requested.contentGroups` holds `{contentName, groups}` records; `groups` is
   a nonempty list of unique group names. Each name is the `group` of one of
   that item's `connectors` records. List and record order do not change
   authorization. An explicit empty list is refused; a request omits the content
   name instead. Several records for one content name request the union of
   their groups; a group named twice is requested once.
-- `requestedContentKeys` holds `{contentName, group, connector}` records with
+- `requested.contentKeys` holds `{contentName, group, connector}` records with
   exactly those three members and a canonical 16-byte connector. Each record is
   one item route: the group whose connector the issuer recovers the ckey
   through. Several records for one content name are alternative item routes
@@ -310,7 +321,9 @@ closed requested-item record below remains closed.
 - Every requested content name carries a seed in `contentWindowSeeds`, and
   every seeded content name is requested. A requested content key needs the
   seed of its render window.
-- `requestedContentGroups` may be empty when `requestedContentKeys` asks an item.
+- `requested.contentGroups` may be absent or empty when `requested.contentKeys` asks an item.
+  Likewise, `requested.contentKeys` may be absent or empty for group-only requests.
+  An absent `requested` supplies neither collection.
   A request that selects no content-group route and no ordinary coordinate is
   refused.
 - `requestedChainCutoffs`, when present, holds `{windowStart, cutoff}` records
@@ -371,7 +384,8 @@ issuer mechanics; seed opening does not replace that handler.
 
 ### Admission order and refusal
 
-- The issuer counts raw request records and list entries against the bounds
+- The issuer first checks the shape of `requested` when present, then counts
+  raw request records and list entries against the bounds
   and checks their shapes before signature verification. A count over a bound refuses with
   `too_many_entries`; a malformed member refuses with `binding_failed`.
 - A requested content name without a seed, or a seed for a content name the
@@ -740,9 +754,9 @@ profile or require enumerating a publisher's catalogue.
 
 A publisher sizes each issuer's request as a client relays it when it needs
 every item: the base members, the members this profile's default selection
-adds (seed envelopes, `requestedContentGroups`, `renderPeriod` and
+adds (seed envelopes, `requested.contentGroups`, `renderPeriod` and
 `periodGeometry`), the block's envelope selector and the configured allowance
-for client-added members, such as a client public key, `requestedContentKeys`
+for client-added members, such as a client public key, `requested.contentKeys`
 or `requestedChainCutoffs`. A delivery whose request exceeds the issuer's
 trusted body or entry limits is refused at publication.
 
@@ -1021,10 +1035,8 @@ client, with both client-bound methods. Its evidence:
   carriers with direct and client-bound transport, shared storage, reload, reset,
   substitutions and denials checked by real decryption attempts.
 
-An unpublished flat prototype and a later private experiment informed the
-design; their shapes, literals and sizes are not this proposal's. This evidence
-does not establish a general security proof or support for an untested
-transport.
+This evidence does not establish a general security proof or support for an
+untested transport.
 
 Before adoption, settle the profile duties and deployment support, validate any
 selected browser and endpoint profiles, and reconcile the profile catalogue,

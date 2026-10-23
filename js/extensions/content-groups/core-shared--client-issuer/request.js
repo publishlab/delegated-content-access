@@ -16,8 +16,7 @@ export const NARROWING = Object.freeze([
 ]);
 /** Request members this extension adds beside the base request. */
 export const REQUEST_MEMBERS = Object.freeze([
-  WIRE.requestedContentGroups,
-  WIRE.requestedContentKeys,
+  WIRE.requested,
   WIRE.requestedChainCutoffs,
   "renderPeriod",
   "periodGeometry",
@@ -165,8 +164,8 @@ function rawPerName(records, weight = () => 1) {
  * seed, a seed for a name nothing requests, and a request selecting nothing.
  *
  * Each member is an array of records. Raw records count against the bounds
- * before they merge: repeated `requestedContentGroups` records of one name
- * union their groups; `requestedContentKeys` records are item-route
+ * before they merge: repeated `requested.contentGroups` records of one name
+ * union their groups; `requested.contentKeys` records are item-route
  * alternatives, each `{group, connector}` pair kept; seed records at one
  * window are candidates; every cutoff label of a window is kept, and the
  * caller admits each before it takes the lowest. Identical copies merge.
@@ -176,14 +175,17 @@ function rawPerName(records, weight = () => 1) {
  */
 export function readContentGroupRequest(request, inputLimits) {
   const limits = settleLimits(inputLimits);
-  const groupsIn = own(request, WIRE.requestedContentGroups);
-  const keysIn = own(request, WIRE.requestedContentKeys);
+  const requested = own(request, WIRE.requested);
+  if (Object.hasOwn(request ?? {}, WIRE.requested) && !record(requested))
+    malformed("requested is a non-null, non-array object");
+  const groupsIn = own(requested, WIRE.contentGroups);
+  const keysIn = own(requested, WIRE.contentKeys);
   const seedsIn = own(own(request, "sealed"), WIRE.sealedSeeds);
   if (groupsIn === undefined && keysIn === undefined && seedsIn === undefined) return null;
   const cutoffsIn = own(request, WIRE.requestedChainCutoffs);
   for (const [label, list, max] of /** @type {const} */ ([
-    [WIRE.requestedContentGroups, groupsIn === undefined ? [] : groupsIn, limits.maxItems],
-    [WIRE.requestedContentKeys, keysIn === undefined ? [] : keysIn, limits.maxItems],
+    [WIRE.contentGroups, groupsIn === undefined ? [] : groupsIn, limits.maxItems],
+    [WIRE.contentKeys, keysIn === undefined ? [] : keysIn, limits.maxItems],
     [WIRE.sealedSeeds, seedsIn, limits.maxItems * limits.maxSeedWindows],
     [
       WIRE.requestedChainCutoffs,

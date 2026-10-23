@@ -76,7 +76,7 @@ answer_batch() {
 }
 
 if [ "$mode" = prepare ]; then
-  [ -f "$ANSWER" ] || { echo "no $ANSWER; the JavaScript answer source has not landed yet" >&2; exit 2; }
+  [ -f "$ANSWER" ] || { echo "no $ANSWER; the JavaScript answer source is missing" >&2; exit 2; }
 
   if ! BASE="$("$INSTALLER" --version "$VERSION")"; then
     echo "no workerd for version $VERSION, so the bridge was not prepared." >&2

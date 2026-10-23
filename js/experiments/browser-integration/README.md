@@ -238,25 +238,20 @@ reference implementation modules. A new adapter supplies source test-driver oper
 conformance oracle or proof of a second implementation. No npm package or new standard export is
 published by this experiment.
 
-## Accepted experimental scope
+## Experimental scope
 
-The implementation and finite R4/Cookiebot reconciliation were accepted in
-October 2026. The replacement proof uses separately written event/lease adapters,
-a stable consumer, captured transport credentials, separate context clients and
+The replacement proof uses separately written event/lease adapters, a stable
+consumer, captured transport credentials, separate context clients and
 response-application guards. A retired predecessor applies no response and holds
 no delivered key; the eligible successor applies once and completes one effect.
 Suppressing only the stale destination effect would not preserve that custody.
 
-These are bounded experimental results, including the separately described
-Chromium and native publisher crossings. They establish no live vendor adoption,
-production token validity or credential-dependent issuer policy, ambient-cookie
-continuity, arbitrary asynchronous callback schedule, automatic state transfer or
-reduced customer integration cost. Historical broad gate counts do not prove a
-current whole-tree or complete independent-profile conformance result.
+These bounded results establish no live vendor adoption, production token
+validity or credential-dependent issuer policy, ambient-cookie continuity,
+arbitrary asynchronous callback schedule, automatic state transfer or reduced
+application integration cost. The Chromium scope and limitations are described
+above; these tests are not complete independent-profile conformance evidence.
 
-The operator returned browser integration to Proposal status on October 14.
-That decision supersedes the earlier adoption language without removing the
-candidate contract or accepted implementation. The specification maintainers
-decide any later adoption; the integrating application owner selects product
-deployment validation. Publication remains separately held.
-No repeat synthetic replacement proof or catalogue survey is needed.
+The [browser-integration specification](../../../docs/spec-proposal--browser-integration.md)
+remains a Proposal. Specification maintainers decide adoption; the integrating
+application owner selects deployment validation.

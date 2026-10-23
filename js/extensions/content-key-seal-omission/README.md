@@ -1,6 +1,6 @@
 # Content-key seal omission
 
-Status: phase-1 prototype extension; implementation-discovery evidence, not protocol authority
+Status: prototype extension; experimental evidence, not protocol authority
 
 An issuer already entrusted with an access-group period capability returns one item `contentKey`
 without the publisher also sealing that content key to it. The publisher omits that

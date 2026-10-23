@@ -211,7 +211,7 @@ test("route projection refuses malformed declarations and non-object answers", (
   assert.throws(() => settleRouteProjection(Object.assign(() => {}, valid)), {
     code: "bad_config",
   });
-  for (const answer of [null, [], "bad"]) {
+  for (const answer of [undefined, [], "bad"]) {
     const projection = settleRouteProjection({ ...valid, project: () => answer });
     assert.throws(
       () =>
@@ -227,4 +227,22 @@ test("route projection refuses malformed declarations and non-object answers", (
       { code: "bad_config" },
     );
   }
+});
+
+test("an extension can refuse an unsafe conditional projection", () => {
+  const projection = settleRouteProjection({
+    members: [],
+    sealedMembers: [],
+    identities: () => [],
+    project: () => null,
+    useful: () => true,
+  });
+  assert.equal(
+    projectEligibleIdentities(
+      { sealed: { contentKeys: [] } },
+      { contentNames: [], accessGroups: [], routes: [] },
+      projection,
+    ),
+    null,
+  );
 });

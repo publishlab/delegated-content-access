@@ -87,25 +87,21 @@ grant: the difference is selected slot/render integrity, not entitlement
 expansion. The item-key-only control still shows that the first item's direct
 key cannot open the second item's record.
 
-`token-representation-candidate.test.js` compares the adopted transcript, run
-through the production module
-`js/core-shared--client-publisher/contentAad.js`, with the earlier
-exact-full-token transcript and the old carried string. The
-[content-protection specification](../../../docs/spec--content-protection.md#32-content-aad)
-defines the adopted construction. The test pins the independently recorded octets of both
-candidates unchanged and shows that production builds the signing-input
-candidate's octets after the renamed domain. It tests type, ordered encoding and
-slot mutations. An old-format raw-AEAD control shows that the carried AAD did
-not change when type or encoding metadata changed, while the adopted AAD
-refuses the same change. A real ES256 key signs the same protected header and
-claims twice; both different signature tokens pass the DCA JWT signature
-verifier. The adopted AAD opens the same ciphertext for either token, while
-full-token AAD refuses the second. Changing the signed renderId or the
-protected kid refuses the adopted AAD. A damaged signature segment also leaves
-that AAD unchanged: a client holding a key can still open the content,
-although the issuer rejects the damaged token at a new unlock. That is a
-deliberate limit of client-side opening without JWT verification, not a
-provenance result. These are raw-AEAD tests, not a content decoder.
+`token-representation-candidate.test.js` compares historical signing-input
+and full-token transcripts with the old carried string. Its local comparator
+pins recorded candidate octets; it does not run the current production AAD.
+The [content-protection specification](../../../docs/spec--content-protection.md#32-content-aad)
+defines the current render/name construction.
+
+The historical controls test type, ordered encoding and slot mutations. A real
+ES256 key signs the same protected header and claims twice; both different
+signature tokens pass the DCA JWT signature verifier. The signing-input
+candidate opens the same ciphertext for either token, while full-token AAD
+refuses the second. Changing signed claims or the protected kid changes the
+signing-input candidate. A damaged signature segment leaves that candidate
+unchanged: a client holding a key can still open the content, although the
+issuer rejects the damaged token at a new unlock. These are raw-AEAD component
+comparisons, not current content-decoder or provenance evidence.
 
 | Choice                                                              | Integrity and reach                                                                                                                                                                                                                                                                                                                                                                                     | Function and cost                                                                                                                                                                                                                                                                            |
 | ------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |

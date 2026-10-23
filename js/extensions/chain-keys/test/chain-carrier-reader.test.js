@@ -1041,11 +1041,10 @@ test("chain opening errors report only the presented source member while an item
   assert.deepEqual(await resolver.contentKeyFor(page, "bodytext"), new Uint8Array(16).fill(3));
 });
 
-// Data-format Section 2.1 rejects a whole collection when one record's
-// identifier is bad. The client has never done that for `keys.chainKeys`: a
-// bad family name in the old response map cost only that entry, and the
-// record form keeps that per-entry scope. This test pins it, so a change to
-// either reading of Section 2.1 is a deliberate one.
+// Response binding Section 3 admits response keys per record, as explicitly
+// allowed by data-format Section 2.1. A bad identity leaves valid sibling
+// records available; these tests pin that admission scope.
+
 describe("a response chain record with a bad accessGroup costs only that record", () => {
   for (const [label, record] of /** @type {[string, object][]} */ ([
     ["a number", { accessGroup: 7, cutoff: LATE_T, key: CHAIN_KEY }],

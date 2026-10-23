@@ -48,7 +48,7 @@ if [ $# -gt 0 ]; then
 fi
 
 if [ "$mode" = prepare ]; then
-  [ -f "$SOURCE" ] || { echo "no $SOURCE; the JavaScript answer source has not landed yet" >&2; exit 2; }
+  [ -f "$SOURCE" ] || { echo "no $SOURCE; the JavaScript answer source is missing" >&2; exit 2; }
 
   if ! BASE="$("$INSTALLER" --version "$VERSION")"; then
     echo "no Bun for version $VERSION, so the bridge was not prepared." >&2

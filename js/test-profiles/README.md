@@ -141,8 +141,7 @@ The initial selection scenarios establish that:
 - the presence of both period keys and chain keys does not automatically select
   either or both; and
 - a delivery with no complete route selected for that client does not produce
-  a request from unsupported material. The integration authority decides its
-  final no-route observation before the test pins it.
+  a request from unsupported material.
 
 ## Minimum evidence for each profile
 
@@ -161,9 +160,9 @@ orthogonal: the same positive grant reaches usable content through each
 permitted selected form, while a denial yields no usable capability. A test
 must not make a route representation decide entitlement.
 
-Dependency resolution will eventually come from the checked profile
-catalogue. Until then, record the expected closure here and in the file; do not
-create another executable dependency graph merely for these tests.
+Named dependencies come from the checked profile catalogue. Record each test
+selection here and in the file; do not create another executable dependency
+graph merely for these tests.
 
 ## Profile checklist
 
@@ -538,7 +537,7 @@ The profile entries:
   - Status: **JS reference evidence covered** for the signed direct-bearer
     flow. The canonical profile scenario still exercises the optional opaque
     form; the signed extension composition supplies the common signed proof.
-    Product PHP, issuer session exchange and a native browser deployment are
+    Native ports, issuer session exchange and a deployed browser integration are
     outside this evidence.
 - `dca-profile-html-carrier`
   - Dependencies: `dca-profile-baseline`.

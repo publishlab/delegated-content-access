@@ -59,14 +59,14 @@ export function sealedContentKey(page, issuerName, contentName) {
   return find(issuerBlock(page, issuerName)?.sealed?.contentKeys, { contentName })?.key;
 }
 
-/** `{name: [group]}` as `requestedContentGroups` records. @param {Record<string, string[]>} map */
+/** `{name: [group]}` as `requested.contentGroups` records. @param {Record<string, string[]>} map */
 export function groupRecords(map) {
   return Object.entries(map).map(([contentName, groups]) => ({ contentName, groups }));
 }
 
 /**
  * `{name: {group, connector}}` or `{name: [{group, connector}]}` as
- * `requestedContentKeys` records.
+ * `requested.contentKeys` records.
  * @param {Record<string, {group: string, connector: string}|{group: string, connector: string}[]>} map
  */
 export function itemRecords(map) {

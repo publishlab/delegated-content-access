@@ -481,7 +481,7 @@ dynamicTest("only plain planning data enters, and runtime wrap identity remains 
   );
 });
 
-// A function, a symbol and an array subclass cannot cross a bridge, so these stay contentKeyOnly.
+// A function, a symbol and an array subclass cannot cross a bridge, so this case uses full reference coverage.
 full("a function, a symbol or an array subclass is refused before a callback runs", () => {
   for (const forbidden of [() => {}, Symbol("key")]) {
     const input = baseInput();

@@ -313,27 +313,29 @@
         "chainsPerDay": 2,
         "periodMinutes": 60
       },
-      "requestedContentGroups": [
-        {
-          "contentName": "bodytext",
-          "groups": [
-            "politics"
-          ]
-        },
-        {
-          "contentName": "headline",
-          "groups": [
-            "politics"
-          ]
-        }
-      ],
-      "requestedContentKeys": [
-        {
-          "contentName": "shoppingAd",
-          "group": "shopping",
-          "connector": "MOKIZiqdUlGNzqTXNMXhaA"
-        }
-      ]
+      "requested": {
+        "contentGroups": [
+          {
+            "contentName": "bodytext",
+            "groups": [
+              "politics"
+            ]
+          },
+          {
+            "contentName": "headline",
+            "groups": [
+              "politics"
+            ]
+          }
+        ],
+        "contentKeys": [
+          {
+            "contentName": "shoppingAd",
+            "group": "shopping",
+            "connector": "MOKIZiqdUlGNzqTXNMXhaA"
+          }
+        ]
+      }
     },
     "response": {
       "keys": {
@@ -366,7 +368,7 @@
     },
     "jsonBytes": {
       "publication": 1967,
-      "request": 1423,
+      "request": 1419,
       "response": 353
     }
   }

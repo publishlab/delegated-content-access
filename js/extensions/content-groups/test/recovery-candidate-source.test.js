@@ -367,7 +367,7 @@ test("a period key filed under a response lease opens through that response's at
       resourceJWT: dcaData.resourceJWT,
       keyId: "k1",
       sealed: {},
-      requestedContentGroups: groupRecords({ bodytext: ["politics"] }),
+      requested: { contentGroups: groupRecords({ bodytext: ["politics"] }) },
     }),
   );
   assert.equal(application.accepted, 1);

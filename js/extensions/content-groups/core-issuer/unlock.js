@@ -106,8 +106,9 @@ function boundedMembers(document, limits) {
 function presents(request) {
   const document = request.toObject();
   if (!record(document)) return false;
-  const groups = document[CONTRACT.wire.requestedContentGroups];
-  const items = document[CONTRACT.wire.requestedContentKeys];
+  const requested = own(document, CONTRACT.wire.requested);
+  const groups = own(requested, CONTRACT.wire.contentGroups);
+  const items = own(requested, CONTRACT.wire.contentKeys);
   return (Array.isArray(groups) && groups.length > 0) || (Array.isArray(items) && items.length > 0);
 }
 

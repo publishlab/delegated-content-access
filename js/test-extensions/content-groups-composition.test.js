@@ -1014,7 +1014,7 @@ describe("the composed exchange refuses substitutions and unbound answers", () =
     // The client relays every sports connector of shoppingAd; each one is swapped.
     const substitute = find(pageItem(page, "bodytext").connectors, { group: "sports" }).connector;
     issuer.rewriteRequests((request) => {
-      for (const record of findAll(request.requestedContentKeys, { contentName: "shoppingAd" }))
+      for (const record of findAll(request.requested.contentKeys, { contentName: "shoppingAd" }))
         record.connector = substitute;
       return request;
     });
@@ -1991,7 +1991,7 @@ describe("one base issuer engine composing chain keys with content groups", () =
       ...base,
       sealed: { ...base.sealed, contentWindowSeeds: pageSeeds(page) },
       renderPeriod: dcaData.renderPeriod,
-      requestedContentGroups: groupRecords(groups),
+      requested: { contentGroups: groupRecords(groups) },
     };
   }
 

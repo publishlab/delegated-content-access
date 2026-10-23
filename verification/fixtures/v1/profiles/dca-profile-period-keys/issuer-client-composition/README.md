@@ -62,7 +62,7 @@ The keys here are published test keys. The ES256 signatures are retained
 values: a regeneration keeps a recorded signature only after it verifies over
 the same header and payload.
 
-Limitations: every claim decision is incomplete. The package proves the
+Limitations: the package exercises the
 period-key-only supply path through the real JavaScript issuer and client. It
 does not replay the publisher, and it covers no chain keys, no
 client-bound transport, no second issuer and no independent conformance.

@@ -239,8 +239,8 @@ export function contentGroupRequestSelection(page, issuerName, candidates, narro
 }
 
 /**
- * Write a selection as request members: the `sealed` member and the root
- * members, each a fresh copy and each a collection of records.
+ * Write a selection as fresh request members: the `sealed` collections,
+ * the fixed `requested` container, and the root context and cutoff members.
  * @param {ContentGroupRequestSelection} selection
  */
 export function contentGroupRequestMembers(selection) {
@@ -258,10 +258,13 @@ export function contentGroupRequestMembers(selection) {
     members: {
       renderPeriod: structuredClone(selection.renderPeriod),
       periodGeometry: structuredClone(selection.periodGeometry),
-      [WIRE.requestedContentGroups]: Object.entries(selection.groups).map(
-        ([contentName, groups]) => ({ contentName, groups: [...groups] }),
-      ),
-      ...(items.length === 0 ? {} : { [WIRE.requestedContentKeys]: items }),
+      [WIRE.requested]: {
+        [WIRE.contentGroups]: Object.entries(selection.groups).map(([contentName, groups]) => ({
+          contentName,
+          groups: [...groups],
+        })),
+        ...(items.length === 0 ? {} : { [WIRE.contentKeys]: items }),
+      },
       ...(selection.cutoffs === undefined
         ? {}
         : {

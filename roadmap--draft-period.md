@@ -55,16 +55,16 @@ source of current mandatory and optional duties.
 ## Current reference capabilities
 
 Publication-by-publication compatibility notes are recorded in
-[CHANGELOG.md](CHANGELOG.md). Its Unreleased section covers changes since
+[CHANGELOG.md](CHANGELOG.md). Its v1.0.0-alpha.3 section covers changes since
 v1.0.0-alpha.2, published on 20 October 2026.
 
-**Current draft compatibility:** unreleased deliveries and exchanges use arrays
+**Current draft compatibility:** alpha.3 deliveries and exchanges use arrays
 of named records, 97-octet ordinary ECDH key envelopes and 113-octet content-group
 seed envelopes. They are incompatible with the former maps and carried-nonce
 envelopes. The changelog identifies the roles that must update together and the
-selected-profile boundaries. These changes and the reference corrections remain
-Unreleased until a publication records them; they are not evidence of native-port
-or deployed-browser compatibility.
+selected-profile boundaries. These changes and reference corrections were
+published in alpha.3; they are not evidence of native-port or deployed-browser
+compatibility.
 
 **Chain activation and period-key overlap:** a simple publisher can keep random
 pkeys without chain construction. Enabling chains selects a new generation of derived pkeys. Compatible clients
@@ -176,8 +176,7 @@ or prove every combination of extensions.
     the completed ordinary-envelope changes.
 
 - **Access-group generalization** [design, profile]
-  - **Current state:** Generalization remains paused;
-    the October 12 baseline/naming steering is preserved without adoption.
+  - **Current state:** Generalization remains paused.
     The current period-key and chain-key specifications continue to apply.
     Named sets are one candidate organization for the bounded
     OR model; no new wire fields, profile names or production provisioning

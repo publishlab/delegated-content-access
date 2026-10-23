@@ -2,7 +2,7 @@
 
 // Reference-only endpoint-port fixtures. They deliberately observe adapter
 // calls and pin this implementation's coded response mapping, so they must not
-// travel with the wire-only issuer-endpoint contract in Step 3.
+// form part of the implementation-independent issuer-endpoint contract.
 
 import test, { describe } from "node:test";
 import assert from "node:assert/strict";

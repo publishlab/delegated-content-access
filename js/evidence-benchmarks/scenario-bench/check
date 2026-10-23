@@ -1,0 +1,17 @@
+#!/bin/sh
+# Independent positive evidence for each benchmark-tool stage.
+set -eu
+cd "$(dirname "$0")"
+case "${1:-all}" in
+    tests) node --test 'test/**/*.test.js' ;;
+    types) node static-evidence.mjs types ;;
+    lint) node ../../node_modules/eslint/bin/eslint.js --format json . ;;
+    format) node static-evidence.mjs format ;;
+    all)
+        sh ./check tests
+        sh ./check types
+        sh ./check lint
+        sh ./check format
+        ;;
+    *) echo "usage: sh check [all|tests|types|lint|format]" >&2; exit 2 ;;
+esac

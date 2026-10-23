@@ -17,8 +17,8 @@
 # answering process install and run the same version, because DCA_VERSION
 # carries the token to them.
 #
-# It needs network only for the first toolchain install (~229 MB download,
-# ~624 MB extracted). After that everything here runs with no egress at all,
+# It needs network only for the first toolchain install.
+# After that everything here runs with no egress at all,
 # which is why it is never wired into the suite: run it by hand on a machine
 # that has network once, then forever offline. Nothing is installed
 # system-wide and no build output is committed; both the SDK and the build

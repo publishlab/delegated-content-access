@@ -3,16 +3,9 @@
 // The published base64url pair, plus the UTF-8 pair.
 // Canonical source: spec--data-format.md section 2.2.
 //
-// Two departures from the code the public reference ships, both measured:
-//
-//   base64urlEncode: the reference spreads the whole buffer into
-//   String.fromCharCode. That throws a RangeError somewhere around 125k bytes,
-//   and a long article reaches that size, so this code uses the chunked loop
-//   that the reference mentions in a comment.
-//
-//   base64urlDecode: the reference builds the result with
-//   Uint8Array.from(atob(s), c => c.charCodeAt(0)). That calls a callback once
-//   per byte and runs about 16x slower than writing into a preallocated array.
+// Encoding uses bounded chunks so String.fromCharCode does not receive one
+// argument per byte of a large input. Decoding writes into a preallocated
+// array without invoking a callback for every byte.
 
 /** TextEncoder and TextDecoder hold no state; one of each is enough. */
 const encoder = new TextEncoder();

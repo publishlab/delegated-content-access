@@ -16,10 +16,13 @@ test("null request collections refuse before policy through the issuer endpoint"
   const base = new ContentGroupRequestBuilder()
     .build(new DcaData(p.page, { publisherOrigin: p.origin }), "issuer", ["bodytext", "headline"])
     .toObject();
-  for (const name of ["requestedContentGroups", "requestedContentKeys", "requestedChainCutoffs"]) {
+  for (const name of ["contentGroups", "contentKeys", "requestedChainCutoffs"]) {
     await t.test(name, async () => {
       const issuer = w.issuer();
-      const request = { ...base, [name]: null };
+      const request =
+        name === "requestedChainCutoffs"
+          ? { ...base, [name]: null }
+          : { ...base, requested: { ...base.requested, [name]: null } };
       const response = await issuer.answer(request);
       assert.equal(response.status, 400);
       assert.equal(response.code, "binding_failed");
@@ -63,6 +66,26 @@ test("malformed response errors refuse the candidate member while the ordinary s
           null,
           "no key from the malformed member is retained",
         );
+    });
+  }
+});
+
+test("malformed requested containers refuse before policy, including ordinary siblings", async (t) => {
+  const w = await world();
+  const p = await w.publish({
+    ordinary: ["headline"],
+    items: [item("bodytext", ["politics"]), item("headline")],
+  });
+  const base = new ContentGroupRequestBuilder()
+    .build(new DcaData(p.page, { publisherOrigin: p.origin }), "issuer", ["bodytext", "headline"])
+    .toObject();
+  for (const requested of [null, false, 7, "groups", []]) {
+    await t.test(JSON.stringify(requested), async () => {
+      const issuer = w.issuer();
+      const response = await issuer.answer({ ...base, requested });
+      assert.equal(response.status, 400);
+      assert.equal(response.code, "binding_failed");
+      assert.equal(issuer.calls.decide.length, 0);
     });
   }
 });

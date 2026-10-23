@@ -21,14 +21,15 @@ An example with geometry 2/60 (two windows a day, hourly periods), origin `https
   `connectors`.
 - The publisher seals the seed to `issuerA` as the `issuerA` block's `sealed.contentWindowSeeds` record
   `{contentName: "bodytext", windowStart: "261014T1200", key}`.
-- The client sends `requestedContentGroups: [{contentName: "bodytext", groups: ["politics", "sports"]}]` with the
-  unchanged seed envelope. The issuer verifies the JWT, asks its policy, opens the seed and answers the
+- The client sends `requested: {contentGroups: [{contentName: "bodytext", groups: ["politics", "sports"]}]}`
+  with the unchanged seed envelope. The issuer verifies the JWT, asks its policy, opens the seed and answers the
   `contentGroupKeys.chainKeys` record `{contentName: "bodytext", group: "politics", cutoff: "261014T1800", key}`.
 - The client files that chain key under (construction, origin, 2/60, `bodytext`, `politics`). A later `bodytext`
   article rendered at T15 in the same window opens without a request. A `headline` item or a T19 render does not.
 - An item route asks one content key: the client names `requestedContentKeys: {shoppingAd: "sports"}` locally, the
-  request carries `{contentName: "shoppingAd", group: "sports", connector}`, and the issuer authorizes the item,
-  derives a candidate key and answers a `contentGroupKeys.contentKeys` record for `shoppingAd`. The client
+  request carries `{contentName: "shoppingAd", group: "sports", connector}` in `requested.contentKeys`, and the
+  issuer authorizes the item, derives a candidate key and answers a `contentGroupKeys.contentKeys` record for
+  `shoppingAd`. The client
   authenticates the body with that candidate.
   A changed valid-width connector can yield a wrong key; the issuer does not verify correct recovery.
 
@@ -37,8 +38,8 @@ The wire members:
 ```text
 issuerData[].sealed.contentWindowSeeds[] = {contentName, windowStart, key: seedEnvelope}
 contentData[].connectors[] = {group, connector: connector16}
-request.requestedContentGroups[] = {contentName, groups: [group, ...]}
-request.requestedContentKeys[] = {contentName, group, connector}
+request.requested.contentGroups[] = {contentName, groups: [group, ...]}
+request.requested.contentKeys[] = {contentName, group, connector}
 request.requestedChainCutoffs[] = {windowStart, cutoff}
 response.contentGroupKeys.chainKeys[] = {contentName, group, cutoff, key}
 response.contentGroupKeys.periodKeys[] = {contentName, group, period, key}
@@ -287,6 +288,13 @@ An explicit `requestedContentGroups` or `requestedContentKeys` map disables auto
 collection suppresses that item's connector routes as a unit; valid sibling items remain usable. Producer validation and
 shared delivery context and aggregate limits remain strict.
 
+Wire selections live under `requested.contentGroups` and `requested.contentKeys`; the local narrowing maps
+retain the names above. A present `requested` must be a non-null, non-array object. A malformed container
+refuses with `binding_failed` before verification or policy, including beside ordinary coordinates. Omitted
+or empty selection collections supply no content-group route; seeds without a requested content name still
+refuse. Unknown members of `requested` follow the data-format unknown-member policy, and other selected
+capabilities keep their own members. Old top-level selection names are unknown members and supply no selections.
+
 ## Base seams it uses
 
 - Publisher: `createPublisher` contributions. The Sealer runs `itemPreparation` after it draws the content keys and
@@ -373,8 +381,8 @@ node --test extensions/content-groups/test/*.test.js test-extensions/content-gro
 
 ## Wire sizes
 
-Historical setup: the now-retired `measure-content-groups.mjs`, captured after commitment
-removal on 2026-10-16. These retained captures still carry the former per-item
+These historical captures are retained for comparison; their original recorder
+is not included here. They still carry the former per-item
 `contentData.bodytext.nonce` (27 raw JSON bytes) and use the former object maps instead of
 named-record arrays; they are not current wire totals. They also carry the former
 125-byte seed envelopes; the current 113-byte envelope saves 12 decoded bytes, or 16 base64url characters, per seed.

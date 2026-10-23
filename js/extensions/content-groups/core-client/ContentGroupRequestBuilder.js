@@ -3,7 +3,7 @@
 // The content-group request rides the base request flow. This builder wraps a
 // completed base (or other selected) request and adds one issuer's
 // content-group members for the content names the attempt still needs:
-// `sealed.contentWindowSeeds`, `requestedContentGroups`, `requestedContentKeys`,
+// `sealed.contentWindowSeeds`, `requested.contentGroups`, `requested.contentKeys`,
 // with the page's `renderPeriod` and `periodGeometry` and an optional
 // `requestedChainCutoffs`. It relays seeds and connectors exactly as the page
 // carried them; the issuer admits their widths and coordinates.
@@ -19,7 +19,7 @@ import { DcaRequestBuilder } from "../../../core-client/DcaRequestBuilder.js";
 import { DcaRequest } from "../../../core-shared--client-issuer/DcaRequest.js";
 import { dcaError } from "../../../core-shared/errors.js";
 import { own } from "../../../core-shared/wire.js";
-import { settleLimits } from "../core-shared/construction.js";
+import { record, settleLimits } from "../core-shared/construction.js";
 import {
   REQUEST_MEMBERS,
   SEALED_MEMBERS,
@@ -141,11 +141,30 @@ export class ContentGroupRequestBuilder {
     );
     if (selection === null) return inner;
     const document = documentOf(inner);
-    const { sealed } = contentGroupRequestMembers(selection);
+    const { sealed, members: supplied } = contentGroupRequestMembers(selection);
+    const selectedRequests = supplied.requested;
     /** @type {Record<string, unknown>} */
-    const members = contentGroupRequestMembers(selection).members;
+    const members = { ...supplied };
+    // Preserve independently owned selections supplied by the inner composition.
+    // This extension owns only the two fixed collection members it writes.
+    if (Object.hasOwn(document, "requested")) {
+      const requested = own(document, "requested");
+      if (!record(requested))
+        throw dcaError("bad_config", "the inner requested member is an object");
+      for (const [name, value] of Object.entries(selectedRequests))
+        if (
+          Object.hasOwn(requested, name) &&
+          JSON.stringify(requested[name]) !== JSON.stringify(value)
+        )
+          throw dcaError(
+            "bad_config",
+            `the inner request already carries a different requested.${name}`,
+          );
+      members.requested = { ...requested, ...selectedRequests };
+    }
     for (const name of Object.keys(members))
       if (
+        name !== "requested" &&
         Object.hasOwn(document, name) &&
         JSON.stringify(document[name]) !== JSON.stringify(members[name])
       )
@@ -172,8 +191,8 @@ export class ContentGroupRequestBuilder {
 
   /**
    * What this request's content-group coordinates can return: item content
-   * keys for `requestedContentKeys`, derivation keys (period and chain keys)
-   * for `requestedContentGroups`.
+   * keys for `requested.contentKeys`, derivation keys (period and chain keys)
+   * for `requested.contentGroups`.
    * @param {any} request
    * @returns {import("../../../core-client/requestBuilderContracts.js").ExtensionKeyFamilies}
    */
@@ -204,6 +223,14 @@ export class ContentGroupRequestBuilder {
         ];
       },
       project: (request, routes) => {
+        // A different capability owns these selections. Without its projection
+        // contract we cannot narrow or replay them in a conditional retry.
+        const requested = own(request, "requested");
+        if (
+          record(requested) &&
+          Object.keys(requested).some((name) => !["contentGroups", "contentKeys"].includes(name))
+        )
+          return null;
         const view = this.#view(request);
         if (view === null) return {};
         const kept = new Set(routes);

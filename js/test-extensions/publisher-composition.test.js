@@ -157,7 +157,7 @@ describe("Content-group publication sizing at the default bounds", () => {
 });
 
 // The publisher sizes the request a content-groups client actually sends:
-// base members, seed envelopes, requestedContentGroups, renderPeriod and
+// base members, seed envelopes, requested.contentGroups, renderPeriod and
 // periodGeometry. Every render of one shape has the same byte length, so the
 // bytes one client sends set the exact limit the next render must meet.
 describe("Content-group request bytes against the issuer body limit", () => {

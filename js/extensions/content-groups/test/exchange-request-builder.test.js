@@ -2,7 +2,7 @@
 //
 // The content-group request rides the base request builder. Its wire members
 // follow the production annex: `sealed.contentWindowSeeds`,
-// `requestedContentGroups`, `requestedContentKeys`, plus the page's
+// `requested.contentGroups`, `requested.contentKeys`, plus the page's
 // `renderPeriod` and `periodGeometry`. `requestedContentItems` and
 // `seedWindows` narrow locally and never reach the wire. The shared request
 // reader refuses what the builder must never send.
@@ -130,11 +130,11 @@ test("by default the request asks every connector group of each needed name with
     contentKeys: [{ contentName: "purchase", key: b64(20, 109) }],
     contentWindowSeeds: seedsOf(page()),
   });
-  sameRecords(request.requestedContentGroups, [
+  sameRecords(request.requested.contentGroups, [
     { contentName: "bodytext", groups: ["politics", "sports"] },
     { contentName: "headline", groups: ["politics"] },
   ]);
-  sameRecords(request.requestedContentKeys, [
+  sameRecords(request.requested.contentKeys, [
     { contentName: "bodytext", group: "politics", connector: C.bodyPolitics },
     { contentName: "headline", group: "politics", connector: C.headPolitics },
   ]);
@@ -163,10 +163,10 @@ test("an item only needed through its ordinary route adds no content-group membe
 test("requestedContentKeys names a group locally; only the builder relays its connector", () => {
   const b = builder({ requestedContentGroups: {}, requestedContentKeys: { bodytext: "sports" } });
   const request = built(b, ALL);
-  assert.deepEqual(request.requestedContentKeys, [
+  assert.deepEqual(request.requested.contentKeys, [
     { contentName: "bodytext", group: "sports", connector: C.bodySports },
   ]);
-  assert.deepEqual(request.requestedContentGroups, []);
+  assert.deepEqual(request.requested.contentGroups, []);
   assert.deepEqual(seedNames(request), ["bodytext"]);
   const read = readContentGroupRequest(request);
   assert.deepEqual(read?.contentKeys, { bodytext: [{ group: "sports", connector: C.bodySports }] });
@@ -197,16 +197,16 @@ test("explicit narrowing skips a name outside the attempt or without a seed here
   // purchase route and the default content-group routes still go out.
   const absent = built(builder({ requestedContentKeys: { shoppingAd: "sports" } }), ALL);
   assert.deepEqual(absent.sealed.contentKeys, [{ contentName: "purchase", key: b64(20, 109) }]);
-  sameRecords(absent.requestedContentGroups, [
+  sameRecords(absent.requested.contentGroups, [
     { contentName: "bodytext", groups: ["politics", "sports"] },
     { contentName: "headline", groups: ["politics"] },
   ]);
-  assert.equal(Object.hasOwn(absent, "requestedContentKeys"), false);
+  assert.equal(Object.hasOwn(absent.requested ?? {}, "contentKeys"), false);
   const groups = built(
     builder({ requestedContentGroups: { shoppingAd: ["sports"], headline: ["politics"] } }),
     ALL,
   );
-  assert.deepEqual(groups.requestedContentGroups, [
+  assert.deepEqual(groups.requested.contentGroups, [
     { contentName: "headline", groups: ["politics"] },
   ]);
   assert.deepEqual(seedNames(groups), ["headline"]);
@@ -228,8 +228,8 @@ test("explicit narrowing skips a name outside the attempt or without a seed here
         { contentKeys: [{ contentName: "purchase", key: b64(21, 109) }] },
         JSON.stringify([narrowing, needed]),
       );
-      assert.equal(Object.hasOwn(other, "requestedContentGroups"), false);
-      assert.equal(Object.hasOwn(other, "requestedContentKeys"), false);
+      assert.equal(Object.hasOwn(other.requested ?? {}, "contentGroups"), false);
+      assert.equal(Object.hasOwn(other.requested ?? {}, "contentKeys"), false);
     }
   // The same holds at an issuer that seeds other names but not the narrowed one.
   const unseeded = page();
@@ -266,7 +266,7 @@ test("explicit narrowing skips a name outside the attempt or without a seed here
   assert.deepEqual(ordinaryKey.sealed.contentKeys, [
     { contentName: "purchase", key: b64(20, 109) },
   ]);
-  assert.equal(Object.hasOwn(ordinaryKey, "requestedContentKeys"), false);
+  assert.equal(Object.hasOwn(ordinaryKey.requested ?? {}, "contentKeys"), false);
   // A malformed issuer seed collection is unusable even with explicit
   // narrowing; ordinary routes and another issuer remain independent.
   for (const malformedSeeds of [null, {}, [null], [{ contentName: "bodytext", windowStart: W1 }]]) {
@@ -285,7 +285,7 @@ test("explicit narrowing skips a name outside the attempt or without a seed here
       assert.deepEqual(ordinary.sealed, {
         contentKeys: [{ contentName: "purchase", key: b64(20, 109) }],
       });
-      assert.equal(Object.hasOwn(ordinary, "requestedContentGroups"), false);
+      assert.equal(Object.hasOwn(ordinary.requested ?? {}, "contentGroups"), false);
       assert.deepEqual(b.build(new DcaData(malformed), "other", ["purchase"]).toObject().sealed, {
         contentKeys: [{ contentName: "purchase", key: b64(21, 109) }],
       });
@@ -299,7 +299,7 @@ test("explicit narrowing skips a name outside the attempt or without a seed here
 test("a narrowing that selects no content-group route sends no content-group member", () => {
   const request = built(builder({ requestedContentGroups: {} }), ALL);
   assert.equal(Object.hasOwn(request.sealed, "contentWindowSeeds"), false);
-  assert.equal(Object.hasOwn(request, "requestedContentGroups"), false);
+  assert.equal(Object.hasOwn(request.requested ?? {}, "contentGroups"), false);
 });
 
 test("maxItems bounds every content-name map of the narrowing and the request", () => {
@@ -331,7 +331,7 @@ test("maxItems bounds every content-name map of the narrowing and the request", 
   );
   // The page's own name map over the bound relays no content-group member.
   const request = built(builder(undefined, { maxItems: 1 }), ALL);
-  assert.equal(Object.hasOwn(request, "requestedContentGroups"), false);
+  assert.equal(Object.hasOwn(request.requested ?? {}, "contentGroups"), false);
 });
 
 test("local narrowing selects items, windows and cutoffs without new wire members", () => {
@@ -347,7 +347,7 @@ test("local narrowing selects items, windows and cutoffs without new wire member
     contentKeys: [],
     contentWindowSeeds: [{ contentName: "bodytext", windowStart: W1, key: ENV.body1 }],
   });
-  assert.deepEqual(request.requestedContentGroups, [
+  assert.deepEqual(request.requested.contentGroups, [
     { contentName: "bodytext", groups: ["politics", "sports"] },
   ]);
   assert.deepEqual(request.requestedChainCutoffs, [{ windowStart: W1, cutoff: "261014T1800" }]);
@@ -355,7 +355,7 @@ test("local narrowing selects items, windows and cutoffs without new wire member
   const narrowed = built(builder({ requestedContentGroups: { bodytext: ["sports"] } }), [
     "headline",
   ]);
-  assert.equal(Object.hasOwn(narrowed, "requestedContentGroups"), false);
+  assert.equal(Object.hasOwn(narrowed.requested ?? {}, "contentGroups"), false);
 });
 
 test("the shared reader refuses requests the builder never sends", () => {
@@ -372,10 +372,10 @@ test("the shared reader refuses requests the builder never sends", () => {
   };
   /** @param {any} r @param {string} name */
   const groupsOf = (r, name) =>
-    r.requestedContentGroups.find((/** @type {any} */ g) => g.contentName === name);
+    r.requested.contentGroups.find((/** @type {any} */ g) => g.contentName === name);
   /** @param {any} r @param {string} name */
   const keyOf = (r, name) =>
-    r.requestedContentKeys.find((/** @type {any} */ k) => k.contentName === name);
+    r.requested.contentKeys.find((/** @type {any} */ k) => k.contentName === name);
   /** @param {any} r @param {string} name */
   const withoutSeeds = (r, name) =>
     (r.sealed.contentWindowSeeds = r.sealed.contentWindowSeeds.filter(
@@ -386,8 +386,8 @@ test("the shared reader refuses requests the builder never sends", () => {
     (/** @type {any} */ r) => (groupsOf(r, "bodytext").groups = ["politics", "politics"]),
     (/** @type {any} */ r) => (groupsOf(r, "bodytext").groups = "politics"),
     (/** @type {any} */ r) => {
-      r.requestedContentGroups = [];
-      delete r.requestedContentKeys;
+      r.requested.contentGroups = [];
+      delete r.requested.contentKeys;
     },
     (/** @type {any} */ r) => withoutSeeds(r, "bodytext"),
     (/** @type {any} */ r) =>
@@ -404,7 +404,7 @@ test("the shared reader refuses requests the builder never sends", () => {
     (/** @type {any} */ r) => (keyOf(r, "headline").extra = 1),
     (/** @type {any} */ r) => (keyOf(r, "headline").connector = b64(1, 15)),
     (/** @type {any} */ r) =>
-      (r.requestedContentKeys = r.requestedContentKeys.map((/** @type {any} */ k) =>
+      (r.requested.contentKeys = r.requested.contentKeys.map((/** @type {any} */ k) =>
         k.contentName === "headline" ? "politics" : k,
       )),
     (/** @type {any} */ r) => delete r.renderPeriod,
@@ -435,10 +435,10 @@ test("the shared reader refuses requests the builder never sends", () => {
     () =>
       readContentGroupRequest(
         variant((r) => {
-          r.requestedContentGroups = r.requestedContentGroups.filter(
+          r.requested.contentGroups = r.requested.contentGroups.filter(
             (/** @type {any} */ g) => g.contentName !== "headline",
           );
-          r.requestedContentGroups.push({ contentName: "headline", groups: ["politics"] });
+          r.requested.contentGroups.push({ contentName: "headline", groups: ["politics"] });
           withoutSeeds(r, "headline");
           r.sealed.contentWindowSeeds.push({
             contentName: "headline",
@@ -465,10 +465,10 @@ test("the builder's projection keeps only the named route identities", () => {
     { contentNames: [], accessGroups: [], routes: sportsOnly },
     projection,
   );
-  assert.deepEqual(narrowed.requestedContentGroups, [
+  assert.deepEqual(narrowed.requested.contentGroups, [
     { contentName: "bodytext", groups: ["sports"] },
   ]);
-  assert.equal(Object.hasOwn(narrowed, "requestedContentKeys"), false);
+  assert.equal(Object.hasOwn(narrowed.requested ?? {}, "contentKeys"), false);
   assert.deepEqual(seedNames(narrowed), ["bodytext"]);
   assert.equal(narrowed.renderPeriod, request.renderPeriod);
   assert.deepEqual(narrowed.periodGeometry, request.periodGeometry);
@@ -482,10 +482,10 @@ test("the builder's projection keeps only the named route identities", () => {
     },
     projection,
   );
-  assert.deepEqual(itemOnly.requestedContentGroups, [
+  assert.deepEqual(itemOnly.requested.contentGroups, [
     { contentName: "headline", groups: ["politics"] },
   ]);
-  assert.deepEqual(itemOnly.requestedContentKeys, [
+  assert.deepEqual(itemOnly.requested.contentKeys, [
     { contentName: "headline", group: "politics", connector: C.headPolitics },
   ]);
   assert.equal(projection.useful(routes[0], ["purchase"]), false);
@@ -494,7 +494,7 @@ test("the builder's projection keeps only the named route identities", () => {
     { contentNames: [], accessGroups: [], routes: [] },
     projection,
   );
-  assert.equal(Object.hasOwn(none, "requestedContentGroups"), false);
+  assert.equal(Object.hasOwn(none.requested ?? {}, "contentGroups"), false);
   assert.equal(Object.hasOwn(none.sealed, "contentWindowSeeds"), false);
   assert.equal(b.keyFamilies(none).familyKeys, false);
 });
@@ -565,14 +565,14 @@ test("a conditional retry through the delivery client replays only outstanding r
     walk.attempts.map((a) => a.outcome),
     ["timeout", "answered"],
   );
-  assert.deepEqual(posted[0].requestedContentGroups, posted[1].requestedContentGroups);
+  assert.deepEqual(posted[0].requested.contentGroups, posted[1].requested.contentGroups);
   assert.deepEqual(posted[1].sealed.contentKeys, []);
   assert.deepEqual(seedNames(posted[1]), ["bodytext", "headline"]);
 });
 
 test("default alternatives offer one item connector beside groups, but not a future-only item route", () => {
   const request = built(builder(), ["bodytext"]);
-  assert.deepEqual(request.requestedContentKeys, [
+  assert.deepEqual(request.requested.contentKeys, [
     { contentName: "bodytext", group: "politics", connector: C.bodyPolitics },
   ]);
   const future = page();
@@ -580,8 +580,8 @@ test("default alternatives offer one item connector beside groups, but not a fut
   const next = /** @type {any} */ (
     builder().build(new DcaData(future), ISSUER, ["bodytext"]).toObject()
   );
-  assert.equal(Object.hasOwn(next, "requestedContentKeys"), false);
-  assert.deepEqual(next.requestedContentGroups, [
+  assert.equal(Object.hasOwn(next.requested ?? {}, "contentKeys"), false);
+  assert.deepEqual(next.requested.contentGroups, [
     { contentName: "bodytext", groups: ["politics", "sports"] },
   ]);
 });
@@ -593,10 +593,10 @@ test("an unused malformed connector item does not suppress valid sibling selecti
   const request = /** @type {any} */ (
     builder().build(new DcaData(damaged), ISSUER, ["bodytext", "headline", "purchase"]).toObject()
   );
-  assert.deepEqual(request.requestedContentGroups, [
+  assert.deepEqual(request.requested.contentGroups, [
     { contentName: "bodytext", groups: ["politics", "sports"] },
   ]);
-  assert.deepEqual(request.requestedContentKeys, [
+  assert.deepEqual(request.requested.contentKeys, [
     { contentName: "bodytext", group: "politics", connector: C.bodyPolitics },
   ]);
   assert.deepEqual(seedNames(request), ["bodytext"]);
@@ -611,7 +611,7 @@ test("default item choice is independent of record order and respects sub-hour w
   ];
   /** @param {any} request */
   const itemGroups = (request) =>
-    request.requestedContentKeys.map((/** @type {any} */ k) => [k.contentName, k.group]);
+    request.requested.contentKeys.map((/** @type {any} */ k) => [k.contentName, k.group]);
   const first = builder().build(new DcaData(original), ISSUER, ["bodytext"]).toObject();
   assert.deepEqual(itemGroups(first), [["bodytext", "politics"]]);
   original.periodGeometry = { chainsPerDay: 5, periodMinutes: 12 };
@@ -622,12 +622,12 @@ test("default item choice is independent of record order and respects sub-hour w
     builder().build(new DcaData(original), ISSUER, ["bodytext"]).toObject()
   );
   assert.deepEqual(itemGroups(subhour), [["bodytext", "politics"]]);
-  assert.deepEqual(subhour.requestedContentGroups, [
+  assert.deepEqual(subhour.requested.contentGroups, [
     { contentName: "bodytext", groups: ["sports", "politics"] },
   ]);
   const groupOnly = built(builder({ requestedContentKeys: {} }), ["bodytext"]);
-  assert.equal(Object.hasOwn(groupOnly, "requestedContentKeys"), false);
-  assert.deepEqual(groupOnly.requestedContentGroups, [
+  assert.equal(Object.hasOwn(groupOnly.requested ?? {}, "contentKeys"), false);
+  assert.deepEqual(groupOnly.requested.contentGroups, [
     { contentName: "bodytext", groups: ["politics", "sports"] },
   ]);
 });
@@ -667,7 +667,7 @@ test("default item route relays all candidates of the first group and counts raw
       .build(new DcaData(data), ISSUER, ["bodytext"])
       .toObject();
   const request = build(2);
-  sameRecords(request.requestedContentKeys, [
+  sameRecords(request.requested.contentKeys, [
     { contentName: "bodytext", group: "politics", connector: C.bodyPolitics },
     { contentName: "bodytext", group: "politics", connector: b64(4) },
   ]);
@@ -728,7 +728,7 @@ test("an unusable seed collection leaves another issuer's valid seeded route ava
   const ordinary = b.build(new DcaData(damaged), ISSUER, ["bodytext", "purchase"]).toObject();
   assert.equal(Object.hasOwn(ordinary.sealed, "contentWindowSeeds"), false);
   const other = b.build(new DcaData(damaged), "other", ["bodytext", "purchase"]).toObject();
-  assert.deepEqual(other.requestedContentGroups, [
+  assert.deepEqual(other.requested.contentGroups, [
     { contentName: "bodytext", groups: ["politics"] },
   ]);
   assert.deepEqual(seedNames(other), ["bodytext"]);
@@ -740,4 +740,106 @@ test("an unusable seed collection leaves another issuer's valid seeded route ava
       ]),
     { code: "bad_config" },
   );
+});
+
+test("the wrapped builder preserves independently owned requested members", () => {
+  const requested = { anotherCapability: [{ name: "kept" }] };
+  const inner = {
+    build: () => ({
+      ...new DcaRequestBuilder().build(new DcaData(page()), ISSUER, ALL).toObject(),
+      requested,
+    }),
+  };
+  const wrapped = new ContentGroupRequestBuilder({ innerBuilder: inner });
+  const request = built(wrapped, ALL);
+  assert.deepEqual(request.requested.anotherCapability, requested.anotherCapability);
+  assert.deepEqual(request.requested.contentGroups, built(builder(), ALL).requested.contentGroups);
+  assert.deepEqual(Object.keys(requested), ["anotherCapability"], "inner selection is not mutated");
+  const before = structuredClone(request);
+  for (const routes of [wrapped.routeProjection.identities(request), []]) {
+    assert.equal(
+      projectEligibleIdentities(
+        request,
+        { contentNames: [], accessGroups: [], routes },
+        wrapped.routeProjection,
+      ),
+      null,
+      "an independently owned selector cannot be projected without its contract",
+    );
+  }
+  assert.deepEqual(request, before, "refused projection leaves the input intact");
+  assert.equal(Object.hasOwn(request, "requestedContentGroups"), false);
+  assert.equal(Object.hasOwn(request, "requestedContentKeys"), false);
+});
+
+test("the wrapped builder refuses malformed containers and conflicting owned requested members", () => {
+  for (const requested of [null, false, [], { contentGroups: [] }, { contentKeys: [] }]) {
+    const inner = {
+      build: () => ({
+        ...new DcaRequestBuilder().build(new DcaData(page()), ISSUER, ALL).toObject(),
+        requested,
+      }),
+    };
+    assert.throws(
+      () => built(new ContentGroupRequestBuilder({ innerBuilder: inner }), ALL),
+      { code: "bad_config" },
+      JSON.stringify(requested),
+    );
+  }
+});
+
+test("an attempt captures independent request values before awaiting denial-cache work", async () => {
+  const requested = { anotherCapability: [{ name: "before" }] };
+  const entered = Promise.withResolvers();
+  const released = Promise.withResolvers();
+  /** @type {Record<string, any>} */
+  const seen = {};
+  const client = createDeliveryClient({
+    reader: { dcaData: page(), publisherOrigin: PUB, extract: () => b64(0, 32) },
+    issuerName: ISSUER,
+    unlockUrl: "https://issuer.example/u",
+    requestBuilderFactory: (options) =>
+      new ContentGroupRequestBuilder({
+        innerBuilder: {
+          build: (data, issuer, names) => ({
+            ...new DcaRequestBuilder(options).build(data, issuer, names).toObject(),
+            requested,
+          }),
+        },
+      }),
+    denialCache: {
+      async capture(input) {
+        seen.cache = input.request;
+        entered.resolve();
+        await released.promise;
+        return { retryAt: null };
+      },
+      deny() {},
+    },
+    transport: {
+      async post(_url, request) {
+        seen.sent = structuredClone(request);
+        return { status: 200, contentType: "application/json", body: {} };
+      },
+    },
+    resolverFactory: () => ({
+      applyResponse: async (_data, _issuer, _response, association) => {
+        seen.associated = association.request;
+        return { accepted: 0, errors: [], issues: [], notDelivered: [] };
+      },
+      resolveDetailed: async (_data, names) => ({ covered: [], missing: names, origins: [] }),
+      resolveAuthenticated: async (_data, names) => ({ missing: names }),
+      resolve: async () => [],
+      contentKeyFor: async () => null,
+      contentKeyWithOriginFor: async () => null,
+    }),
+  });
+  const pending = client.unlock(["bodytext"]);
+  await entered.promise;
+  requested.anotherCapability[0].name = "after";
+  released.resolve();
+  await pending;
+  for (const document of [seen.cache, seen.sent, seen.associated])
+    assert.deepEqual(document.requested.anotherCapability, [{ name: "before" }]);
+  assert.deepEqual(requested.anotherCapability, [{ name: "after" }], "caller data stays mutable");
 });

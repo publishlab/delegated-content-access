@@ -40,10 +40,10 @@ test("a 1-of-100 group publishes, requests and answers one coordinate, with no p
   // name's seeds: nothing of `wide` and none of the other 99 groups.
   assert.equal(client.sent.length, 1);
   const [sent] = client.sent;
-  assert.deepEqual(sent.requestedContentGroups, [{ contentName: "narrow", groups: [only] }]);
+  assert.deepEqual(sent.requested.contentGroups, [{ contentName: "narrow", groups: [only] }]);
   assert.ok(sent.sealed.contentWindowSeeds.length > 0);
   for (const seed of sent.sealed.contentWindowSeeds) assert.equal(seed.contentName, "narrow");
-  for (const route of sent.requestedContentKeys ?? []) assert.equal(route.contentName, "narrow");
+  for (const route of sent.requested.contentKeys ?? []) assert.equal(route.contentName, "narrow");
 
   // The answer holds records at the requested coordinate only.
   const answered = issuer.calls.answers[0].body.contentGroupKeys;

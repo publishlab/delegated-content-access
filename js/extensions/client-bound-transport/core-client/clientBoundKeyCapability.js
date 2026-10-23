@@ -1,8 +1,7 @@
 // @ts-check
 //
 // The client-bound key capability's demo reference implementation, built from
-// one logical client's raw keypair. `clientBoundKeyCapability` is the
-// provisional descriptive name for this injected seam.
+// one logical client's raw keypair. `clientBoundKeyCapability` is the injected seam.
 //
 // The capability has two duties, and this is where the client's private half
 // lives. The public half is the client's request material, handed to

@@ -5,7 +5,8 @@ import assert from "node:assert/strict";
 import { globSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { fileURLToPath } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
+import { assertContractOwnsItsStatuses } from "./issuer-endpoint/support/issuer-endpoint-statuses.js";
 
 import { ASSERTED_HTML_WRITER_NEGATIVE_PROOF } from "./html-writer/html-writer-negative-proof.test.js";
 import { dcaTestBinding as htmlWriterBinding } from "./html-writer/bindings/reference-html-writer-binding.js";
@@ -330,5 +331,54 @@ test("selected profile evidence is never inferred by the base selector", () => {
   assert.throws(
     () => declaredBaseTargets(manifest, browserOriginBinding),
     /declares none of the base targets/,
+  );
+});
+
+/**
+ * @param {string} text
+ * @param {(failures: string[]) => void} check
+ */
+function inspectSource(text, check) {
+  const directory = mkdtempSync(join(tmpdir(), "dca-status-isolation-"));
+  try {
+    const file = join(directory, "contract.js");
+    writeFileSync(file, text);
+    check(assertContractOwnsItsStatuses([pathToFileURL(file)]));
+  } finally {
+    rmSync(directory, { recursive: true, force: true });
+  }
+}
+
+test("status isolation refuses endpoint filenames and prefixed implementation names", () => {
+  for (const name of ["UnlockEndpoint.js", "ExampleUnlockEndpoint"]) {
+    inspectSource(`const implementation = "${name}";`, (failures) => {
+      assert.deepEqual(failures, ["contract.js names an implementation endpoint"]);
+    });
+  }
+});
+
+test("status isolation still refuses imports outside the contract", () => {
+  inspectSource('import { statuses } from "../implementation.js";', (failures) => {
+    assert.equal(failures.length, 1);
+    assert.match(failures[0], /imports .* outside test-contract\//);
+  });
+});
+
+test("status isolation permits Node imports and the contract driver factory", () => {
+  inspectSource(
+    'import { readFileSync } from "node:fs"; const factory = "createIssuerEndpoint";',
+    (failures) => assert.deepEqual(failures, []),
+  );
+});
+
+test("the endpoint contract and support retain implementation isolation", () => {
+  const directory = new URL("./issuer-endpoint/", import.meta.url);
+  assert.deepEqual(
+    assertContractOwnsItsStatuses([
+      new URL("support/issuer-endpoint-statuses.js", directory),
+      new URL("support/issuer-endpoint-contract.js", directory),
+      new URL("issuer-endpoint.contract.test.js", directory),
+    ]),
+    [],
   );
 });

@@ -15,7 +15,7 @@
   cannot be stored there.
 
   The ported proof logic and the base64url helpers use only WebCrypto and
-  btoa/atob, so the exact same functions run under Node for pre-ship
+  btoa/atob, so the exact same functions run under Node for component
   verification; the DOM and IndexedDB parts are the browser's to run.
 -->
 <style>
@@ -132,7 +132,7 @@
 /* ============================================================================
  * Pure-crypto portable section
  * Everything from here down to the DOM RUNNER marker uses only WebCrypto and
- * btoa/atob, so it runs identically under Node for pre-ship verification.
+ * btoa/atob, so it runs identically under Node for component verification.
  * ==========================================================================*/
 
 const subtle = globalThis.crypto.subtle;

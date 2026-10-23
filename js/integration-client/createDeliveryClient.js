@@ -298,14 +298,16 @@ export function createDeliveryClient(config) {
     if (projected === null) return { skipped: "unsupported-retry-projection" };
     if (skipEmpty && !hasEligibleCoordinates(projected, keyFamilies))
       return { skipped: "no-eligible-route" };
-    const attempted = routeIdentities(projected, projection);
     const association = new ResponseAssociation(dcaData, route.issuerName, projected, {
       acceptDirectResponse: route.acceptDirectResponse,
     });
+    // Cache callbacks and transport use the values captured for response admission.
+    const capturedRequest = association.request;
+    const attempted = routeIdentities(capturedRequest, projection);
     if (
       !association.acceptDirectResponse &&
       association.offeredClientBoundMethod === null &&
-      hasEligibleCoordinates(projected, keyFamilies)
+      hasEligibleCoordinates(capturedRequest, keyFamilies)
     ) {
       throw dcaError(
         "bad_config",
@@ -324,9 +326,9 @@ export function createDeliveryClient(config) {
         );
       }
       if (
-        (hasKeyFamilyEntries(projected.sealed?.periodKeys) ||
-          hasKeyFamilyEntries(projected.sealed?.chainKeys) ||
-          keyFamilies?.(projected)?.familyKeys === true) &&
+        (hasKeyFamilyEntries(capturedRequest.sealed?.periodKeys) ||
+          hasKeyFamilyEntries(capturedRequest.sealed?.chainKeys) ||
+          keyFamilies?.(capturedRequest)?.familyKeys === true) &&
         !persistsRawPeriodKeys
       ) {
         throw dcaError(
@@ -341,7 +343,7 @@ export function createDeliveryClient(config) {
             publisherOrigin,
             issuerName: route.issuerName,
             unlockUrl: route.unlockUrl,
-            request: projected,
+            request: capturedRequest,
           }),
           readerRevision,
         )
@@ -351,7 +353,7 @@ export function createDeliveryClient(config) {
     let answer;
     try {
       answer = readerContext.accept(
-        await post(route.unlockUrl, projected, { origin: publisherOrigin }),
+        await post(route.unlockUrl, capturedRequest, { origin: publisherOrigin }),
         readerRevision,
       );
     } catch (cause) {
@@ -419,10 +421,10 @@ export function createDeliveryClient(config) {
       application?.issues?.length === 0 &&
       application?.errors?.length === 0 &&
       attempted.contentNames.length === 0 &&
-      keyFamilies?.(projected)?.contentKeys !== true &&
+      keyFamilies?.(capturedRequest)?.contentKeys !== true &&
       (attempted.routes ?? []).length === 0 &&
       attempted.accessGroups.length > 0 &&
-      Object.keys(projected.sealed ?? {}).every((kind) =>
+      Object.keys(capturedRequest.sealed ?? {}).every((kind) =>
         ["contentKeys", "periodKeys", "chainKeys"].includes(kind),
       ) &&
       attempted.accessGroups.every((group) =>

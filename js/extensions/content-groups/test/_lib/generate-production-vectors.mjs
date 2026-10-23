@@ -567,12 +567,18 @@ const request = {
   },
   renderPeriod: inputs.renderPeriod,
   periodGeometry: geometry,
-  requestedContentGroups: Object.entries(inputs.narrowing.requestedContentGroups).map(
-    ([contentName, groups]) => ({ contentName, groups }),
-  ),
-  requestedContentKeys: Object.entries(inputs.narrowing.requestedContentKeys).map(
-    ([contentName, group]) => ({ contentName, group, connector: connectorOf(contentName, group) }),
-  ),
+  requested: {
+    contentGroups: Object.entries(inputs.narrowing.requestedContentGroups).map(
+      ([contentName, groups]) => ({ contentName, groups }),
+    ),
+    contentKeys: Object.entries(inputs.narrowing.requestedContentKeys).map(
+      ([contentName, group]) => ({
+        contentName,
+        group,
+        connector: connectorOf(contentName, group),
+      }),
+    ),
+  },
 };
 
 // The direct response to the three grants. A chain grant returns C[cutoff];
@@ -601,7 +607,7 @@ for (const grant of inputs.grants) {
       periodKeyAt(seed, grant.group, geometry, grant.t),
     );
   } else {
-    const route = request.requestedContentKeys.find(
+    const route = request.requested.contentKeys.find(
       (record) => record.contentName === grant.contentName,
     );
     check(route !== undefined, `the request relays a route for ${grant.contentName}`);

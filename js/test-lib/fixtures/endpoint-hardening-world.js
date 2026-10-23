@@ -107,8 +107,8 @@ const ARTICLE = {
  * one place that cannot be faked: `crypto.subtle` itself.
  *
  * A status code says a request was refused; it does not say what the refusal
- * cost. "Nothing was verified and nothing was unsealed" is the claim in the DoS
- * entries, and it is only a claim if the primitives are counted.
+ * cost. Count primitive calls to check whether refusal happened before
+ * signature verification and key opening.
  *
  * `asymmetric` is what an attacker is trying to buy: signature verification,
  * ECDH agreement, RSA decryption, keypair generation. Hashing is counted apart

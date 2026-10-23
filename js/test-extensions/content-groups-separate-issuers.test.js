@@ -192,7 +192,7 @@ test("separate issuers: stock and content-group chains open, scopes project, hel
     ["issuerA", "issuerB"],
   );
   assert.equal(w.sent[0].sealed.contentWindowSeeds, undefined);
-  assert.equal(w.sent[0].requestedContentGroups, undefined);
+  assert.equal(w.sent[0].requested?.contentGroups, undefined);
   assert.deepEqual(distinct(w.sent[0].sealed.chainKeys, "accessGroup"), ["premium"]);
   assert.equal(w.sent[1].sealed.chainKeys, undefined);
   assert.equal(find(w.sent[1].sealed.contentKeys, { contentName: "bodytext" }), undefined);

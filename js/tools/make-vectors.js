@@ -1501,7 +1501,7 @@ const RESPLIT_LABEL = `${RESPLIT_ACCESS_GROUP}${BIND_DELIMITER}${RESPLIT_PERIOD}
 /**
  * The contentKey the hostile render sealed at the delimited name. A contentKey
  * is drawn at random per render, so this one was drawn once with getRandomValues
- * and pasted in, like the keypairs above. Its first 16 octets form this v1 key.
+ * and pasted in, like the keypairs above. It is a 16-octet v1 key.
  * It appears nowhere else in the corpus,
  * so a response carrying it is unmistakable.
  */

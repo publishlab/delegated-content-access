@@ -280,7 +280,7 @@ describe("The markup delivery writer", () => {
     );
   });
 
-  test("the writer emits an empty object when every item is deferred", () => {
+  test("the writer emits an empty array when every item is deferred", () => {
     const markup = writeMarkupDelivery({ dcaData: { version: "1" }, sealedContent: {} });
 
     assert.equal(sealedBlockText(markup), "\n[]\n", "an empty carrier, not an absent one");

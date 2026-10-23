@@ -235,8 +235,8 @@ retain the point, derive the raw shared x with the recorded recipient test
 key, and re-encrypt the recorded 16-octet plaintext under twelve zero nonce
 octets and the literal recorded BIND. Hybrid/compressed point-form negatives
 retain the ordinary positive ciphertext/tag. Historical capture hashes and
-source revisions remain historical provenance; they are not replaced by a
-reachable squash tip. `make-vectors.js` is not the producer of that conversion.
+source revisions remain historical provenance; they are not replaced by
+later source revisions. `make-vectors.js` is not the producer of that conversion.
 
 The earlier off-curve row changed the point while preserving the positive
 ciphertext/tag, so it did not distinguish point validation from authentication

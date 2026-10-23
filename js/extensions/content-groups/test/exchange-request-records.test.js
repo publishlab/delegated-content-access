@@ -2,8 +2,8 @@
 //
 // The shared request reader over named records. The issuer and the client read
 // a request through `readContentGroupRequest`, so these rules hold for both:
-// repeated `requestedContentGroups` records union their groups, repeated
-// `requestedContentKeys` records are item-route alternatives, every
+// repeated `requested.contentGroups` records union their groups, repeated
+// `requested.contentKeys` records are item-route alternatives, every
 // `requestedChainCutoffs` label stays for the caller to admit before it takes
 // the lowest, and repeated seed records at one window are candidates. Raw
 // records count against the bounds before anything merges.
@@ -36,8 +36,10 @@ function request() {
     },
     renderPeriod: "261014T1500",
     periodGeometry: { chainsPerDay: 2, periodMinutes: 60 },
-    requestedContentGroups: [{ contentName: "bodytext", groups: ["politics", "sports"] }],
-    requestedContentKeys: [{ contentName: "headline", group: "politics", connector: b64(3) }],
+    requested: {
+      contentGroups: [{ contentName: "bodytext", groups: ["politics", "sports"] }],
+      contentKeys: [{ contentName: "headline", group: "politics", connector: b64(3) }],
+    },
   };
 }
 
@@ -91,9 +93,9 @@ test("the reader admits named records and exposes coordinates by name", () => {
 
 test("the former object maps are malformed requests", () => {
   for (const mutate of [
-    (/** @type {any} */ r) => (r.requestedContentGroups = { bodytext: ["politics"] }),
+    (/** @type {any} */ r) => (r.requested.contentGroups = { bodytext: ["politics"] }),
     (/** @type {any} */ r) =>
-      (r.requestedContentKeys = { headline: { group: "politics", connector: b64(3) } }),
+      (r.requested.contentKeys = { headline: { group: "politics", connector: b64(3) } }),
     (/** @type {any} */ r) => (r.sealed.contentWindowSeeds = { bodytext: { [W1]: ENV.body1 } }),
     (/** @type {any} */ r) => (r.requestedChainCutoffs = { [W1]: "261014T1800" }),
   ])
@@ -102,13 +104,13 @@ test("the former object maps are malformed requests", () => {
 
 test("records refuse a missing or wrong required field and extra closed-route fields", () => {
   const refused = [
-    (/** @type {any} */ r) => (r.requestedContentGroups[0].groups = []),
-    (/** @type {any} */ r) => (r.requestedContentGroups[0].groups = ["politics", "politics"]),
-    (/** @type {any} */ r) => delete r.requestedContentGroups[0].contentName,
-    (/** @type {any} */ r) => (r.requestedContentGroups[0] = ["bodytext", ["politics"]]),
-    (/** @type {any} */ r) => (r.requestedContentKeys[0].extra = 1),
-    (/** @type {any} */ r) => (r.requestedContentKeys[0].connector = b64(1, 15)),
-    (/** @type {any} */ r) => delete r.requestedContentKeys[0].group,
+    (/** @type {any} */ r) => (r.requested.contentGroups[0].groups = []),
+    (/** @type {any} */ r) => (r.requested.contentGroups[0].groups = ["politics", "politics"]),
+    (/** @type {any} */ r) => delete r.requested.contentGroups[0].contentName,
+    (/** @type {any} */ r) => (r.requested.contentGroups[0] = ["bodytext", ["politics"]]),
+    (/** @type {any} */ r) => (r.requested.contentKeys[0].extra = 1),
+    (/** @type {any} */ r) => (r.requested.contentKeys[0].connector = b64(1, 15)),
+    (/** @type {any} */ r) => delete r.requested.contentKeys[0].group,
     (/** @type {any} */ r) => (r.sealed.contentWindowSeeds[0].key = 7),
     (/** @type {any} */ r) => (r.sealed.contentWindowSeeds[0].windowStart = ""),
     (/** @type {any} */ r) => (r.requestedChainCutoffs = [{ windowStart: W1 }]),
@@ -122,10 +124,10 @@ test("records refuse a missing or wrong required field and extra closed-route fi
     );
 });
 
-test("repeated requestedContentGroups records union their groups", () => {
+test("repeated requested.contentGroups records union their groups", () => {
   const view = readContentGroupRequest(
     variant((r) => {
-      r.requestedContentGroups = [
+      r.requested.contentGroups = [
         { contentName: "bodytext", groups: ["politics"] },
         { contentName: "bodytext", groups: ["sports", "politics"] },
       ];
@@ -134,11 +136,11 @@ test("repeated requestedContentGroups records union their groups", () => {
   assert.deepEqual(view?.contentGroups.bodytext.groups, ["politics", "sports"]);
 });
 
-test("repeated requestedContentKeys records are item-route alternatives", () => {
+test("repeated requested.contentKeys records are item-route alternatives", () => {
   const other = { contentName: "headline", group: "sports", connector: b64(4) };
   const rival = { contentName: "headline", group: "politics", connector: b64(5) };
   const view = readContentGroupRequest(
-    variant((r) => r.requestedContentKeys.push(other, rival, { ...r.requestedContentKeys[0] })),
+    variant((r) => r.requested.contentKeys.push(other, rival, { ...r.requested.contentKeys[0] })),
   );
   assert.deepEqual(view?.contentKeys.headline, [
     { group: "politics", connector: b64(3) },
@@ -184,11 +186,11 @@ test("raw records count against the bounds before they merge", () => {
     () =>
       readContentGroupRequest(
         variant((r) => {
-          r.requestedContentGroups = [
+          r.requested.contentGroups = [
             { contentName: "bodytext", groups: ["politics"] },
             { contentName: "bodytext", groups: ["politics"] },
           ];
-          r.requestedContentKeys = [];
+          r.requested.contentKeys = [];
           r.sealed.contentWindowSeeds = [r.sealed.contentWindowSeeds[0]];
         }),
         { maxItems: 1 },
@@ -200,7 +202,7 @@ test("raw records count against the bounds before they merge", () => {
     () =>
       readContentGroupRequest(
         variant((r) => {
-          r.requestedContentGroups = [
+          r.requested.contentGroups = [
             { contentName: "bodytext", groups: ["politics"] },
             { contentName: "bodytext", groups: ["politics", "sports"] },
           ];
@@ -214,8 +216,8 @@ test("raw records count against the bounds before they merge", () => {
     () =>
       readContentGroupRequest(
         variant((r) => {
-          r.requestedContentGroups = [];
-          r.requestedContentKeys.push({ ...r.requestedContentKeys[0] });
+          r.requested.contentGroups = [];
+          r.requested.contentKeys.push({ ...r.requested.contentKeys[0] });
           r.sealed.contentWindowSeeds = [r.sealed.contentWindowSeeds[2]];
         }),
         { maxItems: 1 },
@@ -254,12 +256,12 @@ test("raw records count against the bounds before they merge", () => {
 
 test("record order changes no coordinate", () => {
   const forward = variant((r) => {
-    r.requestedContentGroups = [
+    r.requested.contentGroups = [
       { contentName: "bodytext", groups: ["politics"] },
       { contentName: "headline", groups: ["politics"] },
       { contentName: "bodytext", groups: ["sports"] },
     ];
-    r.requestedContentKeys.push({ contentName: "bodytext", group: "sports", connector: b64(2) });
+    r.requested.contentKeys.push({ contentName: "bodytext", group: "sports", connector: b64(2) });
     r.requestedChainCutoffs = [
       { windowStart: W1, cutoff: "261014T1800" },
       { windowStart: W2, cutoff: "261015T0300" },
@@ -267,13 +269,13 @@ test("record order changes no coordinate", () => {
   });
   const reversed = structuredClone(forward);
   for (const list of [
-    reversed.requestedContentGroups,
-    reversed.requestedContentKeys,
+    reversed.requested.contentGroups,
+    reversed.requested.contentKeys,
     reversed.requestedChainCutoffs,
     reversed.sealed.contentWindowSeeds,
   ])
     list.reverse();
-  for (const list of [reversed.requestedContentGroups[0].groups]) list.reverse();
+  for (const list of [reversed.requested.contentGroups[0].groups]) list.reverse();
   const a = readContentGroupRequest(JSON.parse(JSON.stringify(forward)));
   const b = readContentGroupRequest(JSON.parse(JSON.stringify(reversed)));
   assert.deepEqual(sortedView(a), sortedView(b));
@@ -282,7 +284,7 @@ test("record order changes no coordinate", () => {
 test("seed, group and cutoff records ignore unknown members while retaining required own fields", () => {
   const original = request();
   const extended = variant((r) => {
-    r.requestedContentGroups[0].future = { note: "ignored" };
+    r.requested.contentGroups[0].future = { note: "ignored" };
     r.sealed.contentWindowSeeds[0].future = false;
     r.requestedChainCutoffs = [{ windowStart: W1, cutoff: "261014T1800", future: null }];
   });
@@ -296,13 +298,18 @@ test("seed, group and cutoff records ignore unknown members while retaining requ
   );
   assert.deepEqual(readContentGroupRequest(extended)?.cutoffs, { [W1]: ["261014T1800"] });
   for (const [collection, fields] of [
-    ["requestedContentGroups", ["contentName", "groups"]],
+    ["contentGroups", ["contentName", "groups"]],
     ["seeds", ["contentName", "windowStart", "key"]],
     ["requestedChainCutoffs", ["windowStart", "cutoff"]],
   ])
     for (const field of fields) {
       const r = /** @type {any} */ (structuredClone(extended));
-      const records = collection === "seeds" ? r.sealed.contentWindowSeeds : r[collection];
+      const records =
+        collection === "seeds"
+          ? r.sealed.contentWindowSeeds
+          : collection === "contentGroups"
+            ? r.requested.contentGroups
+            : r[collection];
       const entry = records[0];
       records[0] = Object.assign(Object.create({ [field]: entry[field] }), entry);
       delete records[0][field];
@@ -327,4 +334,45 @@ test("a requested cutoff must name a supplied seed window across the request", (
       ),
     { code: "binding_failed" },
   );
+});
+
+test("requested refuses every present non-object container", () => {
+  for (const requested of [null, false, true, 0, "groups", [], [request().requested]]) {
+    assert.throws(
+      () => readContentGroupRequest({ requested }),
+      { code: "binding_failed" },
+      JSON.stringify(requested),
+    );
+    assert.throws(
+      () => readContentGroupRequest({ ...request(), requested }),
+      { code: "binding_failed" },
+      `with seeds: ${JSON.stringify(requested)}`,
+    );
+  }
+});
+
+test("unknown requested members do not select content groups or alter valid selections", () => {
+  assert.equal(readContentGroupRequest({ requested: { anotherCapability: [] } }), null);
+  assert.equal(readContentGroupRequest({ requested: {} }), null);
+  assert.equal(readContentGroupRequest({}), null);
+  const extended = variant((r) => {
+    r.requested.anotherCapability = { value: true };
+  });
+  assert.deepEqual(readContentGroupRequest(extended), readContentGroupRequest(request()));
+});
+
+test("top-level selection lookalikes are ignored and cannot replace requested selections", () => {
+  const original = request();
+  const legacy = {
+    requestedContentGroups: original.requested.contentGroups,
+    requestedContentKeys: original.requested.contentKeys,
+  };
+  assert.equal(readContentGroupRequest(legacy), null);
+  assert.deepEqual(
+    readContentGroupRequest({ ...original, ...legacy }),
+    readContentGroupRequest(original),
+  );
+  const withSeeds = /** @type {any} */ ({ ...original, ...legacy });
+  delete withSeeds.requested;
+  assert.throws(() => readContentGroupRequest(withSeeds), { code: "binding_failed" });
 });

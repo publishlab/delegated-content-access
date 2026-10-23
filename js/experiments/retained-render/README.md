@@ -9,7 +9,7 @@ period-key reuse at one publisher, access group and period coordinate.
 
 The retained article's period-key content-key wrap uses **no AAD**, as current
 v1 specifies. The suite seals its content under a fixed local string,
-`article-old|1|premiumtext`, in the carried format v1 used before 2026-10-15;
+`article-old|1|premiumtext`, in the historical carried format v1;
 content AAD is not a coordinate this experiment compares. The test first
 opens that saved article at its honest old coordinate. It then tests only the
 moved issuer envelope at the admitted hourly label `251023T1400`. The suite

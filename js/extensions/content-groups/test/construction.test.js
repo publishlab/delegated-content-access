@@ -47,8 +47,8 @@ test("the contract names are the root-pinned production literals in one frozen o
   assert.deepEqual(CONTRACT.wire, {
     sealedSeeds: "contentWindowSeeds",
     connectors: "connectors",
-    requestedContentGroups: "requestedContentGroups",
-    requestedContentKeys: "requestedContentKeys",
+    requested: "requested",
+    contentGroups: "contentGroups",
     requestedChainCutoffs: "requestedChainCutoffs",
     response: "contentGroupKeys",
     chainKeys: "chainKeys",

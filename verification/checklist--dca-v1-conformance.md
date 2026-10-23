@@ -9,11 +9,9 @@ specifications; it adds no protocol requirements. A checked box needs evidence
 for the named implementation and revision. A deployed path needs its own
 cross-role check.
 
-Specification editors must first use this checklist on the DCA implementations
-they maintain, role by role and profile by profile. Record where a requirement
-cannot be checked, where evidence is missing, and where the checklist is
-unclear. This is the checklist's first practical test; it does not turn an
-incomplete implementation into a conformance claim.
+Apply the checklist role by role and profile by profile. Record where a
+requirement cannot be checked, where evidence is missing, and where a check
+is unclear. An incomplete implementation does not establish conformance.
 
 ## Set the claim scope
 

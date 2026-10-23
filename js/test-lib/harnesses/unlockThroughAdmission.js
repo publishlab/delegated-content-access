@@ -12,9 +12,7 @@
 // processor owns them; an object or `DcaRequest` is admitted through the
 // processor and, on admission, handed to `handleRequest`.
 //
-// This directory is the assert side of the suite. The run glob is
-// `js/test/*.test.js` and does not descend, so nothing here is collected as a
-// test file.
+// This module supplies test assertions and helpers; it is not a .test.js entrypoint.
 
 import { DcaRequest } from "../../core-shared--client-issuer/DcaRequest.js";
 

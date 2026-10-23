@@ -1,10 +1,10 @@
 // @ts-check
 //
-// The two sides of `issuerData[issuerName].sealed`: the publisher sealing one
+// The two sides of a named issuerData record's sealed material: sealing one
 // render's key material for one issuer, and the issuer opening the coordinates
-// it granted. Same shape both ways (`contentKeys[contentName]` and
-// `periodKeys[accessGroup][t]`), and that is the shape a relabel moves one
-// member of.
+// it granted. This diagnostic harness uses slot-indexed local tables
+// (`contentKeys[contentName]` and `periodKeys[accessGroup][t]`); they are not
+// serialized delivery collections. A relabel moves one local member.
 //
 // This harness walks the issuer side itself instead of calling into
 // `core-issuer/IssuerEngine`. It varies two answers the engine settled the other
@@ -21,7 +21,7 @@
 // of the name it decided on, and no wire carries it.
 //
 // The harness refuses the whole request when an unseal fails. The engine answers
-// a blob that did not open with `errors[label]` beside a 200, which is what a
+// a blob that did not open with an error record beside a 200, which is what a
 // benign key rollover is owed: the rest of the request is opened and the reader
 // loses one item. A relabel arrives as the same failure, so that answer also
 // tells an attacker which coordinate they got wrong, one blob at a time.

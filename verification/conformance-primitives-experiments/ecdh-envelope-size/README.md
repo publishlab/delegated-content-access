@@ -169,7 +169,7 @@ proof must compare the exact recovered `04 || x || y` bytes before key agreement
 parities, and must refuse a malformed prefix, an out-of-range x-coordinate, a value with no square root and
 any point the library rejects.
 
-The final HKDF transcript also has to decide whether it authenticates the exact transmitted point encoding.
+These experimental HKDF transcripts do not include the transmitted point encoding in the derivation context.
 Including the 33 carried octets in the domain-separated HKDF context would make a prefix change produce a
 different key; leaving them out permits the two encodings above to open the same envelope. That is an
 encoding-malleability decision, not evidence that the content key can be recovered without an issuer key.
@@ -184,13 +184,13 @@ make ephemeral reuse a supported mode.
 
 ## Decoding sketch
 
-This sketch is preserved verbatim from the compact-ECDH proposal's Opening
-section. The "requirements above" in its introduction refer to that proposal's
-opening requirements. The proposal remains unadopted; this experiment records
-adapter evidence and selects no DCA envelope form.
+This non-normative SEC 1 P-256 decoding sketch describes the adapter used by
+this experiment. The [compact-ECDH profile](../../../docs/spec-profile--compact-ecdh.md#43-compressed-carrier)
+defines its own opening requirements; the frozen transcripts above do not
+implement that profile.
 
-The following is a non-normative decoding sketch. SEC 1 and the rejection
-requirements above define behavior; this sketch does not replace either one.
+SEC 1 defines point decoding. This sketch does not replace the standard or
+the current profile's additional opening requirements.
 
 ```text
 decodeCompressedP256(encoded):

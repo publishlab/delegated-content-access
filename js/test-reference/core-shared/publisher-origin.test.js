@@ -104,8 +104,8 @@ describe("canonical publisher origin", () => {
     // This side folds nothing. A value the URL parser would have rewritten
     // is not a value a browser reports, so it is refused rather than
     // reduced, and a zone identifier or IPvFuture syntax never parses at
-    // all. PHP `Origin::canonical` folds the foldable ones on configured
-    // publisher input and `Origin::observed` refuses them on a header.
+    // all. Configured publisher input may be normalized; an observed header
+    // must already use its canonical spelling.
     for (const value of [
       "https://[2001:DB8::1]",
       "https://[2001:0db8:0000:0000:0000:0000:0000:0001]",

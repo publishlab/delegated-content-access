@@ -190,7 +190,7 @@ async function groupsCrossAllRoles(counts) {
     const envelope = seedOf(page, "issuer", "bodytext", T12);
     assert.equal(binaryStringBytes(envelope).length, 113);
     const { client, request, issuer } = await exchanged(w, published);
-    assert.deepEqual(request.requestedContentGroups, groupRecords({ bodytext: groups }));
+    assert.deepEqual(request.requested.contentGroups, groupRecords({ bodytext: groups }));
     const [answer] = issuer.calls.answers;
     assert.deepEqual(chainGroups(chainKeysOf(answer), "bodytext"), groups);
     assert.equal(JSON.stringify(answer.body).includes(CONTRACT.wire.sealedSeeds), false);
@@ -237,7 +237,7 @@ test("named connector maps: sparse routes, exact denial, pooled grants and a lat
   const sports = await exchanged(w, published, {
     narrowing: { requestedContentGroups: { bodytext: ["sports"] } },
   });
-  assert.deepEqual(sports.request.requestedContentGroups, groupRecords({ bodytext: ["sports"] }));
+  assert.deepEqual(sports.request.requested.contentGroups, groupRecords({ bodytext: ["sports"] }));
   const politics = await exchanged(w, published, {
     narrowing: { requestedContentGroups: { bodytext: ["politics"], headline: ["politics"] } },
   });
@@ -277,20 +277,19 @@ test("named connector maps: sparse routes, exact denial, pooled grants and a lat
   assert.equal(await pooled.client(later, sports.issuer).open("headline"), "later headline");
 });
 
-// Replaces the request assertions over the flat `requestedContentGroups` list:
-// the request names groups per content name.
+// The requested.contentGroups collection names groups per content name.
 test("the issuer verifies the JWT and independently authorizes requested names, groups and windows", async () => {
   const w = await world();
   const published = await w.publish({ items: [item("bodytext", ["sports"])] });
   const { request } = await exchanged(w, published);
   assert.equal(request.version, "1");
   assert.equal(request.keyId, "issuer-k1");
-  assert.deepEqual(request.requestedContentGroups, groupRecords({ bodytext: ["sports"] }));
+  assert.deepEqual(request.requested.contentGroups, groupRecords({ bodytext: ["sports"] }));
   assert.deepEqual(requestWindows(request, "bodytext"), [T12, NEXT]);
   for (const field of ["contentData", "requestedContentItems", "contentGroups"])
     assert.equal(Object.hasOwn(request, field), false, field);
   assert.deepEqual(
-    findAll(request.requestedContentKeys, { contentName: "bodytext" }).map(({ group }) => group),
+    findAll(request.requested.contentKeys, { contentName: "bodytext" }).map(({ group }) => group),
     ["sports"],
   );
   assert.equal(request.renderPeriod, T12);
@@ -299,14 +298,14 @@ test("the issuer verifies the JWT and independently authorizes requested names, 
   // Keep these authorization checks about group routes. The default request
   // also offers the item's connectors, which remain independent alternatives.
   const groupOnly = copy(request);
-  groupOnly.requestedContentKeys = [];
+  groupOnly.requested.contentKeys = [];
 
   const badSig = copy(request);
   badSig.resourceJWT = `${badSig.resourceJWT.slice(0, -2)}aa`;
   assert.notEqual((await answer(badSig)).status, 200);
   // A group name on the page is presentation, not entitlement: policy decides.
   const unknown = copy(groupOnly);
-  unknown.requestedContentGroups = groupRecords({ bodytext: ["premium"] });
+  unknown.requested.contentGroups = groupRecords({ bodytext: ["premium"] });
   assert.deepEqual(chainGroups(chainKeysOf(await answer(unknown)), "bodytext"), ["premium"]);
   const refuseAll = chainPolicy({ authorize: () => false });
   assert.equal((await answer(unknown, { policy: refuseAll })).code, "bad_policy");
@@ -322,10 +321,10 @@ test("the issuer verifies the JWT and independently authorizes requested names, 
   assert.deepEqual(chainCutoffs(chainKeysOf(await answer(broaden)), "bodytext", "sports"), [T18]);
   // An explicit empty group list refuses; so does a request that asks nothing.
   const emptyList = copy(groupOnly);
-  emptyList.requestedContentGroups = groupRecords({ bodytext: [] });
+  emptyList.requested.contentGroups = groupRecords({ bodytext: [] });
   assert.equal((await answer(emptyList)).code, "binding_failed");
   const asksNothing = copy(groupOnly);
-  delete asksNothing.requestedContentGroups;
+  delete asksNothing.requested.contentGroups;
   assert.notEqual((await answer(asksNothing)).status, 200);
   // No selected window leaves the policy nothing to grant.
   const noWindows = copy(groupOnly);
@@ -335,7 +334,7 @@ test("the issuer verifies the JWT and independently authorizes requested names, 
     narrowing: { requestedContentItems: ["bodytext"] },
   });
   assert.equal(Object.hasOwn(local.request, "requestedContentItems"), false);
-  assert.deepEqual(local.request.requestedContentGroups, groupRecords({ bodytext: ["sports"] }));
+  assert.deepEqual(local.request.requested.contentGroups, groupRecords({ bodytext: ["sports"] }));
 });
 
 // Replaces the pending-association checks on `contentGroupChains`, the
@@ -452,7 +451,7 @@ test("a trusted maxGroups admits 1025 groups while the default refuses; retired 
     reader: w.reader({ limits }),
   });
   assert.equal(
-    find(request.requestedContentGroups, { contentName: "bodytext" }).groups.length,
+    find(request.requested.contentGroups, { contentName: "bodytext" }).groups.length,
     1025,
   );
   assert.equal(issuer.calls.decide[0].contentGroups.bodytext.groups.length, 1025);
@@ -474,7 +473,7 @@ test("raw request and answer bounds refuse surplus entries before verification, 
   });
   assert.equal((await w.issuer().answer(surplusSeeds)).code, "too_many_entries");
   const surplusNames = copy(request);
-  surplusNames.requestedContentGroups = groupRecords(
+  surplusNames.requested.contentGroups = groupRecords(
     Object.fromEntries(names(65).map((name) => [name, ["sports"]])),
   );
   assert.equal((await w.issuer().answer(surplusNames)).code, "too_many_entries");
@@ -760,7 +759,7 @@ test("a connector map is read by group name: member order is free, a relabeled o
     const client = fresh.client(changed, issuer);
     await client.unlock(["bodytext"]);
     assert.equal(
-      client.sent.some((sent) => Object.hasOwn(sent, "requestedContentGroups")),
+      client.sent.some((sent) => Object.hasOwn(sent.requested ?? {}, "contentGroups")),
       false,
       `${label}: no content-group member is relayed`,
     );
@@ -896,7 +895,7 @@ test("a zero-connector item grant exposes only that item's pad, not another name
     "content:bodytext",
   );
   const changed = copy(request);
-  for (const route of findAll(changed.requestedContentKeys, { contentName: "bodytext" }))
+  for (const route of findAll(changed.requested.contentKeys, { contentName: "bodytext" }))
     route.connector = base64urlEncode(new Uint8Array(16));
   const answer = await issuer.answer(changed);
   assert.equal(answer.status, 200);
@@ -1076,8 +1075,8 @@ test("an altered renderPeriod returns a wrong item candidate and leaves a chain 
   const { request } = await exchanged(w, published);
   const answer = (changed) => w.issuer().answer(changed);
   const asItem = copy(request);
-  delete asItem.requestedContentGroups;
-  asItem.requestedContentKeys = [
+  delete asItem.requested.contentGroups;
+  asItem.requested.contentKeys = [
     {
       contentName: "bodytext",
       group: "sports",
@@ -1317,7 +1316,7 @@ test("protocol entries are own JSON members: a __proto__ member is a name like a
   const client = fresh.client(page, issuer);
   await client.unlock(["bodytext"]);
   assert.equal(
-    client.sent.some((sent) => Object.hasOwn(sent, "requestedContentGroups")),
+    client.sent.some((sent) => Object.hasOwn(sent.requested ?? {}, "contentGroups")),
     false,
   );
   assert.equal(await client.open("bodytext"), null);
@@ -1352,8 +1351,8 @@ test("own __proto__ is ignored in extensible requests and refused in closed resp
   assert.equal(await control.client.open("bodytext"), "content:bodytext");
 
   // Request side: this unknown field does not change the successful grant.
-  const request = smuggled(control.request, '"requestedContentGroups":[{');
-  assert.ok(Object.hasOwn(request.requestedContentGroups[0], "__proto__"));
+  const request = smuggled(control.request, '"contentGroups":[{');
+  assert.ok(Object.hasOwn(request.requested.contentGroups[0], "__proto__"));
   const issuer = w.issuer();
   const accepted = await issuer.answer(request);
   assert.equal(accepted.status, 200);

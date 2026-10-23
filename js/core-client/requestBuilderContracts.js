@@ -19,8 +19,9 @@
  * @property {readonly string[]} members - root request members the extension adds
  * @property {readonly string[]} sealedMembers - `sealed` members the extension adds
  * @property {(request: any) => string[]} identities
- * @property {(request: any, routes: string[]) => { members?: Record<string, unknown>, sealed?: Record<string, unknown> }} project
- *   - the extension's members narrowed to those routes; `{}` when none remain
+ * @property {(request: any, routes: string[]) => { members?: Record<string, unknown>, sealed?: Record<string, unknown> } | null} project
+ *   - the extension's members narrowed to those routes; `{}` when none remain,
+ *   `null` when independently owned members prevent safe projection
  * @property {(route: string, missing: string[]) => boolean} useful
  */
 

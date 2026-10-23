@@ -449,16 +449,15 @@ examples. The placeholders below abbreviate the example, not the wire format.
 
 The client relays the sealed seeds and names the access it needs:
 
-- `requestedContentGroups` asks for reusable group access for each named
+- `requested.contentGroups` asks for reusable group access for each named
   content item. Here it asks for `politics` access to `bodytext` and `headline`.
-- `requestedContentKeys` asks for an individual item's content key through
+- `requested.contentKeys` asks for an individual item's content key through
   one of its connectors. Here it supplies the `shopping` connector for
   `shoppingAd`, rather than asking for reusable shopping-group access.
 
 These are requests, not grants. The issuer applies its authorization policy
-and chooses the permitted key outputs shown in the response below. Both fields
-predate the named-record reorganization; their collections now use arrays
-instead of maps keyed by content name.
+and chooses the permitted key outputs shown in the response below. The fixed
+`requested` object holds both selection arrays.
 
 ```json
 {
@@ -476,13 +475,15 @@ instead of maps keyed by content name.
     },
     "renderPeriod": "261014T1500",
     "periodGeometry": { "chainsPerDay": 2, "periodMinutes": 60 },
-    "requestedContentGroups": [
-        { "contentName": "bodytext", "groups": ["politics"] },
-        { "contentName": "headline", "groups": ["politics"] }
-    ],
-    "requestedContentKeys": [
-        { "contentName": "shoppingAd", "group": "shopping", "connector": "MOKIZiqdUlGNzqTXNMXhaA" }
-    ]
+    "requested": {
+        "contentGroups": [
+            { "contentName": "bodytext", "groups": ["politics"] },
+            { "contentName": "headline", "groups": ["politics"] }
+        ],
+        "contentKeys": [
+            { "contentName": "shoppingAd", "group": "shopping", "connector": "MOKIZiqdUlGNzqTXNMXhaA" }
+        ]
+    }
 }
 ```
 

@@ -108,7 +108,6 @@ their claims:
 | Content interpretation | [The AAD comparison](derived-content-aad/README.md) retains historical carried and larger token transcripts. The current baseline binds render ID and item name with an implicit fixed content nonce; it refuses complete-record slot/render substitution under a real period grant. Type, encodings and other JWT claims are outside the current content tag. |
 | Retained access | [Retained-render evidence](retained-render/README.md) separates opening a newly sealed capability envelope from using already delivered period material. Binding a new envelope to a render does not revoke previously delivered keys. |
 | Browser context | [Example adapters](browser-integration/README.md) suspend old work as soon as a feed notification makes context unknown, retire it after an unresolved or overlapping read, and compare handle pairs unambiguously. Matching handles confirm continuity only under the documented upstream nonreuse contract. |
-| Group construction | Prefer ordinary independent group chains when narrow grants and sparse memberships dominate. Key links trade fewer reader-held keys for public helper bytes and, with their default global source, set-wide issuer custody. Tree links favor aligned branch/root grants, with broader reach and period-specific public link distribution. A byte ranking needs matched reach and workload. |
 
 The migration suite exercises manual version dispatch; it does not implement
 an interoperable second wire version. Browser evidence covers the available

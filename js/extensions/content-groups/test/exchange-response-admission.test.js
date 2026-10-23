@@ -447,7 +447,7 @@ test("the request is read once per captured exchange", async () => {
   const request = association.request;
   const watched = new Proxy(request, {
     get(target, name, receiver) {
-      if (name === "requestedContentGroups") reads++;
+      if (name === "requested") reads++;
       return Reflect.get(target, name, receiver);
     },
   });

@@ -22,9 +22,9 @@ import { dcaError } from "../core-shared/errors.js";
 import { formatT as formatPeriodLabel, isPeriodKeyLabel } from "../core-shared/periodLabels.js";
 
 /**
- * The default is hourly, current period plus one forward. The type is loose on
- * purpose, because the spec's typical config ships three slots and a scenario
- * may want fifteen-minute periods. Every call takes it as an argument.
+ * The default is hourly, current period plus one forward. Callers may choose
+ * another supported period length and slot count; every call takes the
+ * configuration as an argument.
  *
  * @typedef {object} Period
  * @property {number} [length] - period length in minutes

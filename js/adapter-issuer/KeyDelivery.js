@@ -130,7 +130,7 @@ function requireRetirementRecords(value, fields, path) {
 }
 
 /**
- * Structural nodes above declared sections and error maps are closed:
+ * Structural nodes above declared sections and error collections are closed:
  * declaring one child does not permit an undeclared sibling to leave raw. At a
  * section terminal, its record validation owns the payload and metadata; at
  * an error-collection terminal, only fixed retirement records pass.

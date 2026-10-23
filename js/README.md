@@ -453,10 +453,9 @@ The "client copy slice" cases in `test-base/import-boundary.test.js`
 hold the manifest against the tree and the entry's permitted imports; you write
 a copy check of your own: re-derive the slice from the manifest, compare each
 file with the source at the revision you recorded, and fail on a file that
-differs, is missing or is no longer named. Source copy is
-the current boundary because the one known JavaScript consumer already uses
-it, while a package or generated bundle would add a second release boundary
-without serving another consumer or deployment format.
+differs, is missing or is no longer named. Source copy is the supported
+distribution boundary here. A package or generated bundle would require its
+own release and artifact checks.
 
 `createBrowserClient` is synchronous and uses static imports. The standard
 browser globals its dependencies read must therefore exist before the entry is
@@ -659,9 +658,8 @@ invocation. After fixing, run
 stage did.
 
 The `test` script runs the discovered test files in parallel, one process per
-file, across however many cores the host has. On this host that is the faster
-mode: 2026-09-20, `corepack pnpm@10.23.0 --dir js test` ran in 5.6s and the single-process run
-in 11.7s, because per-file mode parallelises across cores. Use
+file, using the host's available cores. Compare runtime on your host when
+choosing process isolation. Use
 `corepack pnpm run test:single-process`
 (`--experimental-test-isolation=none`) where that parallelism does not pay: a
 host with few cores, or debugging state that leaks between test files. Node

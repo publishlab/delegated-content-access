@@ -65,9 +65,7 @@ using a period key to enable chain duties. This record describes evidence; it do
 make the publisher's, issuer's, or client's selection for them.
 
 The focused JavaScript checker and tests live in
-[`js/test-tools/`](../../js/test-tools/). A later verification claim
-index may consume this closure and duty vocabulary; evidence-package
-membership belongs to that index.
+[`js/test-tools/`](../../js/test-tools/).
 
 ## Adding a profile
 

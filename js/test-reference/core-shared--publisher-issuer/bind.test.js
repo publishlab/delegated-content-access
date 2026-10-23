@@ -70,7 +70,7 @@ function pinnedNonce(base64url) {
 const RENDER_A = makeRenderId(0xa1);
 const RENDER_B = makeRenderId(0xb2);
 
-/** What `core-publisher/Sealer` drew while the manifest was the binder: 12 bytes. */
+/** Nonce width retained by the historical manifest-binding fixture: 12 bytes. */
 const SHORT_RENDER = base64urlEncode(new Uint8Array(12).fill(0xc3));
 
 const T = "251023T1300";
@@ -655,7 +655,8 @@ describe("The carriers", () => {
       });
 
       test("a chain blob does not open under another chain geometry", async () => {
-        // The two geometry integers are bound (`bind.js` :175-189) so a chain
+        // The two geometry integers are bound by the chain-key form in
+        // docs/spec--sealed-key-envelopes.md Section 3.1 so a chain
         // key cannot be relabeled into a different geometry and derive under
         // it. One chain key, one coordinate, and the geometry is the only thing
         // that moves between the three opens below.
@@ -808,8 +809,8 @@ function contentAad(contentName) {
 
 /**
  * The content layer of one render: each item under its own contentKey, with the
- * aad of the slot it sits in. Stage 1's first line, and what stands between a
- * key the issuer handed over and the text.
+ * aad of the slot it sits in. The content tag is checked separately after
+ * obtaining a key from the issuer.
  *
  * @param {{ bytes: (n: number) => Uint8Array }} random
  * @returns {Promise<Record<string, { nonce: Uint8Array, ciphertext: Uint8Array }>>}
@@ -894,7 +895,7 @@ describe("The layer under the binding", () => {
   for (const carrier of CARRIERS) {
     describe(carrier.label, () => {
       test("a granted user's own key, sealed under a valid BIND, comes back and opens nothing", async () => {
-        // Forgery #5. The attacker is a paying reader with a bodytext grant,
+        // The attacker is a paying reader with a bodytext grant,
         // and nothing they send is malformed: this is exactly the blob an
         // honest publisher produces for that slot, over a key they drew
         // themselves.
@@ -909,9 +910,8 @@ describe("The layer under the binding", () => {
 
         // The issuer cannot tell, and the design never asks it to: the binding
         // is valid for a slot this user holds, so the unlock succeeds and hands
-        // back exactly the bytes that went in. That is the whole of what the
-        // oracle question buys - an authenticated user making the issuer do
-        // asymmetric work to return their own key.
+        // back exactly the bytes that went in. An authenticated user can make
+        // the issuer do asymmetric work here, but receives only their own key.
         const opened = await unlock(
           { contentKeys: { bodytext: forged } },
           { granted: { contentNames: ["bodytext"] } },
@@ -924,8 +924,8 @@ describe("The layer under the binding", () => {
 
         // Where it dies. The ciphertext is under the publisher's contentKey and
         // the tag over it is what the forged key fails, so nothing of the
-        // article comes out - the gap between stage 2's output and stage 3's
-        // check, which is where the "garbage key" result is visible.
+        // article comes out. Successful envelope opening does not make a
+        // caller-supplied key authenticate the publisher's content.
         await failsAtContentDecrypt(
           () =>
             readContent(
@@ -1203,7 +1203,7 @@ const miswiredSealing = {
 
 /**
  * The per-blob picture the telemetry counts. `unsealSection` refuses the whole
- * request at the first failure - the 7.2 rule - so the outcomes are gathered one
+ * request at the first failure, so these diagnostic outcomes are gathered one
  * coordinate per call, which is what an issuer that wants the count has to do
  * as well.
  *
@@ -1228,7 +1228,7 @@ async function blobOutcomes(section, open) {
 }
 
 describe("The binding self-test fixture", () => {
-  // Section 7.2: any binding failure is suspected tampering, which
+  // This harness treats any binding failure as suspected tampering, which
   // leaves an issuer whose own wiring is wrong sending tampering alarms for
   // every blob it is handed. The fixture is what tells the two apart, and
   // `test-lib/harnesses/bindSelfTest.js` is that fixture run
@@ -1354,8 +1354,7 @@ describe("The binding self-test fixture", () => {
     );
 
     // The classification only changes what the log says; the request is still
-    // refused whole, which is the 7.2 rule the telemetry sits beside rather
-    // than replaces.
+    // refused whole; this diagnostic classification does not change refusal.
     await refuses(
       () => unlock(presented, { granted: { contentNames: ["bodytext", "premiumtext"] } }),
       "binding_failed",

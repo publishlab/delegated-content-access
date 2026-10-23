@@ -6,8 +6,10 @@
 // moment a `*.test.js` file lands in it. A generated tree, a scratch copy or a vendored
 // package would then run on every gate, or stop it, without anyone choosing that.
 //
-// The rule below names no directory list. It names the two shapes a test file lives in
-// here: a top-level `test*/` directory, and `extensions/<name>/test/`. A new
+// The rule below names the three shapes a test file lives in
+// here: a top-level `test*/` directory, `extensions/<name>/test/`, and
+// `evidence-benchmarks/<name>/test/`. Benchmark runner tests form a separate
+// tier; measurement scripts remain opt-in. A new
 // `test-something/` directory joins the unit gate automatically, but does not
 // silently join the public reference gate: that choice needs an explicit tier
 // classification below. A file outside these shapes fails this check and must
@@ -41,6 +43,7 @@ function gateGlob() {
 
 const TOP_LEVEL_TEST_DIRECTORY = /^test[^/]*\//;
 const EXTENSION_TEST_DIRECTORY = /^extensions\/[^/]+\/test\//;
+const BENCHMARK_TEST_DIRECTORY = /^evidence-benchmarks\/[^/]+\/test\//;
 const REFERENCE_TEST_DIRECTORY = /^test(?:\/|-(?:reference|extensions|profiles)\/)/;
 const SEPARATE_TEST_TIERS = new Set(["test-base", "test-bridges", "test-tools", "test-vectors"]);
 
@@ -52,7 +55,10 @@ function isReferenceTest(file) {
 /** @param {string[]} files */
 function unclassifiedTestFiles(files) {
   return files.filter(
-    (file) => !isReferenceTest(file) && !SEPARATE_TEST_TIERS.has(file.split("/")[0]),
+    (file) =>
+      !isReferenceTest(file) &&
+      !SEPARATE_TEST_TIERS.has(file.split("/")[0]) &&
+      !BENCHMARK_TEST_DIRECTORY.test(file),
   );
 }
 
@@ -86,13 +92,17 @@ describe("The discovery boundary of the test gate", () => {
 
   test("every file the gate discovers sits in a test directory", () => {
     const strays = discoveredFiles().filter(
-      (file) => !TOP_LEVEL_TEST_DIRECTORY.test(file) && !EXTENSION_TEST_DIRECTORY.test(file),
+      (file) =>
+        !TOP_LEVEL_TEST_DIRECTORY.test(file) &&
+        !EXTENSION_TEST_DIRECTORY.test(file) &&
+        !BENCHMARK_TEST_DIRECTORY.test(file),
     );
     assert.deepEqual(
       strays,
       [],
       "the gate runs these files from outside a test directory; move them under a top-level " +
-        "test*/ directory or extensions/<name>/test/, or state here why they belong",
+        "test*/ directory, extensions/<name>/test/ or evidence-benchmarks/<name>/test/, " +
+        "or state here why they belong",
     );
   });
 
@@ -124,6 +134,13 @@ describe("The discovery boundary of the test gate", () => {
 
   test("a new test directory and a test-lib entry point cannot disappear from public check", () => {
     assert.deepEqual(unclassifiedTestFiles(["test-new/case.test.js"]), ["test-new/case.test.js"]);
+    assert.deepEqual(
+      unclassifiedTestFiles(["evidence-benchmarks/example/test/runner.test.js"]),
+      [],
+    );
+    assert.deepEqual(unclassifiedTestFiles(["evidence-benchmarks/example/src/runner.test.js"]), [
+      "evidence-benchmarks/example/src/runner.test.js",
+    ]);
     assert.deepEqual(unclassifiedTestFiles(["test-lib/case.test.js"]), ["test-lib/case.test.js"]);
     assert.deepEqual(unclassifiedTestFiles(["extensions/other/test-lib/case.test.js"]), [
       "extensions/other/test-lib/case.test.js",

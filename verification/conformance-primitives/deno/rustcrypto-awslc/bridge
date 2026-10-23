@@ -60,7 +60,7 @@ export DENO_DIR="$CACHE/deno-dir"
 export DENO_NO_UPDATE_CHECK=1
 
 if [ "$mode" = prepare ]; then
-  [ -f "$SOURCE" ] || { echo "no $SOURCE; the JavaScript answer source has not landed yet" >&2; exit 2; }
+  [ -f "$SOURCE" ] || { echo "no $SOURCE; the JavaScript answer source is missing" >&2; exit 2; }
 
   if ! BASE="$("$INSTALLER" --version "$VERSION")"; then
     echo "no Deno for version $VERSION, so the bridge was not prepared." >&2

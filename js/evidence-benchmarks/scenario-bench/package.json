@@ -1,0 +1,11 @@
+{
+  "name": "dca-scenario-bench",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test": "node --test \"test/**/*.test.js\"",
+    "lint": "sh check lint",
+    "format:check": "sh check format",
+    "check:types": "sh check types"
+  }
+}

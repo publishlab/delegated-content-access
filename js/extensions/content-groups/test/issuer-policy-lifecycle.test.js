@@ -15,7 +15,7 @@ async function groupOnlyRequest(publication, w) {
   });
   await client.attempt(["bodytext"]);
   assert.equal(client.sent.length, 1);
-  assert.equal(client.sent[0].requestedContentKeys, undefined);
+  assert.equal(client.sent[0].requested?.contentKeys, undefined);
   return client.sent[0];
 }
 

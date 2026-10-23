@@ -25,11 +25,13 @@ defines source and composition constraints. Extension-local obligations:
 
 ## Nonce omission prototypes
 
-`nonce-free-envelope/` and `nonce-free-response/` are isolated candidate
-implementations with behavior tests. They are not registered profiles and do
-not change the currently specified procedures. Their READMEs state the exact
-candidate, setup, seam limitations and evidence. Tests and portable assertion
-suites stay inside those extensions until any later adoption.
+`nonce-free-envelope/` retains an experimental implementation of the carrier
+and nonce construction now used by ordinary core ECDH, with primitive and
+interoperability tests. It adds no profile identifier.
+
+`nonce-free-response/` is an unadopted candidate; ordinary issuer responses
+still carry their nonces. Each README states its setup, seam limitations and
+evidence. The specialized tests remain with their implementation.
 
 ## Content-groups proposal extension
 

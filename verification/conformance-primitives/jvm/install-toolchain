@@ -195,8 +195,8 @@ if [ "$force" = 1 ] || [ ! -x "$JAVAC_BIN" ]; then
   # This branch downloads, so this is where the host has to be one the pin covers.
   pinned_platform
   mkdir -p "$CACHE"
-  # The cache dir is shared: $HOME is a bind mount that several concurrent runs
-  # see at once. One exclusive lock covers the whole install, so a second caller
+  # The cache dir may be shared by several concurrent runs.
+  # One exclusive lock covers the whole install, so a second caller
   # waits here instead of writing over the first caller's download or reading a
   # JDK directory that is still being unpacked.
   exec 9>"$CACHE/.install.lock"

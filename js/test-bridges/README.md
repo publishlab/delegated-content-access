@@ -288,7 +288,7 @@ DCA_BRIDGE=php DCA_TARGET_ROOT=/path/to/php pnpm test:bridge portable-sealer-ori
 Its setup adds a fixed key for each of the two periods the render wraps under.
 The case checks every value the render draws at its offset in the stream: the
 render id, the content key, and the envelope nonces, up to the stream's last
-byte. Wraps draw nothing: the case opens each `{t, key}` entry to the drawn
+byte. Wraps draw nothing: the case opens each `{accessGroup, period, key}` record to the drawn
 content key under the nonce it derives from the render id and the wrap's
 coordinate, as `PORTING.md` "Derived wrap nonce" states. The test then
 opens each issuer envelope with the known issuer private key, using Node's

@@ -18,6 +18,106 @@ than list individual commits. The [specifications](docs/spec---overview.md) defi
   below, then read the relevant entries. A JavaScript API change does not by
   itself require an independent implementation to adopt that API.
 
+## v1.0.0-alpha.4 — 23 October 2026
+
+Changes since v1.0.0-alpha.3, published on 23 October 2026.
+
+### Breaking: content-group selections move under requested
+
+Content-group clients and issuers must update the request wire format together.
+The two selection arrays move into one fixed `requested` object. Their records
+and meanings stay the same. Baseline-only implementations have no new duty;
+content groups remains a Proposal.
+
+Alpha.3 request fragment:
+
+```json
+{
+  "requestedContentGroups": [
+    { "contentName": "bodytext", "groups": ["politics"] }
+  ],
+  "requestedContentKeys": [
+    { "contentName": "shoppingAd", "group": "shopping", "connector": "<unchanged connector>" }
+  ]
+}
+```
+
+Alpha.4 request fragment:
+
+```json
+{
+  "requested": {
+    "contentGroups": [
+      { "contentName": "bodytext", "groups": ["politics"] }
+    ],
+    "contentKeys": [
+      { "contentName": "shoppingAd", "group": "shopping", "connector": "<unchanged connector>" }
+    ]
+  }
+}
+```
+
+**Migration:** update request builders, issuer readers, schemas, validators,
+relay/proxy code and recorded exchange fixtures that consume these fields.
+Publishers calculating request-size budgets must use the new shape too.
+`requestedChainCutoffs` stays at the request root; `sealed.contentWindowSeeds`,
+`renderPeriod` and `periodGeometry` keep their existing locations.
+
+**Admission and compatibility:** there is no dual parser or old-shape fallback.
+The former top-level names are ignored as unknown members, rather than treated
+as selections. An old-shape request that still carries content-group seeds
+therefore fails the seed/selection checks. A present `requested` must be a
+non-null, non-array object; otherwise the issuer returns `binding_failed`
+before signature verification, policy or opening, even beside ordinary
+coordinates. Either selection array may be absent or empty when the other
+supplies a usable selection. Omitting `requested` supplies neither selection;
+it cannot make a seed-only or otherwise empty exchange valid. Existing record
+bounds, repeated-candidate rules and issuer authorization still apply.
+
+**Local APIs and cryptography:** trusted narrowing options retain the names
+`requestedContentGroups` and `requestedContentKeys`; do not rename them when
+updating the wire. Response `contentGroupKeys`, publisher delivery, connectors,
+resource signatures, BIND/AAD and derived key bytes are unchanged. Regenerate
+request fixtures and byte counts without replacing their cryptographic values.
+
+Authority and complete example:
+[content-group request](docs/spec-profile--content-groups.md#unlock-request) and
+[worked exchange](docs/design--data-format--example.md#content-groups--html-delivery-proposal).
+
+### JavaScript request capture
+
+Each delivery attempt now uses one captured request for denial-cache callbacks,
+transport and response association. Later mutation of data retained by a custom
+request builder cannot change a pending attempt; caller-owned data remains mutable.
+
+Integrations that call `routeProjection.project(request, routes)` must allow
+a `null` result: the request cannot be safely narrowed, so the conditional
+retry is skipped. `{}` still means no extension members remain. The content-group builder preserves selections
+owned by other configured capabilities inside `requested`, and declines
+projection when it cannot scope those selections. It neither drops them
+silently nor retries with a broader request.
+
+### Public scenario benchmark
+
+The runnable scenario benchmark now lives at
+[`js/evidence-benchmarks/scenario-bench/`](js/evidence-benchmarks/scenario-bench/README.md).
+It executes publisher, issuer and client roles and measures delivery metadata,
+encrypted content, unlock requests and responses separately.
+
+A [saved comparison](js/evidence-benchmarks/scenario-bench/COMPARISON.md) compares
+period keys and chains with content groups for two and 100 groups. It records
+inputs, byte counts and opening checks; a fresh `--out` run saves its exact
+payloads. Content groups remains a Proposal. The dense ordinary case exceeds
+the current chain-member bound and is explicitly experimental. The guide
+states custody differences, capacity settings and single-sample limitations.
+
+### Reference and documentation corrections
+
+Public guides and source comments now clarify current wire shapes, supported
+profile choices and verification limits. Benchmark guidance distinguishes saved
+counts from exact payload captures. These corrections add no cryptographic
+construction or baseline requirement.
+
 ## v1.0.0-alpha.3 - 2026-10-23
 
 Changes since [v1.0.0-alpha.2, publication commit 14cd688](https://github.com/publishlab/delegated-content-access/commit/14cd688db74086cd718139e8cbda1efd0f05f37b),

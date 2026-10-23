@@ -66,7 +66,7 @@ opens a real issuer-produced chain response through `createDeliveryClient`,
 reopens locally and clears its retained capability. This is a client source-copy
 and opening proof; browser hosting and live HTTP configuration remain host duties.
 
-Retained obligations from the rejected forward grant-through-end-of-day construction:
+Construction requirements:
 
 - separate access groups, windows and the Root, Step and Leaf derivations by domain;
 - fail closed on malformed, out-of-range and invalid terminal labels;
@@ -104,10 +104,8 @@ Base wrapping and envelopes use the canonical 16-byte `contentKey`, period key
 and chain key. The separate internal envelope transport key remains
 32 bytes and is not a delivered DCA capability.
 
-The bounded backward-cutoff family supersedes the rejected construction. Do
-not port the rejected derivation, cache, end-of-day or vector fixtures. The
-current bounded backward-cutoff construction is fixed by the published
-chain-key specification and is implemented here.
+The published chain-key specification fixes the bounded backward-cutoff
+construction implemented here.
 
 ## Composition options
 

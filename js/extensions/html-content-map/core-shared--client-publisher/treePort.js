@@ -99,7 +99,7 @@ export function orderedTokenSet(value) {
  * applies it only to an element that carries a `class` attribute, which target
  * admission guarantees for every `removeClass` target.
  *
- * `"bodytext lab-paywall-locked  bodytext"` without `lab-paywall-locked` is
+ * `"bodytext locked  bodytext"` without `locked` is
  * `"bodytext"`.
  *
  * @param {string} value - the current attribute value

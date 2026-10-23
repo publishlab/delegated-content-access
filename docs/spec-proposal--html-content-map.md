@@ -744,9 +744,9 @@ carries both ciphertexts. Its body contains, among other markup:
 
 ```html
 <body class="article blur-content">
-  <div class="paywallTeaser">Subscribe to read on</div>
+  <div class="subscription-prompt">Subscribe to read on</div>
   <section class="main" id="main">
-    <div class="bodytext lab-paywall-locked teaserContent">
+    <div class="bodytext locked preview-content">
       <p>The first lines of the story…</p>
     </div>
     <div id="factbox-inline"></div>
@@ -765,12 +765,12 @@ member is inside the same delivery's `dca-data` object:
     "rules": [
       { "item": "bodytext", "op": "fill", "target": "#main .bodytext" },
       { "item": "bodytext", "op": "removeClass", "target": "#main .bodytext",
-        "class": "lab-paywall-locked" },
+        "class": "locked" },
       { "item": "bodytext", "op": "removeClass", "target": "#main .bodytext",
-        "class": "teaserContent" },
+        "class": "preview-content" },
       { "item": "bodytext", "op": "removeClass", "target": "body",
         "class": "blur-content" },
-      { "item": "bodytext", "op": "remove", "target": ".paywallTeaser" },
+      { "item": "bodytext", "op": "remove", "target": ".subscription-prompt" },
       { "item": "factbox", "op": "fill", "target": "#factbox-inline" },
       { "item": "factbox", "op": "fill", "target": "#factbox-aside" }
     ]
@@ -787,7 +787,7 @@ observations show:
 
 - `#main .bodytext` holding the full body and the class value `bodytext`;
 - `body` with the class value `article`;
-- no `.paywallTeaser` element; and
+- no `.subscription-prompt` element; and
 - equal child trees in `#factbox-inline` and `#factbox-aside`.
 
 When the issuer grants `factbox` and does not deliver a key that opens

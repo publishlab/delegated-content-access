@@ -187,7 +187,7 @@ general rules engine or new article catalogue. `premium` is an example name,
 not a mandatory baseline group, and period keys are an optional profile.
 
 The authoring input could be an enum, a metadata field, a rule over existing
-article metadata, or an explicit array of group names. An issuer or customer
+article metadata, or an explicit array of group names. An issuer or integrating application
 can administer this mapping. The publisher still applies and validates it
 before sealing, rather than expecting the issuer to classify already sealed
 items at unlock time. No particular classification language or configuration

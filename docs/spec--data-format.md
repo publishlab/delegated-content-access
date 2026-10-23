@@ -395,9 +395,9 @@ retrieval mechanism.
 A publisher emits one record per `contentName`. When several records carry one
 `contentName`, the consumer uses the last whole record (Section 2.3). A
 grammar-valid record not declared by `contentData` is ignored by the core
-client. Section 2.1 rejects the entire enclosing delivery with `bad_page` when
-a record's own `contentName` is missing, is not a string or is not a valid
-`contentName`. This scope applies to both markup and object deliveries. An element
+client. The consumer rejects the entire enclosing delivery when a record's own
+`contentName` is missing, is not a string or violates Section 2.1. This scope
+applies to both markup and object deliveries. An element
 that is not a non-array object names no item; the consumer skips it, and its siblings
 stay usable. A missing record, a `content` value that is not a string, or a string
 that is not canonical base64url supplies no ciphertext for that item.

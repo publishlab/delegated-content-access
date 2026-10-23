@@ -148,7 +148,7 @@ documents `run()`, `snapshot()`, `dispose()` and the server entry `createHtmlGat
 
 The reference checks the whole serialized document and element identities for external
 changes. That is intentionally conservative: unrelated DOM activity such as an ad refresh
-can also make a browser map run stale. For a dynamic customer page, use the owner's
+can also make a browser map run stale. For a dynamic page, use the owner's
 handler as the ordinary renderer and exercise the map on the independently fetched
 locked document. Do not broaden live-page ownership merely to make the map test pass.
 
@@ -185,7 +185,7 @@ while opening is pending, and missing or duplicate target markers.
 Run the owner-selected browser handler and the independent map client against the
 same sealed delivery. Compare body content and lock/prompt effects separately from
 activation behavior. A map defect must not be mistaken for an issuer denial, and a
-customer page must not acquire two placement owners. Start with templates whose
+page must not acquire two placement owners. Start with templates whose
 rendering contract is known, retaining the existing handler for unsupported layouts.
 
 Record the template and actual selected handler, browser effects, independent
@@ -195,6 +195,5 @@ whole-document stale check may be too conservative for unrelated DOM churn.
 Measure article-size/repeated-placement costs against existing page budgets
 before adding machinery. JSON paths, append, arbitrary attributes, script
 execution, shadow-root traversal and a general template language are not part
-of this candidate. The integrating application owner selects customer validation;
-the specification maintainers decide promotion separately from the accepted
-publisher build.
+of this candidate. The integrating application owner selects deployment validation;
+the specification maintainers decide promotion separately.

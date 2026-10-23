@@ -38,11 +38,11 @@ export const ARTICLE_MAP = Object.freeze({
       item: "bodytext",
       op: "removeClass",
       target: "#main .bodytext",
-      class: "lab-paywall-locked",
+      class: "locked",
     },
-    { item: "bodytext", op: "removeClass", target: "#main .bodytext", class: "teaserContent" },
+    { item: "bodytext", op: "removeClass", target: "#main .bodytext", class: "preview-content" },
     { item: "bodytext", op: "removeClass", target: "body", class: "blur-content" },
-    { item: "bodytext", op: "remove", target: ".paywallTeaser" },
+    { item: "bodytext", op: "remove", target: ".subscription-prompt" },
     { item: "factbox", op: "fill", target: "#factbox-inline" },
     { item: "factbox", op: "fill", target: "#factbox-aside" },
   ],
@@ -58,9 +58,9 @@ export function articlePage(carriers) {
   return `<!DOCTYPE html>
 <html lang="en"><head><meta charset="utf-8"><title>Harbour vote</title></head>
 <body class="article blur-content">
-  <div class="paywallTeaser">Subscribe to read on</div>
+  <div class="subscription-prompt">Subscribe to read on</div>
   <section class="main" id="main">
-    <div class="bodytext lab-paywall-locked teaserContent">
+    <div class="bodytext locked preview-content">
       <p>The first lines of the story…</p>
     </div>
     <div id="factbox-inline"></div>
@@ -80,7 +80,7 @@ export function nestedTemplatePage(carriers) {
   return `<!DOCTYPE html>
 <html lang="en"><head><meta charset="utf-8"><title>Harbour vote</title></head>
 <body class="article blur-content">
-  <div class="paywallTeaser">Subscribe to read on</div>
+  <div class="subscription-prompt">Subscribe to read on</div>
   <section class="main" id="main">
     <div class="bodytext">
       <div class="bodytext intro"><p>The first lines…</p></div>

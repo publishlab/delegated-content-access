@@ -1,0 +1,755 @@
+{
+  "captured": "2026-10-23",
+  "samplesPerCase": 1,
+  "gzipLevel": 9,
+  "payloadOrder": ["dcaData", "content", "request", "response"],
+  "rows": [
+    {
+      "groups": 2,
+      "construction": "ordinary",
+      "input": {
+        "publisher": {
+          "groups": 2,
+          "groupVocabulary": 2
+        },
+        "client": {
+          "routeProbes": false
+        }
+      },
+      "runtime": {
+        "node": "v22.23.3",
+        "platform": "linux",
+        "arch": "x64",
+        "instrumentation": "none"
+      },
+      "sizes": {
+        "dcaData": {
+          "json": 2079,
+          "gzip": 1302
+        },
+        "content": {
+          "json": 107,
+          "gzip": 127
+        },
+        "request": {
+          "json": 1776,
+          "gzip": 1125
+        },
+        "response": {
+          "json": 205,
+          "gzip": 156
+        }
+      },
+      "checks": [
+        {
+          "name": "delivery-round-trip",
+          "passed": true
+        },
+        {
+          "name": "returned-chain-coordinates",
+          "passed": true,
+          "details": {
+            "expected": ["[\"group0000\",\"261014T1800\"]", "[\"group0001\",\"261014T1800\"]"],
+            "actual": ["[\"group0000\",\"261014T1800\"]", "[\"group0001\",\"261014T1800\"]"],
+            "status": 200
+          }
+        },
+        {
+          "name": "route-walk",
+          "passed": true,
+          "details": {
+            "missing": [],
+            "attempts": [
+              {
+                "issuerName": "issuer",
+                "status": 200,
+                "outcome": "answered"
+              }
+            ],
+            "failed": []
+          }
+        },
+        {
+          "name": "item:bodytext",
+          "passed": true,
+          "details": {
+            "expected": "opens authored plaintext",
+            "opened": true
+          }
+        },
+        {
+          "name": "retained-chain-keys",
+          "passed": true,
+          "details": {
+            "expected": 2,
+            "actual": 2
+          }
+        }
+      ],
+      "success": true
+    },
+    {
+      "groups": 2,
+      "construction": "content-groups",
+      "input": {
+        "publisher": {
+          "groups": 2,
+          "groupVocabulary": 2
+        },
+        "client": {
+          "routeProbes": false
+        }
+      },
+      "runtime": {
+        "node": "v22.23.3",
+        "platform": "linux",
+        "arch": "x64",
+        "instrumentation": "none"
+      },
+      "sizes": {
+        "dcaData": {
+          "json": 1310,
+          "gzip": 885
+        },
+        "content": {
+          "json": 107,
+          "gzip": 127
+        },
+        "request": {
+          "json": 1151,
+          "gzip": 774
+        },
+        "response": {
+          "json": 264,
+          "gzip": 173
+        }
+      },
+      "checks": [
+        {
+          "name": "delivery-round-trip",
+          "passed": true
+        },
+        {
+          "name": "returned-chain-coordinates",
+          "passed": true,
+          "details": {
+            "expected": [
+              "[\"bodytext\",\"group0000\",\"261014T1800\"]",
+              "[\"bodytext\",\"group0001\",\"261014T1800\"]"
+            ],
+            "actual": [
+              "[\"bodytext\",\"group0000\",\"261014T1800\"]",
+              "[\"bodytext\",\"group0001\",\"261014T1800\"]"
+            ],
+            "status": 200
+          }
+        },
+        {
+          "name": "route-walk",
+          "passed": true,
+          "details": {
+            "missing": [],
+            "attempts": [
+              {
+                "issuerName": "issuer",
+                "status": 200,
+                "outcome": "answered"
+              }
+            ],
+            "failed": []
+          }
+        },
+        {
+          "name": "item:bodytext",
+          "passed": true,
+          "details": {
+            "expected": "opens authored plaintext",
+            "opened": true
+          }
+        },
+        {
+          "name": "retained-chain-keys",
+          "passed": true,
+          "details": {
+            "expected": 2,
+            "actual": 2
+          }
+        }
+      ],
+      "success": true
+    },
+    {
+      "groups": 100,
+      "construction": "ordinary",
+      "input": {
+        "publisher": {
+          "groups": 100,
+          "groupVocabulary": 100,
+          "maxChainMembersPerMessage": 200
+        },
+        "client": {
+          "routeProbes": false
+        }
+      },
+      "runtime": {
+        "node": "v22.23.3",
+        "platform": "linux",
+        "arch": "x64",
+        "instrumentation": "none"
+      },
+      "sizes": {
+        "dcaData": {
+          "json": 68033,
+          "gzip": 35117
+        },
+        "content": {
+          "json": 107,
+          "gzip": 127
+        },
+        "request": {
+          "json": 62928,
+          "gzip": 31616
+        },
+        "response": {
+          "json": 8241,
+          "gzip": 2203
+        }
+      },
+      "checks": [
+        {
+          "name": "delivery-round-trip",
+          "passed": true
+        },
+        {
+          "name": "returned-chain-coordinates",
+          "passed": true,
+          "details": {
+            "expected": [
+              "[\"group0000\",\"261014T1800\"]",
+              "[\"group0001\",\"261014T1800\"]",
+              "[\"group0002\",\"261014T1800\"]",
+              "[\"group0003\",\"261014T1800\"]",
+              "[\"group0004\",\"261014T1800\"]",
+              "[\"group0005\",\"261014T1800\"]",
+              "[\"group0006\",\"261014T1800\"]",
+              "[\"group0007\",\"261014T1800\"]",
+              "[\"group0008\",\"261014T1800\"]",
+              "[\"group0009\",\"261014T1800\"]",
+              "[\"group0010\",\"261014T1800\"]",
+              "[\"group0011\",\"261014T1800\"]",
+              "[\"group0012\",\"261014T1800\"]",
+              "[\"group0013\",\"261014T1800\"]",
+              "[\"group0014\",\"261014T1800\"]",
+              "[\"group0015\",\"261014T1800\"]",
+              "[\"group0016\",\"261014T1800\"]",
+              "[\"group0017\",\"261014T1800\"]",
+              "[\"group0018\",\"261014T1800\"]",
+              "[\"group0019\",\"261014T1800\"]",
+              "[\"group0020\",\"261014T1800\"]",
+              "[\"group0021\",\"261014T1800\"]",
+              "[\"group0022\",\"261014T1800\"]",
+              "[\"group0023\",\"261014T1800\"]",
+              "[\"group0024\",\"261014T1800\"]",
+              "[\"group0025\",\"261014T1800\"]",
+              "[\"group0026\",\"261014T1800\"]",
+              "[\"group0027\",\"261014T1800\"]",
+              "[\"group0028\",\"261014T1800\"]",
+              "[\"group0029\",\"261014T1800\"]",
+              "[\"group0030\",\"261014T1800\"]",
+              "[\"group0031\",\"261014T1800\"]",
+              "[\"group0032\",\"261014T1800\"]",
+              "[\"group0033\",\"261014T1800\"]",
+              "[\"group0034\",\"261014T1800\"]",
+              "[\"group0035\",\"261014T1800\"]",
+              "[\"group0036\",\"261014T1800\"]",
+              "[\"group0037\",\"261014T1800\"]",
+              "[\"group0038\",\"261014T1800\"]",
+              "[\"group0039\",\"261014T1800\"]",
+              "[\"group0040\",\"261014T1800\"]",
+              "[\"group0041\",\"261014T1800\"]",
+              "[\"group0042\",\"261014T1800\"]",
+              "[\"group0043\",\"261014T1800\"]",
+              "[\"group0044\",\"261014T1800\"]",
+              "[\"group0045\",\"261014T1800\"]",
+              "[\"group0046\",\"261014T1800\"]",
+              "[\"group0047\",\"261014T1800\"]",
+              "[\"group0048\",\"261014T1800\"]",
+              "[\"group0049\",\"261014T1800\"]",
+              "[\"group0050\",\"261014T1800\"]",
+              "[\"group0051\",\"261014T1800\"]",
+              "[\"group0052\",\"261014T1800\"]",
+              "[\"group0053\",\"261014T1800\"]",
+              "[\"group0054\",\"261014T1800\"]",
+              "[\"group0055\",\"261014T1800\"]",
+              "[\"group0056\",\"261014T1800\"]",
+              "[\"group0057\",\"261014T1800\"]",
+              "[\"group0058\",\"261014T1800\"]",
+              "[\"group0059\",\"261014T1800\"]",
+              "[\"group0060\",\"261014T1800\"]",
+              "[\"group0061\",\"261014T1800\"]",
+              "[\"group0062\",\"261014T1800\"]",
+              "[\"group0063\",\"261014T1800\"]",
+              "[\"group0064\",\"261014T1800\"]",
+              "[\"group0065\",\"261014T1800\"]",
+              "[\"group0066\",\"261014T1800\"]",
+              "[\"group0067\",\"261014T1800\"]",
+              "[\"group0068\",\"261014T1800\"]",
+              "[\"group0069\",\"261014T1800\"]",
+              "[\"group0070\",\"261014T1800\"]",
+              "[\"group0071\",\"261014T1800\"]",
+              "[\"group0072\",\"261014T1800\"]",
+              "[\"group0073\",\"261014T1800\"]",
+              "[\"group0074\",\"261014T1800\"]",
+              "[\"group0075\",\"261014T1800\"]",
+              "[\"group0076\",\"261014T1800\"]",
+              "[\"group0077\",\"261014T1800\"]",
+              "[\"group0078\",\"261014T1800\"]",
+              "[\"group0079\",\"261014T1800\"]",
+              "[\"group0080\",\"261014T1800\"]",
+              "[\"group0081\",\"261014T1800\"]",
+              "[\"group0082\",\"261014T1800\"]",
+              "[\"group0083\",\"261014T1800\"]",
+              "[\"group0084\",\"261014T1800\"]",
+              "[\"group0085\",\"261014T1800\"]",
+              "[\"group0086\",\"261014T1800\"]",
+              "[\"group0087\",\"261014T1800\"]",
+              "[\"group0088\",\"261014T1800\"]",
+              "[\"group0089\",\"261014T1800\"]",
+              "[\"group0090\",\"261014T1800\"]",
+              "[\"group0091\",\"261014T1800\"]",
+              "[\"group0092\",\"261014T1800\"]",
+              "[\"group0093\",\"261014T1800\"]",
+              "[\"group0094\",\"261014T1800\"]",
+              "[\"group0095\",\"261014T1800\"]",
+              "[\"group0096\",\"261014T1800\"]",
+              "[\"group0097\",\"261014T1800\"]",
+              "[\"group0098\",\"261014T1800\"]",
+              "[\"group0099\",\"261014T1800\"]"
+            ],
+            "actual": [
+              "[\"group0000\",\"261014T1800\"]",
+              "[\"group0001\",\"261014T1800\"]",
+              "[\"group0002\",\"261014T1800\"]",
+              "[\"group0003\",\"261014T1800\"]",
+              "[\"group0004\",\"261014T1800\"]",
+              "[\"group0005\",\"261014T1800\"]",
+              "[\"group0006\",\"261014T1800\"]",
+              "[\"group0007\",\"261014T1800\"]",
+              "[\"group0008\",\"261014T1800\"]",
+              "[\"group0009\",\"261014T1800\"]",
+              "[\"group0010\",\"261014T1800\"]",
+              "[\"group0011\",\"261014T1800\"]",
+              "[\"group0012\",\"261014T1800\"]",
+              "[\"group0013\",\"261014T1800\"]",
+              "[\"group0014\",\"261014T1800\"]",
+              "[\"group0015\",\"261014T1800\"]",
+              "[\"group0016\",\"261014T1800\"]",
+              "[\"group0017\",\"261014T1800\"]",
+              "[\"group0018\",\"261014T1800\"]",
+              "[\"group0019\",\"261014T1800\"]",
+              "[\"group0020\",\"261014T1800\"]",
+              "[\"group0021\",\"261014T1800\"]",
+              "[\"group0022\",\"261014T1800\"]",
+              "[\"group0023\",\"261014T1800\"]",
+              "[\"group0024\",\"261014T1800\"]",
+              "[\"group0025\",\"261014T1800\"]",
+              "[\"group0026\",\"261014T1800\"]",
+              "[\"group0027\",\"261014T1800\"]",
+              "[\"group0028\",\"261014T1800\"]",
+              "[\"group0029\",\"261014T1800\"]",
+              "[\"group0030\",\"261014T1800\"]",
+              "[\"group0031\",\"261014T1800\"]",
+              "[\"group0032\",\"261014T1800\"]",
+              "[\"group0033\",\"261014T1800\"]",
+              "[\"group0034\",\"261014T1800\"]",
+              "[\"group0035\",\"261014T1800\"]",
+              "[\"group0036\",\"261014T1800\"]",
+              "[\"group0037\",\"261014T1800\"]",
+              "[\"group0038\",\"261014T1800\"]",
+              "[\"group0039\",\"261014T1800\"]",
+              "[\"group0040\",\"261014T1800\"]",
+              "[\"group0041\",\"261014T1800\"]",
+              "[\"group0042\",\"261014T1800\"]",
+              "[\"group0043\",\"261014T1800\"]",
+              "[\"group0044\",\"261014T1800\"]",
+              "[\"group0045\",\"261014T1800\"]",
+              "[\"group0046\",\"261014T1800\"]",
+              "[\"group0047\",\"261014T1800\"]",
+              "[\"group0048\",\"261014T1800\"]",
+              "[\"group0049\",\"261014T1800\"]",
+              "[\"group0050\",\"261014T1800\"]",
+              "[\"group0051\",\"261014T1800\"]",
+              "[\"group0052\",\"261014T1800\"]",
+              "[\"group0053\",\"261014T1800\"]",
+              "[\"group0054\",\"261014T1800\"]",
+              "[\"group0055\",\"261014T1800\"]",
+              "[\"group0056\",\"261014T1800\"]",
+              "[\"group0057\",\"261014T1800\"]",
+              "[\"group0058\",\"261014T1800\"]",
+              "[\"group0059\",\"261014T1800\"]",
+              "[\"group0060\",\"261014T1800\"]",
+              "[\"group0061\",\"261014T1800\"]",
+              "[\"group0062\",\"261014T1800\"]",
+              "[\"group0063\",\"261014T1800\"]",
+              "[\"group0064\",\"261014T1800\"]",
+              "[\"group0065\",\"261014T1800\"]",
+              "[\"group0066\",\"261014T1800\"]",
+              "[\"group0067\",\"261014T1800\"]",
+              "[\"group0068\",\"261014T1800\"]",
+              "[\"group0069\",\"261014T1800\"]",
+              "[\"group0070\",\"261014T1800\"]",
+              "[\"group0071\",\"261014T1800\"]",
+              "[\"group0072\",\"261014T1800\"]",
+              "[\"group0073\",\"261014T1800\"]",
+              "[\"group0074\",\"261014T1800\"]",
+              "[\"group0075\",\"261014T1800\"]",
+              "[\"group0076\",\"261014T1800\"]",
+              "[\"group0077\",\"261014T1800\"]",
+              "[\"group0078\",\"261014T1800\"]",
+              "[\"group0079\",\"261014T1800\"]",
+              "[\"group0080\",\"261014T1800\"]",
+              "[\"group0081\",\"261014T1800\"]",
+              "[\"group0082\",\"261014T1800\"]",
+              "[\"group0083\",\"261014T1800\"]",
+              "[\"group0084\",\"261014T1800\"]",
+              "[\"group0085\",\"261014T1800\"]",
+              "[\"group0086\",\"261014T1800\"]",
+              "[\"group0087\",\"261014T1800\"]",
+              "[\"group0088\",\"261014T1800\"]",
+              "[\"group0089\",\"261014T1800\"]",
+              "[\"group0090\",\"261014T1800\"]",
+              "[\"group0091\",\"261014T1800\"]",
+              "[\"group0092\",\"261014T1800\"]",
+              "[\"group0093\",\"261014T1800\"]",
+              "[\"group0094\",\"261014T1800\"]",
+              "[\"group0095\",\"261014T1800\"]",
+              "[\"group0096\",\"261014T1800\"]",
+              "[\"group0097\",\"261014T1800\"]",
+              "[\"group0098\",\"261014T1800\"]",
+              "[\"group0099\",\"261014T1800\"]"
+            ],
+            "status": 200
+          }
+        },
+        {
+          "name": "route-walk",
+          "passed": true,
+          "details": {
+            "missing": [],
+            "attempts": [
+              {
+                "issuerName": "issuer",
+                "status": 200,
+                "outcome": "answered"
+              }
+            ],
+            "failed": []
+          }
+        },
+        {
+          "name": "item:bodytext",
+          "passed": true,
+          "details": {
+            "expected": "opens authored plaintext",
+            "opened": true
+          }
+        },
+        {
+          "name": "retained-chain-keys",
+          "passed": true,
+          "details": {
+            "expected": 100,
+            "actual": 100
+          }
+        }
+      ],
+      "success": true
+    },
+    {
+      "groups": 100,
+      "construction": "content-groups",
+      "input": {
+        "publisher": {
+          "groups": 100,
+          "groupVocabulary": 100
+        },
+        "client": {
+          "routeProbes": false
+        }
+      },
+      "runtime": {
+        "node": "v22.23.3",
+        "platform": "linux",
+        "arch": "x64",
+        "instrumentation": "none"
+      },
+      "sizes": {
+        "dcaData": {
+          "json": 7092,
+          "gzip": 2943
+        },
+        "content": {
+          "json": 107,
+          "gzip": 127
+        },
+        "request": {
+          "json": 2327,
+          "gzip": 997
+        },
+        "response": {
+          "json": 10162,
+          "gzip": 2241
+        }
+      },
+      "checks": [
+        {
+          "name": "delivery-round-trip",
+          "passed": true
+        },
+        {
+          "name": "returned-chain-coordinates",
+          "passed": true,
+          "details": {
+            "expected": [
+              "[\"bodytext\",\"group0000\",\"261014T1800\"]",
+              "[\"bodytext\",\"group0001\",\"261014T1800\"]",
+              "[\"bodytext\",\"group0002\",\"261014T1800\"]",
+              "[\"bodytext\",\"group0003\",\"261014T1800\"]",
+              "[\"bodytext\",\"group0004\",\"261014T1800\"]",
+              "[\"bodytext\",\"group0005\",\"261014T1800\"]",
+              "[\"bodytext\",\"group0006\",\"261014T1800\"]",
+              "[\"bodytext\",\"group0007\",\"261014T1800\"]",
+              "[\"bodytext\",\"group0008\",\"261014T1800\"]",
+              "[\"bodytext\",\"group0009\",\"261014T1800\"]",
+              "[\"bodytext\",\"group0010\",\"261014T1800\"]",
+              "[\"bodytext\",\"group0011\",\"261014T1800\"]",
+              "[\"bodytext\",\"group0012\",\"261014T1800\"]",
+              "[\"bodytext\",\"group0013\",\"261014T1800\"]",
+              "[\"bodytext\",\"group0014\",\"261014T1800\"]",
+              "[\"bodytext\",\"group0015\",\"261014T1800\"]",
+              "[\"bodytext\",\"group0016\",\"261014T1800\"]",
+              "[\"bodytext\",\"group0017\",\"261014T1800\"]",
+              "[\"bodytext\",\"group0018\",\"261014T1800\"]",
+              "[\"bodytext\",\"group0019\",\"261014T1800\"]",
+              "[\"bodytext\",\"group0020\",\"261014T1800\"]",
+              "[\"bodytext\",\"group0021\",\"261014T1800\"]",
+              "[\"bodytext\",\"group0022\",\"261014T1800\"]",
+              "[\"bodytext\",\"group0023\",\"261014T1800\"]",
+              "[\"bodytext\",\"group0024\",\"261014T1800\"]",
+              "[\"bodytext\",\"group0025\",\"261014T1800\"]",
+              "[\"bodytext\",\"group0026\",\"261014T1800\"]",
+              "[\"bodytext\",\"group0027\",\"261014T1800\"]",
+              "[\"bodytext\",\"group0028\",\"261014T1800\"]",
+              "[\"bodytext\",\"group0029\",\"261014T1800\"]",
+              "[\"bodytext\",\"group0030\",\"261014T1800\"]",
+              "[\"bodytext\",\"group0031\",\"261014T1800\"]",
+              "[\"bodytext\",\"group0032\",\"261014T1800\"]",
+              "[\"bodytext\",\"group0033\",\"261014T1800\"]",
+              "[\"bodytext\",\"group0034\",\"261014T1800\"]",
+              "[\"bodytext\",\"group0035\",\"261014T1800\"]",
+              "[\"bodytext\",\"group0036\",\"261014T1800\"]",
+              "[\"bodytext\",\"group0037\",\"261014T1800\"]",
+              "[\"bodytext\",\"group0038\",\"261014T1800\"]",
+              "[\"bodytext\",\"group0039\",\"261014T1800\"]",
+              "[\"bodytext\",\"group0040\",\"261014T1800\"]",
+              "[\"bodytext\",\"group0041\",\"261014T1800\"]",
+              "[\"bodytext\",\"group0042\",\"261014T1800\"]",
+              "[\"bodytext\",\"group0043\",\"261014T1800\"]",
+              "[\"bodytext\",\"group0044\",\"261014T1800\"]",
+              "[\"bodytext\",\"group0045\",\"261014T1800\"]",
+              "[\"bodytext\",\"group0046\",\"261014T1800\"]",
+              "[\"bodytext\",\"group0047\",\"261014T1800\"]",
+              "[\"bodytext\",\"group0048\",\"261014T1800\"]",
+              "[\"bodytext\",\"group0049\",\"261014T1800\"]",
+              "[\"bodytext\",\"group0050\",\"261014T1800\"]",
+              "[\"bodytext\",\"group0051\",\"261014T1800\"]",
+              "[\"bodytext\",\"group0052\",\"261014T1800\"]",
+              "[\"bodytext\",\"group0053\",\"261014T1800\"]",
+              "[\"bodytext\",\"group0054\",\"261014T1800\"]",
+              "[\"bodytext\",\"group0055\",\"261014T1800\"]",
+              "[\"bodytext\",\"group0056\",\"261014T1800\"]",
+              "[\"bodytext\",\"group0057\",\"261014T1800\"]",
+              "[\"bodytext\",\"group0058\",\"261014T1800\"]",
+              "[\"bodytext\",\"group0059\",\"261014T1800\"]",
+              "[\"bodytext\",\"group0060\",\"261014T1800\"]",
+              "[\"bodytext\",\"group0061\",\"261014T1800\"]",
+              "[\"bodytext\",\"group0062\",\"261014T1800\"]",
+              "[\"bodytext\",\"group0063\",\"261014T1800\"]",
+              "[\"bodytext\",\"group0064\",\"261014T1800\"]",
+              "[\"bodytext\",\"group0065\",\"261014T1800\"]",
+              "[\"bodytext\",\"group0066\",\"261014T1800\"]",
+              "[\"bodytext\",\"group0067\",\"261014T1800\"]",
+              "[\"bodytext\",\"group0068\",\"261014T1800\"]",
+              "[\"bodytext\",\"group0069\",\"261014T1800\"]",
+              "[\"bodytext\",\"group0070\",\"261014T1800\"]",
+              "[\"bodytext\",\"group0071\",\"261014T1800\"]",
+              "[\"bodytext\",\"group0072\",\"261014T1800\"]",
+              "[\"bodytext\",\"group0073\",\"261014T1800\"]",
+              "[\"bodytext\",\"group0074\",\"261014T1800\"]",
+              "[\"bodytext\",\"group0075\",\"261014T1800\"]",
+              "[\"bodytext\",\"group0076\",\"261014T1800\"]",
+              "[\"bodytext\",\"group0077\",\"261014T1800\"]",
+              "[\"bodytext\",\"group0078\",\"261014T1800\"]",
+              "[\"bodytext\",\"group0079\",\"261014T1800\"]",
+              "[\"bodytext\",\"group0080\",\"261014T1800\"]",
+              "[\"bodytext\",\"group0081\",\"261014T1800\"]",
+              "[\"bodytext\",\"group0082\",\"261014T1800\"]",
+              "[\"bodytext\",\"group0083\",\"261014T1800\"]",
+              "[\"bodytext\",\"group0084\",\"261014T1800\"]",
+              "[\"bodytext\",\"group0085\",\"261014T1800\"]",
+              "[\"bodytext\",\"group0086\",\"261014T1800\"]",
+              "[\"bodytext\",\"group0087\",\"261014T1800\"]",
+              "[\"bodytext\",\"group0088\",\"261014T1800\"]",
+              "[\"bodytext\",\"group0089\",\"261014T1800\"]",
+              "[\"bodytext\",\"group0090\",\"261014T1800\"]",
+              "[\"bodytext\",\"group0091\",\"261014T1800\"]",
+              "[\"bodytext\",\"group0092\",\"261014T1800\"]",
+              "[\"bodytext\",\"group0093\",\"261014T1800\"]",
+              "[\"bodytext\",\"group0094\",\"261014T1800\"]",
+              "[\"bodytext\",\"group0095\",\"261014T1800\"]",
+              "[\"bodytext\",\"group0096\",\"261014T1800\"]",
+              "[\"bodytext\",\"group0097\",\"261014T1800\"]",
+              "[\"bodytext\",\"group0098\",\"261014T1800\"]",
+              "[\"bodytext\",\"group0099\",\"261014T1800\"]"
+            ],
+            "actual": [
+              "[\"bodytext\",\"group0000\",\"261014T1800\"]",
+              "[\"bodytext\",\"group0001\",\"261014T1800\"]",
+              "[\"bodytext\",\"group0002\",\"261014T1800\"]",
+              "[\"bodytext\",\"group0003\",\"261014T1800\"]",
+              "[\"bodytext\",\"group0004\",\"261014T1800\"]",
+              "[\"bodytext\",\"group0005\",\"261014T1800\"]",
+              "[\"bodytext\",\"group0006\",\"261014T1800\"]",
+              "[\"bodytext\",\"group0007\",\"261014T1800\"]",
+              "[\"bodytext\",\"group0008\",\"261014T1800\"]",
+              "[\"bodytext\",\"group0009\",\"261014T1800\"]",
+              "[\"bodytext\",\"group0010\",\"261014T1800\"]",
+              "[\"bodytext\",\"group0011\",\"261014T1800\"]",
+              "[\"bodytext\",\"group0012\",\"261014T1800\"]",
+              "[\"bodytext\",\"group0013\",\"261014T1800\"]",
+              "[\"bodytext\",\"group0014\",\"261014T1800\"]",
+              "[\"bodytext\",\"group0015\",\"261014T1800\"]",
+              "[\"bodytext\",\"group0016\",\"261014T1800\"]",
+              "[\"bodytext\",\"group0017\",\"261014T1800\"]",
+              "[\"bodytext\",\"group0018\",\"261014T1800\"]",
+              "[\"bodytext\",\"group0019\",\"261014T1800\"]",
+              "[\"bodytext\",\"group0020\",\"261014T1800\"]",
+              "[\"bodytext\",\"group0021\",\"261014T1800\"]",
+              "[\"bodytext\",\"group0022\",\"261014T1800\"]",
+              "[\"bodytext\",\"group0023\",\"261014T1800\"]",
+              "[\"bodytext\",\"group0024\",\"261014T1800\"]",
+              "[\"bodytext\",\"group0025\",\"261014T1800\"]",
+              "[\"bodytext\",\"group0026\",\"261014T1800\"]",
+              "[\"bodytext\",\"group0027\",\"261014T1800\"]",
+              "[\"bodytext\",\"group0028\",\"261014T1800\"]",
+              "[\"bodytext\",\"group0029\",\"261014T1800\"]",
+              "[\"bodytext\",\"group0030\",\"261014T1800\"]",
+              "[\"bodytext\",\"group0031\",\"261014T1800\"]",
+              "[\"bodytext\",\"group0032\",\"261014T1800\"]",
+              "[\"bodytext\",\"group0033\",\"261014T1800\"]",
+              "[\"bodytext\",\"group0034\",\"261014T1800\"]",
+              "[\"bodytext\",\"group0035\",\"261014T1800\"]",
+              "[\"bodytext\",\"group0036\",\"261014T1800\"]",
+              "[\"bodytext\",\"group0037\",\"261014T1800\"]",
+              "[\"bodytext\",\"group0038\",\"261014T1800\"]",
+              "[\"bodytext\",\"group0039\",\"261014T1800\"]",
+              "[\"bodytext\",\"group0040\",\"261014T1800\"]",
+              "[\"bodytext\",\"group0041\",\"261014T1800\"]",
+              "[\"bodytext\",\"group0042\",\"261014T1800\"]",
+              "[\"bodytext\",\"group0043\",\"261014T1800\"]",
+              "[\"bodytext\",\"group0044\",\"261014T1800\"]",
+              "[\"bodytext\",\"group0045\",\"261014T1800\"]",
+              "[\"bodytext\",\"group0046\",\"261014T1800\"]",
+              "[\"bodytext\",\"group0047\",\"261014T1800\"]",
+              "[\"bodytext\",\"group0048\",\"261014T1800\"]",
+              "[\"bodytext\",\"group0049\",\"261014T1800\"]",
+              "[\"bodytext\",\"group0050\",\"261014T1800\"]",
+              "[\"bodytext\",\"group0051\",\"261014T1800\"]",
+              "[\"bodytext\",\"group0052\",\"261014T1800\"]",
+              "[\"bodytext\",\"group0053\",\"261014T1800\"]",
+              "[\"bodytext\",\"group0054\",\"261014T1800\"]",
+              "[\"bodytext\",\"group0055\",\"261014T1800\"]",
+              "[\"bodytext\",\"group0056\",\"261014T1800\"]",
+              "[\"bodytext\",\"group0057\",\"261014T1800\"]",
+              "[\"bodytext\",\"group0058\",\"261014T1800\"]",
+              "[\"bodytext\",\"group0059\",\"261014T1800\"]",
+              "[\"bodytext\",\"group0060\",\"261014T1800\"]",
+              "[\"bodytext\",\"group0061\",\"261014T1800\"]",
+              "[\"bodytext\",\"group0062\",\"261014T1800\"]",
+              "[\"bodytext\",\"group0063\",\"261014T1800\"]",
+              "[\"bodytext\",\"group0064\",\"261014T1800\"]",
+              "[\"bodytext\",\"group0065\",\"261014T1800\"]",
+              "[\"bodytext\",\"group0066\",\"261014T1800\"]",
+              "[\"bodytext\",\"group0067\",\"261014T1800\"]",
+              "[\"bodytext\",\"group0068\",\"261014T1800\"]",
+              "[\"bodytext\",\"group0069\",\"261014T1800\"]",
+              "[\"bodytext\",\"group0070\",\"261014T1800\"]",
+              "[\"bodytext\",\"group0071\",\"261014T1800\"]",
+              "[\"bodytext\",\"group0072\",\"261014T1800\"]",
+              "[\"bodytext\",\"group0073\",\"261014T1800\"]",
+              "[\"bodytext\",\"group0074\",\"261014T1800\"]",
+              "[\"bodytext\",\"group0075\",\"261014T1800\"]",
+              "[\"bodytext\",\"group0076\",\"261014T1800\"]",
+              "[\"bodytext\",\"group0077\",\"261014T1800\"]",
+              "[\"bodytext\",\"group0078\",\"261014T1800\"]",
+              "[\"bodytext\",\"group0079\",\"261014T1800\"]",
+              "[\"bodytext\",\"group0080\",\"261014T1800\"]",
+              "[\"bodytext\",\"group0081\",\"261014T1800\"]",
+              "[\"bodytext\",\"group0082\",\"261014T1800\"]",
+              "[\"bodytext\",\"group0083\",\"261014T1800\"]",
+              "[\"bodytext\",\"group0084\",\"261014T1800\"]",
+              "[\"bodytext\",\"group0085\",\"261014T1800\"]",
+              "[\"bodytext\",\"group0086\",\"261014T1800\"]",
+              "[\"bodytext\",\"group0087\",\"261014T1800\"]",
+              "[\"bodytext\",\"group0088\",\"261014T1800\"]",
+              "[\"bodytext\",\"group0089\",\"261014T1800\"]",
+              "[\"bodytext\",\"group0090\",\"261014T1800\"]",
+              "[\"bodytext\",\"group0091\",\"261014T1800\"]",
+              "[\"bodytext\",\"group0092\",\"261014T1800\"]",
+              "[\"bodytext\",\"group0093\",\"261014T1800\"]",
+              "[\"bodytext\",\"group0094\",\"261014T1800\"]",
+              "[\"bodytext\",\"group0095\",\"261014T1800\"]",
+              "[\"bodytext\",\"group0096\",\"261014T1800\"]",
+              "[\"bodytext\",\"group0097\",\"261014T1800\"]",
+              "[\"bodytext\",\"group0098\",\"261014T1800\"]",
+              "[\"bodytext\",\"group0099\",\"261014T1800\"]"
+            ],
+            "status": 200
+          }
+        },
+        {
+          "name": "route-walk",
+          "passed": true,
+          "details": {
+            "missing": [],
+            "attempts": [
+              {
+                "issuerName": "issuer",
+                "status": 200,
+                "outcome": "answered"
+              }
+            ],
+            "failed": []
+          }
+        },
+        {
+          "name": "item:bodytext",
+          "passed": true,
+          "details": {
+            "expected": "opens authored plaintext",
+            "opened": true
+          }
+        },
+        {
+          "name": "retained-chain-keys",
+          "passed": true,
+          "details": {
+            "expected": 100,
+            "actual": 100
+          }
+        }
+      ],
+      "success": true
+    }
+  ]
+}

@@ -41,8 +41,7 @@ single-extension suites replay seven further records captured from unchanged
 publisher source. Tests compare JWT signing-input bytes and verify
 the signature, and compare issuer-envelope/ciphertext and remaining delivery
 bytes with the records. Randomized ECDSA signature bytes are not required to
-match. No fixture is regenerated during this replay. The derived content AAD
-first re-recorded these records on 2026-10-15. The current fixed-nonce
+match. No fixture is regenerated during this replay. The current fixed-nonce
 transcript also omits item `nonce` members and changes ciphertext bytes and
 tags and shifts later seeded draws. The derived period-wrap nonce drops each
 wrap entry's `nonce` member and shifts the seeded envelope draws that followed

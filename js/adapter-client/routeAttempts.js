@@ -146,7 +146,8 @@ export function projectEligibleIdentities(request, identities, projection = null
   for (const name of extensionMembers)
     if (!SHARED_CONTEXT_MEMBERS.includes(name)) delete selected[name];
   const extension = projection.project(request, [...(identities.routes ?? [])]);
-  if (extension === null || typeof extension !== "object" || Array.isArray(extension))
+  if (extension === null) return null;
+  if (typeof extension !== "object" || Array.isArray(extension))
     throw dcaError("bad_config", "a routeProjection project answers an object");
   for (const [part, declared, target] of /** @type {const} */ ([
     ["members", extensionMembers, selected],

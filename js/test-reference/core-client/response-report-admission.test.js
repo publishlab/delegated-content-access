@@ -658,11 +658,10 @@ describe("several records for one identity resolve to the last whole record", ()
   });
 });
 
-// Data-format Section 2.1 rejects a whole collection when one record's
-// identifier is bad. The client has never done that for response key
-// collections: a bad name in the old response maps cost only that entry, and
-// the record form keeps that per-entry scope. These tests pin it, so a change
-// to either reading of Section 2.1 is a deliberate one.
+// Response binding Section 3 admits response keys per record, as explicitly
+// allowed by data-format Section 2.1. A bad identity leaves valid sibling
+// records available; these tests pin that admission scope.
+
 describe("a response key record with a bad identity costs only that record", () => {
   /** @param {object} keys */
   async function apply(keys) {

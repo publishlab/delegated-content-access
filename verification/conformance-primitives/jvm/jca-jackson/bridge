@@ -88,7 +88,7 @@ if [ "$mode" = prepare ]; then
     exit 2
   fi
   for source in "${SOURCES[@]}"; do
-    [ -f "$source" ] || { echo "no $source; the JVM bridge has not landed yet" >&2; exit 2; }
+    [ -f "$source" ] || { echo "no $source; the JVM bridge source is missing" >&2; exit 2; }
   done
 
   mkdir -p "$(dirname "$BUILD")"
